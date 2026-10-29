@@ -1,5 +1,5 @@
 import { Bot, Command, Moon, PanelLeft, Sun } from "lucide-react";
-import type { ConnectionConfig } from "../lib/api";
+import { kindInfo, type ConnectionConfig } from "../lib/api";
 import { isMac, mod } from "../lib/types";
 import { Button, Dot, Kbd, cx } from "./ui";
 
@@ -35,7 +35,7 @@ export function Titlebar({
             <Dot color={conn.color} />
             <span className="truncate font-medium">{conn.name}</span>
             <span className="truncate text-muted">
-              {conn.kind === "sqlite" ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}${conn.database ? "/" + conn.database : ""}`}
+              {kindInfo(conn.kind).file ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}${conn.database ? "/" + conn.database : ""}`}
             </span>
             {conn.readOnly && (
               <span className="rounded bg-warning/15 px-1.5 py-px text-[10px] font-semibold text-warning">READ-ONLY</span>

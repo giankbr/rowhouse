@@ -8,9 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::AssertSqlSafe;
 
-use crate::{config::DbKind, Connection, Error, Result};
+use crate::{backend::Expect, config::Driver, Connection, Error, Result};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChangeSet {
@@ -41,7 +40,7 @@ enum Kind {
 
 impl Connection {
     pub(crate) fn target(&self, schema: &str, table: &str) -> String {
-        if self.kind() == DbKind::Sqlite {
+        if self.driver() == Driver::Sqlite {
             self.ident(table)
         } else {
             format!("{}.{}", self.ident(schema), self.ident(table))
@@ -52,8 +51,10 @@ impl Connection {
     pub(crate) fn sql_value(&self, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
-            Value::Bool(b) => match self.kind() {
-                DbKind::Sqlite => (if *b { "1" } else { "0" }).into(),
+            Value::Bool(b) => match self.driver() {
+                Driver::Sqlite | Driver::Mssql | Driver::Clickhouse => {
+                    (if *b { "1" } else { "0" }).into()
+                }
                 _ => (if *b { "TRUE" } else { "FALSE" }).into(),
             },
             Value::Number(n) => n.to_string(),
@@ -135,38 +136,20 @@ impl Connection {
         if self.config.read_only {
             return Err(Error::ReadOnly("connection is read-only".into()));
         }
-        let stmts = self.statements(cs)?;
-        macro_rules! apply {
-            ($pool:expr) => {{
-                let mut tx = $pool.begin().await?;
-                let mut total = 0u64;
-                for (kind, sql) in &stmts {
-                    let n = sqlx::raw_sql(AssertSqlSafe(sql.clone()))
-                        .execute(&mut *tx)
-                        .await?
-                        .rows_affected();
-                    // MySQL reports 0 for an UPDATE that sets identical values; accept that.
-                    let ok = match kind {
-                        Kind::Insert => true,
-                        Kind::Update if self.kind() == DbKind::Mysql => n <= 1,
-                        _ => n == 1,
-                    };
-                    if !ok {
-                        tx.rollback().await?;
-                        return Err(Error::Other(format!(
-                            "expected 1 row, {n} affected — rolled back.\n{sql}"
-                        )));
-                    }
-                    total += n;
-                }
-                tx.commit().await?;
-                Ok(total)
-            }};
-        }
-        match self.pool() {
-            crate::driver::PoolRef::Pg(p) => apply!(p),
-            crate::driver::PoolRef::My(p) => apply!(p),
-            crate::driver::PoolRef::Lite(p) => apply!(p),
-        }
+        // MySQL reports 0 for an UPDATE that sets identical values; accept that.
+        let lenient = self.driver() == Driver::Mysql;
+        let stmts = self
+            .statements(cs)?
+            .into_iter()
+            .map(|(kind, sql)| {
+                let expect = match kind {
+                    Kind::Insert => Expect::Any,
+                    Kind::Update if lenient => Expect::AtMostOne,
+                    _ => Expect::One,
+                };
+                (expect, sql)
+            })
+            .collect();
+        self.exec_tx(stmts).await
     }
 }

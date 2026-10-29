@@ -1,11 +1,11 @@
-import { sql, PostgreSQL, MySQL, SQLite, type SQLNamespace } from "@codemirror/lang-sql";
+import { sql, PostgreSQL, MySQL, SQLite, MSSQL, StandardSQL, type SQLNamespace } from "@codemirror/lang-sql";
 import { keymap, EditorView } from "@codemirror/view";
 import { Prec } from "@codemirror/state";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
-import type { DbKind, TableInfo } from "../lib/api";
+import { kindInfo, type DbKind, type TableInfo } from "../lib/api";
 
 const theme = EditorView.theme({
   "&": { color: "var(--fg)" },
@@ -47,7 +47,17 @@ export function SqlEditor({
   const extensions = useMemo(() => {
     const schema: SQLNamespace = {};
     for (const t of tables) schema[t.name] = [];
-    const dialect = kind === "mysql" ? MySQL : kind === "sqlite" ? SQLite : PostgreSQL;
+    const d = kindInfo(kind).dialect;
+    const dialect =
+      d === "mysql" || d === "clickhouse"
+        ? MySQL
+        : d === "sqlite"
+          ? SQLite
+          : d === "mssql"
+            ? MSSQL
+            : d === "duckdb"
+              ? StandardSQL
+              : PostgreSQL;
     return [
       sql({ dialect, schema, upperCaseKeywords: true }),
       theme,

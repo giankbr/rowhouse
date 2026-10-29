@@ -59,6 +59,73 @@ impl client::Handler for Verifier {
     }
 }
 
+async fn try_agent_identities<S>(
+    session: &mut client::Handle<Verifier>,
+    user: &str,
+    agent: &mut keys::agent::client::AgentClient<S>,
+) -> Result<bool>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let ids = agent
+        .request_identities()
+        .await
+        .map_err(|e| Error::Ssh(format!("ssh-agent: {e}")))?;
+    if ids.is_empty() {
+        return Err(Error::Ssh(
+            "ssh-agent has no keys loaded (try `ssh-add`)".into(),
+        ));
+    }
+    let hash = session
+        .best_supported_rsa_hash()
+        .await
+        .map_err(|e| Error::Ssh(e.to_string()))?
+        .flatten();
+    for id in ids {
+        let keys::agent::AgentIdentity::PublicKey { key, .. } = id else {
+            continue;
+        };
+        let res = session
+            .authenticate_publickey_with(user, key, hash, agent)
+            .await
+            .map_err(|e| Error::Ssh(format!("ssh-agent: {e:?}")))?;
+        if res.success() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(unix)]
+async fn agent_auth(session: &mut client::Handle<Verifier>, cfg: &SshConfig) -> Result<bool> {
+    use keys::agent::client::AgentClient;
+    let mut agent = match cfg.agent_socket.as_deref().filter(|s| !s.is_empty()) {
+        Some(sock) => AgentClient::connect_uds(expand_home(sock)).await,
+        None => AgentClient::connect_env().await,
+    }
+    .map_err(|e| Error::Ssh(format!("cannot reach ssh-agent: {e}")))?;
+    try_agent_identities(session, &cfg.user, &mut agent).await
+}
+
+#[cfg(windows)]
+async fn agent_auth(session: &mut client::Handle<Verifier>, cfg: &SshConfig) -> Result<bool> {
+    use keys::agent::client::AgentClient;
+    let pipe = cfg
+        .agent_socket
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| r"\\.\pipe\openssh-ssh-agent".into());
+    match AgentClient::connect_named_pipe(&pipe).await {
+        Ok(mut agent) => try_agent_identities(session, &cfg.user, &mut agent).await,
+        Err(_) => {
+            let mut agent = AgentClient::connect_pageant()
+                .await
+                .map_err(|e| Error::Ssh(format!("no OpenSSH agent or Pageant running: {e}")))?;
+            try_agent_identities(session, &cfg.user, &mut agent).await
+        }
+    }
+}
+
 pub struct Tunnel {
     pub local_port: u16,
     /// SHA256 fingerprint of the server key that was accepted.
@@ -127,6 +194,7 @@ impl Tunnel {
                 .await
                 .map_err(|e| Error::Ssh(e.to_string()))?
                 .success(),
+            SshAuth::Agent => agent_auth(&mut session, cfg).await?,
             SshAuth::Key => {
                 let path = expand_home(cfg.key_path.as_deref().unwrap_or("~/.ssh/id_ed25519"));
                 let key = keys::load_secret_key(&path, secret.filter(|s| !s.is_empty()))

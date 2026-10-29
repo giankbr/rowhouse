@@ -18,20 +18,79 @@ use crate::{Error, Result};
 
 const KEYRING_SERVICE: &str = "rowhouse";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// What the user picks in the UI. Several kinds share a wire protocol / driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DbKind {
     Postgres,
+    Cockroach,
+    Redshift,
+    Greenplum,
+    Mysql,
+    Mariadb,
+    Tidb,
+    Singlestore,
+    Sqlite,
+    Duckdb,
+    Mssql,
+    Clickhouse,
+}
+
+/// The engine actually used to talk to a [`DbKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Driver {
+    Postgres,
     Mysql,
     Sqlite,
+    Duckdb,
+    Mssql,
+    Clickhouse,
 }
 
 impl DbKind {
-    pub fn default_port(self) -> Option<u16> {
+    pub const ALL: [DbKind; 12] = [
+        DbKind::Postgres,
+        DbKind::Cockroach,
+        DbKind::Redshift,
+        DbKind::Greenplum,
+        DbKind::Mysql,
+        DbKind::Mariadb,
+        DbKind::Tidb,
+        DbKind::Singlestore,
+        DbKind::Sqlite,
+        DbKind::Duckdb,
+        DbKind::Mssql,
+        DbKind::Clickhouse,
+    ];
+
+    pub fn driver(self) -> Driver {
+        use DbKind::*;
         match self {
-            DbKind::Postgres => Some(5432),
-            DbKind::Mysql => Some(3306),
-            DbKind::Sqlite => None,
+            Postgres | Cockroach | Redshift | Greenplum => Driver::Postgres,
+            Mysql | Mariadb | Tidb | Singlestore => Driver::Mysql,
+            Sqlite => Driver::Sqlite,
+            Duckdb => Driver::Duckdb,
+            Mssql => Driver::Mssql,
+            Clickhouse => Driver::Clickhouse,
+        }
+    }
+
+    /// Embedded databases open a local file instead of a host/port.
+    pub fn is_file(self) -> bool {
+        matches!(self.driver(), Driver::Sqlite | Driver::Duckdb)
+    }
+
+    pub fn default_port(self) -> Option<u16> {
+        use DbKind::*;
+        match self {
+            Postgres | Greenplum => Some(5432),
+            Cockroach => Some(26257),
+            Redshift => Some(5439),
+            Mysql | Mariadb | Singlestore => Some(3306),
+            Tidb => Some(4000),
+            Mssql => Some(1433),
+            Clickhouse => Some(8123),
+            Sqlite | Duckdb => None,
         }
     }
 }
@@ -50,7 +109,7 @@ pub struct ConnectionConfig {
     pub user: Option<String>,
     #[serde(default)]
     pub database: Option<String>,
-    /// SQLite file path
+    /// File path for embedded databases (SQLite, DuckDB)
     #[serde(default)]
     pub file: Option<String>,
     /// Block every non-read statement for this profile (UI + MCP).
@@ -73,6 +132,8 @@ pub enum SshAuth {
     #[default]
     Key,
     Password,
+    /// ssh-agent / 1Password / Pageant / Windows OpenSSH agent
+    Agent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +148,10 @@ pub struct SshConfig {
     /// Private key path (for `auth = key`). `~` is expanded.
     #[serde(default)]
     pub key_path: Option<String>,
+    /// Custom agent socket (e.g. 1Password's `agent.sock`); defaults to `$SSH_AUTH_SOCK`
+    /// on macOS/Linux and the OpenSSH agent pipe (then Pageant) on Windows.
+    #[serde(default)]
+    pub agent_socket: Option<String>,
     /// Pinned server key fingerprint (`SHA256:...`). Filled on first connect
     /// when the host is not in ~/.ssh/known_hosts (trust on first use).
     #[serde(default)]
@@ -116,7 +181,7 @@ impl ConnectionConfig {
     }
 
     pub fn password(&self) -> Result<Option<String>> {
-        if self.kind == DbKind::Sqlite {
+        if self.kind.is_file() {
             return Ok(None);
         }
         let entry = keyring::Entry::new(KEYRING_SERVICE, &self.id)?;

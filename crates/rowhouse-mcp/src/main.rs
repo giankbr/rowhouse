@@ -16,7 +16,7 @@ use rmcp::{
     model::{Implementation, ServerCapabilities, ServerConfig},
     schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
-use rowhouse_core::{Connection, ConnectionConfig, ConnectionStore};
+use rowhouse_core::{history::NewEntry, Connection, ConnectionConfig, ConnectionStore, History};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -55,14 +55,16 @@ struct QueryArg {
 #[derive(Clone)]
 struct Rowhouse {
     store: Arc<ConnectionStore>,
+    history: Option<History>,
     pool: Arc<Mutex<HashMap<String, Arc<Connection>>>>,
     tool_router: ToolRouter<Self>,
 }
 
 impl Rowhouse {
-    fn new(store: ConnectionStore) -> Self {
+    fn new(store: ConnectionStore, history: Option<History>) -> Self {
         Self {
             store: Arc::new(store),
+            history,
             pool: Default::default(),
             tool_router: Self::tool_router(),
         }
@@ -85,6 +87,31 @@ impl Rowhouse {
         let c = Arc::new(Connection::connect(&cfg).await.map_err(|e| e.to_string())?);
         pool.insert(cfg.id.clone(), c.clone());
         Ok(c)
+    }
+
+    /// Run read-only and log to the shared query history (source = "mcp").
+    async fn run_logged(&self, c: &Connection, sql: &str, limit: usize) -> Result<String, String> {
+        let started = std::time::Instant::now();
+        let res = c.query_read_only(sql, limit).await;
+        if let Some(h) = &self.history {
+            let err = res.as_ref().err().map(|e| e.to_string());
+            let rows = res
+                .as_ref()
+                .map(|o| o.results.iter().map(|r| r.rows.len() as i64).sum())
+                .unwrap_or(0);
+            let _ = h
+                .record(NewEntry {
+                    connection_id: &c.config.id,
+                    sql,
+                    source: "mcp",
+                    error: err.as_deref(),
+                    rows,
+                    elapsed_ms: started.elapsed().as_millis() as i64,
+                })
+                .await;
+        }
+        let out = res.map_err(|e| e.to_string())?;
+        Ok(serde_json::to_string(&out).unwrap_or_default())
     }
 
     async fn default_schema(
@@ -147,11 +174,7 @@ impl Rowhouse {
         let schema = self.default_schema(&c, a.schema, &a.table).await?;
         let limit = a.limit.unwrap_or(20).min(MAX_LIMIT);
         let sql = c.select_table_sql(&schema, &a.table, limit);
-        let out = c
-            .query_read_only(&sql, limit)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(serde_json::to_string(&out).unwrap_or_default())
+        self.run_logged(&c, &sql, limit).await
     }
 
     #[tool(
@@ -160,11 +183,7 @@ impl Rowhouse {
     async fn run_query(&self, Parameters(a): Parameters<QueryArg>) -> Result<String, String> {
         let c = self.conn(&a.connection).await?;
         let limit = a.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
-        let out = c
-            .query_read_only(&a.sql, limit)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(serde_json::to_string(&out).unwrap_or_default())
+        self.run_logged(&c, &a.sql, limit).await
     }
 }
 
@@ -190,7 +209,13 @@ async fn main() -> anyhow::Result<()> {
 
     let store = ConnectionStore::open_default();
     tracing::info!("rowhouse-mcp using {}", store.path().display());
-    let service = Rowhouse::new(store).serve(rmcp::transport::stdio()).await?;
+    let history = History::open_default()
+        .await
+        .map_err(|e| tracing::warn!("query history disabled: {e}"))
+        .ok();
+    let service = Rowhouse::new(store, history)
+        .serve(rmcp::transport::stdio())
+        .await?;
     service.waiting().await?;
     Ok(())
 }

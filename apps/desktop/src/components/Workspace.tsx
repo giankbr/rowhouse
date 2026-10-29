@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Download, KeyRound, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Check, Download, History, KeyRound, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
@@ -15,6 +15,7 @@ export function Workspace({
   onRun,
   onView,
   onToast,
+  onHistory,
 }: {
   tab: Tab;
   conn: ConnectionConfig | undefined;
@@ -23,6 +24,7 @@ export function Workspace({
   onRun: (sql?: string) => void;
   onView: (v: "data" | "structure") => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
+  onHistory: () => void;
 }) {
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -150,6 +152,9 @@ export function Workspace({
             </span>
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
             <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
+            <Button variant="ghost" size="xs" onClick={onHistory} title={`Query history (${mod}+Y)`}>
+              <History size={11} /> History
+            </Button>
           </Toolbar>
         </>
       ) : (

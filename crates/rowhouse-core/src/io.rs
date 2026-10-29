@@ -9,9 +9,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::AssertSqlSafe;
 
 use crate::{
+    backend::Expect,
     driver::{for_each_row, lite_value, my_value, pg_value, PoolRef},
     Connection, Error, Result, ResultColumn,
 };
@@ -143,6 +143,16 @@ impl Connection {
             PoolRef::Pg(p) => for_each_row!(p, sql, pg_value, f),
             PoolRef::My(p) => for_each_row!(p, sql, my_value, f),
             PoolRef::Lite(p) => for_each_row!(p, sql, lite_value, f),
+            PoolRef::Other => {
+                // non-streaming backends: fetch the first result set, then write it
+                let out = self.query(sql, usize::MAX).await?;
+                let r = out.results.into_iter().next().unwrap_or_default();
+                let n = r.rows.len() as u64;
+                for row in r.rows {
+                    f(&r.columns, row)?;
+                }
+                n
+            }
         };
         sink.finish()?;
         Ok(n)
@@ -217,22 +227,8 @@ impl Connection {
             ));
         }
 
-        macro_rules! run {
-            ($pool:expr) => {{
-                let mut tx = $pool.begin().await?;
-                for s in &statements {
-                    sqlx::raw_sql(AssertSqlSafe(s.clone()))
-                        .execute(&mut *tx)
-                        .await?;
-                }
-                tx.commit().await?;
-            }};
-        }
-        match self.pool() {
-            PoolRef::Pg(p) => run!(p),
-            PoolRef::My(p) => run!(p),
-            PoolRef::Lite(p) => run!(p),
-        }
+        self.exec_tx(statements.into_iter().map(|s| (Expect::Any, s)).collect())
+            .await?;
         Ok(total)
     }
 }

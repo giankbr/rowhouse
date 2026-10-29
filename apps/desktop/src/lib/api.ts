@@ -1,14 +1,61 @@
 // Typed bridge to the Rust side. When running in a plain browser (`pnpm dev`
 // without Tauri) a small in-memory mock is used so the UI can be designed fast.
 
-export type DbKind = "postgres" | "mysql" | "sqlite";
+export type DbKind =
+  | "postgres"
+  | "cockroach"
+  | "redshift"
+  | "greenplum"
+  | "mysql"
+  | "mariadb"
+  | "tidb"
+  | "singlestore"
+  | "sqlite"
+  | "duckdb"
+  | "mssql"
+  | "clickhouse";
+
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse";
+
+export interface KindInfo {
+  kind: DbKind;
+  label: string;
+  abbr: string;
+  color: string;
+  dialect: Dialect;
+  port: number | null;
+  user: string | null;
+  /** embedded file database */
+  file?: boolean;
+  /** shown with a "beta" tag until tested against a real server in CI */
+  beta?: boolean;
+}
+
+export const KINDS: KindInfo[] = [
+  { kind: "postgres", label: "PostgreSQL", abbr: "Pg", color: "#336791", dialect: "postgres", port: 5432, user: "postgres" },
+  { kind: "mysql", label: "MySQL", abbr: "My", color: "#e48e00", dialect: "mysql", port: 3306, user: "root" },
+  { kind: "mariadb", label: "MariaDB", abbr: "Ma", color: "#4b8b9b", dialect: "mysql", port: 3306, user: "root" },
+  { kind: "sqlite", label: "SQLite", abbr: "Sl", color: "#7c3aed", dialect: "sqlite", port: null, user: null, file: true },
+  { kind: "mssql", label: "SQL Server", abbr: "Ss", color: "#a91d22", dialect: "mssql", port: 1433, user: "sa", beta: true },
+  { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
+  { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
+  { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
+  { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
+  { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },
+  { kind: "tidb", label: "TiDB", abbr: "Ti", color: "#dc150b", dialect: "mysql", port: 4000, user: "root", beta: true },
+  { kind: "singlestore", label: "SingleStore", abbr: "S2", color: "#aa00ff", dialect: "mysql", port: 3306, user: "root", beta: true },
+];
+
+export const kindInfo = (k: DbKind): KindInfo => KINDS.find((x) => x.kind === k) ?? KINDS[0];
 
 export interface SshConfig {
   host: string;
   port?: number | null;
   user: string;
-  auth: "key" | "password";
+  auth: "key" | "password" | "agent";
   keyPath?: string | null;
+  /** custom agent socket / pipe (e.g. 1Password); empty = system default */
+  agentSocket?: string | null;
   /** pinned SHA256 fingerprint (trust on first use) */
   hostKey?: string | null;
 }
@@ -64,6 +111,18 @@ export interface ChangeSet {
   deletes: Record<string, Cell>[];
 }
 
+export interface HistoryEntry {
+  id: number;
+  connectionId: string;
+  sql: string;
+  source: "app" | "mcp";
+  ok: boolean;
+  error: string | null;
+  rows: number;
+  elapsedMs: number;
+  at: number;
+}
+
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -104,6 +163,9 @@ export const api = {
   tableSqlAll: (id: string, schema: string, table: string) => call<string>("table_sql_all", { id, schema, table }),
   importCsv: (id: string, schema: string, table: string, path: string) =>
     call<number>("import_csv", { id, schema, table, path }),
+  listHistory: (id?: string, search?: string, limit = 200) =>
+    call<HistoryEntry[]>("list_history", { id, search, limit }),
+  clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
 };
 
@@ -125,13 +187,14 @@ export const dialogs = {
 };
 
 export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
+  const k = kindInfo(kind);
   return {
     id: crypto.randomUUID(),
     name: "",
     kind,
-    host: kind === "sqlite" ? null : "localhost",
-    port: kind === "postgres" ? 5432 : kind === "mysql" ? 3306 : null,
-    user: kind === "postgres" ? "postgres" : kind === "mysql" ? "root" : null,
+    host: k.file ? null : "localhost",
+    port: k.port,
+    user: k.user,
     database: null,
     file: null,
     readOnly: false,
@@ -149,6 +212,7 @@ const mockConns: ConnectionConfig[] = [
   { ...newConnection("postgres"), id: "local-pg", name: "Local Postgres", database: "app_dev", color: "green" },
   { ...newConnection("mysql"), id: "prod-my", name: "Production MySQL", host: "db.internal", database: "shop", readOnly: true, color: "red" },
   { ...newConnection("sqlite"), id: "lite", name: "analytics.db", file: "~/data/analytics.db" },
+  { ...newConnection("clickhouse"), id: "ch", name: "Events (ClickHouse)", database: "events", color: "yellow" },
 ];
 
 const mockTables: TableInfo[] = [
@@ -258,6 +322,23 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return `SELECT * FROM "${a.schema}"."${a.table}"`;
     case "import_csv":
       return 1200;
+    case "list_history": {
+      const now = Math.floor(Date.now() / 1000);
+      const all: HistoryEntry[] = [
+        { sql: "SELECT id, full_name, email\nFROM users\nWHERE active = true\nORDER BY created_at DESC;", source: "app", rows: 214, ms: 18, ago: 40 },
+        { sql: "SELECT count(*) FROM orders WHERE status = 'paid'", source: "mcp", rows: 1, ms: 7, ago: 300 },
+        { sql: "SELECT * FROM invoices WHERE due_at < now()", source: "app", rows: 0, ms: 4, ago: 1800, error: 'relation "invoices" has no column "due_at"' },
+        { sql: "UPDATE users SET active = false WHERE last_login < '2025-01-01'", source: "app", rows: 37, ms: 22, ago: 7200 },
+        { sql: "SELECT date_trunc('month', created_at) m, sum(total) FROM orders GROUP BY 1 ORDER BY 1", source: "mcp", rows: 12, ms: 31, ago: 86400 },
+      ].map((e, i) => ({
+        id: 100 - i, connectionId: String(a.id ?? "local-pg"), sql: e.sql, source: e.source as "app" | "mcp",
+        ok: !e.error, error: e.error ?? null, rows: e.rows, elapsedMs: e.ms, at: now - e.ago,
+      }));
+      const q = String(a.search ?? "").toLowerCase();
+      return all.filter((e) => !q || e.sql.toLowerCase().includes(q));
+    }
+    case "clear_history":
+      return null;
     case "mcp_info":
       return {
         command: "/Applications/Rowhouse.app/Contents/MacOS/rowhouse-mcp",

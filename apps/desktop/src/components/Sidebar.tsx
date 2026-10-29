@@ -1,9 +1,9 @@
 import { ChevronRight, Database, Eye, Lock, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
+import { KindBadge } from "./KindBadge";
 import { Button, Dot, cx } from "./ui";
 
-const KIND_LABEL = { postgres: "PG", mysql: "MY", sqlite: "SQ" } as const;
 
 export function Sidebar({
   connections,
@@ -70,7 +70,7 @@ export function Sidebar({
             <Dot color={c.color} />
             <span className="flex-1 truncate font-medium">{c.name || "Untitled"}</span>
             {c.readOnly && <Lock size={11} className="text-subtle" />}
-            <span className="font-mono text-[9.5px] text-subtle">{KIND_LABEL[c.kind]}</span>
+            <KindBadge kind={c.kind} size={15} className="opacity-80" />
             <button
               onClick={(e) => {
                 e.stopPropagation();

@@ -3,8 +3,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use rowhouse_core::{
-    ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error, ExportFormat,
-    ImportOptions, QueryOutput, TableInfo,
+    history::NewEntry, ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error,
+    ExportFormat, History, HistoryEntry, ImportOptions, QueryOutput, TableInfo,
 };
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
@@ -13,6 +13,7 @@ type CmdResult<T> = Result<T, Error>;
 
 struct AppState {
     store: ConnectionStore,
+    history: Option<History>,
     open: Mutex<HashMap<String, Arc<Connection>>>,
 }
 
@@ -140,11 +141,60 @@ async fn run_query(
     limit: Option<usize>,
 ) -> CmdResult<QueryOutput> {
     let c = state.conn(&id).await?;
-    c.query(
-        &sql,
-        limit.unwrap_or(rowhouse_core::driver::DEFAULT_ROW_LIMIT),
-    )
-    .await
+    let started = std::time::Instant::now();
+    let res = c
+        .query(
+            &sql,
+            limit.unwrap_or(rowhouse_core::driver::DEFAULT_ROW_LIMIT),
+        )
+        .await;
+    if let Some(h) = &state.history {
+        let err = res.as_ref().err().map(|e| e.to_string());
+        let rows = res
+            .as_ref()
+            .map(|o| {
+                o.results
+                    .iter()
+                    .map(|r| r.rows.len().max(r.rows_affected as usize) as i64)
+                    .sum()
+            })
+            .unwrap_or(0);
+        let _ = h
+            .record(NewEntry {
+                connection_id: &id,
+                sql: &sql,
+                source: "app",
+                error: err.as_deref(),
+                rows,
+                elapsed_ms: started.elapsed().as_millis() as i64,
+            })
+            .await;
+    }
+    res
+}
+
+#[tauri::command]
+async fn list_history(
+    state: State<'_, AppState>,
+    id: Option<String>,
+    search: Option<String>,
+    limit: Option<i64>,
+) -> CmdResult<Vec<HistoryEntry>> {
+    match &state.history {
+        Some(h) => {
+            h.list(id.as_deref(), search.as_deref(), limit.unwrap_or(200))
+                .await
+        }
+        None => Ok(vec![]),
+    }
+}
+
+#[tauri::command]
+async fn clear_history(state: State<'_, AppState>, id: Option<String>) -> CmdResult<()> {
+    match &state.history {
+        Some(h) => h.clear(id.as_deref()).await,
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -239,8 +289,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let history = tauri::async_runtime::block_on(History::open_default())
+                .map_err(|e| eprintln!("history disabled: {e}"))
+                .ok();
             app.manage(AppState {
                 store: ConnectionStore::open_default(),
+                history,
                 open: Mutex::new(HashMap::new()),
             });
             Ok(())
@@ -256,6 +310,8 @@ pub fn run() {
             describe_table,
             table_sql,
             run_query,
+            list_history,
+            clear_history,
             preview_changes,
             apply_changes,
             export_query,

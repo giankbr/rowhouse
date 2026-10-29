@@ -16,3 +16,10 @@ serde_json = "1"
 anyhow = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Keep dev builds lean: no debug info for dependencies (DuckDB is huge otherwise).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

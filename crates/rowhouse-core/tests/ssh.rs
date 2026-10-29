@@ -18,6 +18,7 @@ fn setup() -> Option<(ConnectionConfig, SshConfig)> {
         user: s[2].into(),
         auth: SshAuth::Key,
         key_path: Some(s[3].into()),
+        agent_socket: None,
         host_key: None,
     };
     Some((cfg, ssh))
@@ -74,4 +75,23 @@ async fn bad_key_path_is_a_clear_error() {
         .unwrap()
         .to_string();
     assert!(err.starts_with("ssh: load key"), "{err}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn agent_auth_through_tunnel() {
+    // needs SSH_AUTH_SOCK with the test key loaded (ssh-add)
+    let Some((mut cfg, mut ssh)) = setup() else {
+        return;
+    };
+    if std::env::var("SSH_AUTH_SOCK").is_err() {
+        return;
+    }
+    ssh.auth = SshAuth::Agent;
+    ssh.key_path = None;
+    cfg.ssh = Some(ssh);
+    let c = Connection::connect_with_secrets(&cfg, None, None)
+        .await
+        .unwrap();
+    c.ping().await.unwrap();
 }

@@ -1,6 +1,7 @@
 import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, newConnection, type ConnectionConfig, type DbKind } from "../lib/api";
+import { api, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind } from "../lib/api";
+import { KindBadge } from "./KindBadge";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
 
 export function ConnectionDialog({
@@ -34,8 +35,9 @@ export function ConnectionDialog({
   const set = (patch: Partial<ConnectionConfig>) => setC((x) => ({ ...x, ...patch }));
   const setKind = (kind: DbKind) => {
     const d = newConnection(kind);
-    set({ kind, host: d.host, port: d.port, user: d.user });
+    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null });
   };
+  const info = kindInfo(c.kind);
   // Empty password field on an existing profile = keep the stored one.
   const pw = password === "" && !isNew ? undefined : password;
   const sshPw = sshSecret === "" && !isNew ? undefined : sshSecret;
@@ -63,7 +65,7 @@ export function ConnectionDialog({
     <Modal
       open={open}
       onClose={onClose}
-      width={480}
+      width={520}
       title={isNew ? "New connection" : `Edit · ${initial?.name}`}
       footer={
         <>
@@ -84,16 +86,27 @@ export function ConnectionDialog({
       }
     >
       <form className="flex flex-col gap-3" onSubmit={(e) => (e.preventDefault(), save())}>
+        <div className="grid grid-cols-6 gap-1">
+          {KINDS.map((k) => (
+            <button
+              type="button"
+              key={k.kind}
+              onClick={() => setKind(k.kind)}
+              className={cx(
+                "relative flex flex-col items-center gap-1 rounded-lg px-1 pt-2 pb-1.5 text-[10.5px] leading-tight transition-colors",
+                c.kind === k.kind ? "bg-accent-soft text-fg ring-1 ring-accent" : "text-muted hover:bg-hover hover:text-fg",
+              )}
+            >
+              <KindBadge kind={k.kind} size={26} />
+              <span className="w-full truncate text-center">{k.label}</span>
+              {k.beta && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-warning" title="Beta" />}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center justify-between">
-          <Segmented
-            value={c.kind}
-            onChange={setKind}
-            options={[
-              { value: "postgres", label: "PostgreSQL" },
-              { value: "mysql", label: "MySQL" },
-              { value: "sqlite", label: "SQLite" },
-            ]}
-          />
+          <span className="text-2xs text-subtle">
+            {info.beta ? "Beta — not yet verified against a live server" : `${info.label} · default port ${info.port ?? "—"}`}
+          </span>
           <div className="flex items-center gap-1">
             {Object.entries(TAG_COLORS).map(([name, hex]) => (
               <button
@@ -112,9 +125,13 @@ export function ConnectionDialog({
           <Input autoFocus value={c.name} placeholder={defaultName(c)} onChange={(e) => set({ name: e.target.value })} />
         </Field>
 
-        {c.kind === "sqlite" ? (
-          <Field label="Database file" hint="Absolute path to an existing .db / .sqlite file">
-            <Input value={c.file ?? ""} placeholder="/Users/you/data/app.db" onChange={(e) => set({ file: e.target.value })} />
+        {info.file ? (
+          <Field label="Database file" hint={c.kind === "duckdb" ? "Path to a .duckdb file (created if missing)" : "Absolute path to an existing .db / .sqlite file"}>
+            <Input
+              value={c.file ?? ""}
+              placeholder={c.kind === "duckdb" ? "/Users/you/data/warehouse.duckdb" : "/Users/you/data/app.db"}
+              onChange={(e) => set({ file: e.target.value })}
+            />
           </Field>
         ) : (
           <>
@@ -149,7 +166,7 @@ export function ConnectionDialog({
           </>
         )}
 
-        {c.kind !== "sqlite" && (
+        {!info.file && (
           <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
             <Switch
               checked={!!ssh}
@@ -181,10 +198,16 @@ export function ConnectionDialog({
                     onChange={(auth) => setSsh({ auth })}
                     options={[
                       { value: "key", label: "Private key" },
+                      { value: "agent", label: "SSH agent" },
                       { value: "password", label: "Password" },
                     ]}
                   />
                 </div>
+                {ssh.auth === "agent" ? (
+                  <Field label="Agent socket" hint="Leave empty for the system agent ($SSH_AUTH_SOCK / Windows OpenSSH / Pageant). 1Password: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock">
+                    <Input value={ssh.agentSocket ?? ""} placeholder="system default" onChange={(e) => setSsh({ agentSocket: e.target.value || null })} />
+                  </Field>
+                ) : (
                 <div className={cx("grid gap-2", ssh.auth === "key" ? "grid-cols-2" : "grid-cols-1")}>
                   {ssh.auth === "key" && (
                     <Field label="Key file">
@@ -200,6 +223,7 @@ export function ConnectionDialog({
                     />
                   </Field>
                 </div>
+                )}
                 {ssh.hostKey && (
                   <div className="flex items-center gap-1.5 text-2xs text-muted">
                     <ShieldCheck size={12} className="shrink-0 text-success" />
@@ -226,8 +250,8 @@ export function ConnectionDialog({
 }
 
 function defaultName(c: ConnectionConfig) {
-  if (c.kind === "sqlite") return c.file?.split(/[\\/]/).pop() || "SQLite";
-  return `${c.database || c.kind}@${c.host || "localhost"}`;
+  if (kindInfo(c.kind).file) return c.file?.split(/[\\/]/).pop() || kindInfo(c.kind).label;
+  return `${c.database || kindInfo(c.kind).label}@${c.host || "localhost"}`;
 }
 
 function TestStatus({ state, msg }: { state: string; msg?: string }) {

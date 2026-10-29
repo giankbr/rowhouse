@@ -15,8 +15,9 @@ assistants can explore your databases safely.
 - Multi-statement scripts → multiple result sets
 - Virtualized result grid: sort, resize columns, keyboard navigation, `⌘/Ctrl+C` copies a cell
 - Inline editing for tables with a primary key: edit / NULL / add / delete rows, review the generated SQL, commit atomically (`⌘/Ctrl+S`); every UPDATE/DELETE must hit exactly one row or the transaction rolls back
-- SSH tunnels: private key (incl. encrypted) or password; host key checked against `~/.ssh/known_hosts`, otherwise pinned on first connect
+- SSH tunnels: private key (incl. encrypted), SSH agent (incl. 1Password / Pageant / Windows OpenSSH), or password; host key checked against `~/.ssh/known_hosts`, otherwise pinned on first connect
 - Export query/table results to CSV, JSON or SQL INSERTs (streamed, no row limit); import CSV into a table in one transaction
+- Query history (`⌘/Ctrl+Y`) shared with the MCP server — every query an AI assistant runs shows up, tagged “AI”
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
 
@@ -51,7 +52,12 @@ Integration tests (skipped unless configured):
 ```bash
 ROWHOUSE_TEST_PG=localhost:5432:postgres cargo test -p rowhouse-core --test postgres
 ROWHOUSE_TEST_PG=localhost:5432:postgres ROWHOUSE_TEST_SSH=127.0.0.1:22:me:~/.ssh/id_ed25519 cargo test -p rowhouse-core --test ssh
+ROWHOUSE_TEST_MYSQL=127.0.0.1:3306:root:root:rowhouse cargo test -p rowhouse-core --test wire_compat
+ROWHOUSE_TEST_MSSQL='localhost:1433:sa:Pass!word1' cargo test -p rowhouse-core --test mssql
+ROWHOUSE_TEST_CH=localhost:8123:default: cargo test -p rowhouse-core --test clickhouse
 ```
+
+The first build compiles DuckDB from source and takes a while; later builds are cached.
 
 ## Contributing
 
@@ -69,12 +75,15 @@ The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI r
 
 ## Database support
 
-| Status | Databases | Rust driver |
+| Status | Databases | How |
 | --- | --- | --- |
-| ✅ v0.1 | PostgreSQL, MySQL, MariaDB, SQLite | `sqlx` |
-| 🟢 easy (Postgres/MySQL wire) | CockroachDB, Amazon Redshift, Greenplum, SingleStore, TiDB | `sqlx` |
-| 🟡 planned | SQL Server, ClickHouse, DuckDB, LibSQL/Turso, Cloudflare D1, MongoDB, Redis, Cassandra/ScyllaDB, Elasticsearch | `tiberius`, `clickhouse`, `duckdb`, `libsql`, HTTP API, `mongodb`, `redis`, `scylla`, `reqwest` |
-| 🟠 harder | BigQuery, Snowflake, DynamoDB, Oracle, Vertica | REST/SDK (`gcp-bigquery-client`, Snowflake SQL API, `aws-sdk-dynamodb`), Oracle needs Instant Client, Vertica via ODBC |
+| ✅ integration-tested | PostgreSQL, MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
+| 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8 | `tiberius`, Postgres protocol |
+| 🟡 beta (wire-compatible, not yet run against a live server) | Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
+| ⏳ planned | LibSQL/Turso, Cloudflare D1, MongoDB, Redis, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
+
+Notes: ClickHouse has no transactions, so grid editing is disabled there (CSV import still works).
+SQL Server connections encrypt and accept self-signed certificates, like most DB GUIs.
 
 ## MCP
 
@@ -116,10 +125,15 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] Inline cell editing with pending-changes buffer → SQL preview → commit in a transaction
 - [ ] Filters / sort pushed down to SQL, pagination for large tables
 - [x] SSH tunnel (russh): key / password auth, host-key pinning
-- [ ] TLS options (CA / client certs), SSH agent auth
+- [x] SSH agent auth
+- [ ] TLS options (CA / client certs)
+- [x] Query history (app + MCP)
 - [x] Export (CSV, JSON, SQL INSERTs) and CSV import
-- [ ] Query history & saved queries (local SQLite)
-- [ ] SQL Server, MongoDB, Redis, DuckDB, ClickHouse drivers
+- [ ] Saved queries / snippets
+- [x] SQL Server, DuckDB, ClickHouse, CockroachDB (+ beta: Redshift, Greenplum, TiDB, SingleStore)
+- [ ] MongoDB, Redis, LibSQL/Turso, D1, Cassandra drivers
+- [ ] AI: natural-language → SQL and “fix this query” with your own model (OpenAI-compatible)
+- [ ] Split panes, ERD, query plan viewer, schema/data compare
 - [ ] ERD view, table structure editor
 - [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [ ] Auto-update, code signing (macOS notarization, Windows signing)

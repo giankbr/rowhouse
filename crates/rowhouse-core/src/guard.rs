@@ -106,6 +106,91 @@ pub fn normalised_statements(sql: &str) -> Vec<String> {
     out
 }
 
+/// Split a script into statements at top-level `;`, keeping the original text
+/// (comments, literals) intact. Used by drivers without multi-statement support.
+pub fn split_statements(sql: &str) -> Vec<String> {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let push = |out: &mut Vec<String>, from: usize, to: usize| {
+        let stmt: String = chars[from..to].iter().collect();
+        // skip pieces that are only whitespace / comments
+        if !normalised_statements(&stmt).is_empty() {
+            out.push(stmt.trim().to_string());
+        }
+    };
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match c {
+            '-' if next == Some('-') => {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if next == Some('*') => {
+                i += 2;
+                while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            '\'' | '"' | '`' | '[' => {
+                let close = if c == '[' { ']' } else { c };
+                i += 1;
+                while i < chars.len() {
+                    if chars[i] == close {
+                        if chars.get(i + 1) == Some(&close) {
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    if chars[i] == '\\' && c == '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            '$' => {
+                let mut j = i + 1;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == '$' {
+                    let tag: String = chars[i..=j].iter().collect();
+                    let rest: String = chars[j + 1..].iter().collect();
+                    if let Some(end) = rest.find(&tag) {
+                        i = j + 1 + rest[..end].chars().count() + tag.chars().count();
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            ';' => {
+                push(&mut out, start, i);
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    if start < chars.len() {
+        push(&mut out, start, chars.len().min(i.max(start)));
+    }
+    out
+}
+
+/// First keyword of a statement, lowercased (comments skipped).
+pub fn first_keyword(stmt: &str) -> String {
+    normalised_statements(stmt)
+        .first()
+        .and_then(|s| words(s).next().map(str::to_string))
+        .unwrap_or_default()
+}
+
 fn words(stmt: &str) -> impl Iterator<Item = &str> {
     stmt.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|w| !w.is_empty())
@@ -154,6 +239,17 @@ mod tests {
         assert!(check_read_only("show tables").is_ok());
         assert!(check_read_only("select replace(name, 'a', 'b') from t").is_ok());
         assert!(check_read_only("select $$drop table x$$").is_ok());
+    }
+
+    #[test]
+    fn splits_keeping_text() {
+        let s = split_statements("select 'a;b' -- c;\n; /* x; */ select 2;; ");
+        assert_eq!(s, vec!["select 'a;b' -- c;", "/* x; */ select 2"]);
+        assert_eq!(
+            split_statements("select [a;b] from t"),
+            vec!["select [a;b] from t"]
+        );
+        assert_eq!(first_keyword("  -- hi\n  SELECT 1"), "select");
     }
 
     #[test]

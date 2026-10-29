@@ -21,7 +21,8 @@ use sqlx::{
 };
 
 use crate::{
-    config::{ConnectionConfig, DbKind},
+    backend::{self, Expect},
+    config::{ConnectionConfig, DbKind, Driver},
     guard, ColumnInfo, Error, QueryOutput, QueryResult, Result, ResultColumn, TableInfo,
 };
 
@@ -114,12 +115,17 @@ enum Pool {
     Pg(PgPool),
     My(MySqlPool),
     Lite(SqlitePool),
+    Duck(backend::duck::Client),
+    Mssql(backend::mssql::Client),
+    Ch(backend::clickhouse::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
     Pg(&'a PgPool),
     My(&'a MySqlPool),
     Lite(&'a SqlitePool),
+    /// Non-sqlx backend: callers use `Connection::query` / `exec_tx`.
+    Other,
 }
 
 pub struct Connection {
@@ -151,8 +157,8 @@ impl Connection {
         let timeout = Duration::from_secs(10);
         let mut host = config.host.clone().unwrap_or_else(|| "localhost".into());
         let mut port = config.port.or(config.kind.default_port()).unwrap_or(0);
-        let tunnel = match (&config.ssh, config.kind) {
-            (Some(ssh), DbKind::Postgres | DbKind::Mysql) => {
+        let tunnel = match &config.ssh {
+            Some(ssh) if !config.kind.is_file() => {
                 let t = crate::tunnel::Tunnel::open(ssh, ssh_secret, &host, port).await?;
                 host = "127.0.0.1".into();
                 port = t.local_port;
@@ -160,19 +166,27 @@ impl Connection {
             }
             _ => None,
         };
-        let pool = match config.kind {
-            DbKind::Postgres => {
+        let user = config.user.as_deref();
+        let db = config.database.as_deref();
+        let file = || {
+            config
+                .file
+                .clone()
+                .ok_or_else(|| Error::Other("profile has no database file path".into()))
+        };
+        let pool = match config.kind.driver() {
+            Driver::Postgres => {
                 let mut o = PgConnectOptions::new()
                     .host(&host)
                     .port(port)
                     .application_name("rowhouse");
-                if let Some(u) = &config.user {
+                if let Some(u) = user {
                     o = o.username(u);
                 }
                 if let Some(p) = password {
                     o = o.password(p);
                 }
-                if let Some(db) = &config.database {
+                if let Some(db) = db {
                     o = o.database(db);
                 }
                 Pool::Pg(
@@ -183,15 +197,15 @@ impl Connection {
                         .await?,
                 )
             }
-            DbKind::Mysql => {
+            Driver::Mysql => {
                 let mut o = MySqlConnectOptions::new().host(&host).port(port);
-                if let Some(u) = &config.user {
+                if let Some(u) = user {
                     o = o.username(u);
                 }
                 if let Some(p) = password {
                     o = o.password(p);
                 }
-                if let Some(db) = &config.database {
+                if let Some(db) = db {
                     o = o.database(db);
                 }
                 Pool::My(
@@ -202,13 +216,9 @@ impl Connection {
                         .await?,
                 )
             }
-            DbKind::Sqlite => {
-                let file = config
-                    .file
-                    .clone()
-                    .ok_or_else(|| Error::Other("SQLite profile has no file path".into()))?;
+            Driver::Sqlite => {
                 let o = SqliteConnectOptions::new()
-                    .filename(file)
+                    .filename(file()?)
                     .create_if_missing(false)
                     .read_only(config.read_only);
                 Pool::Lite(
@@ -219,6 +229,15 @@ impl Connection {
                         .await?,
                 )
             }
+            Driver::Duckdb => {
+                Pool::Duck(backend::duck::Client::open(&file()?, config.read_only).await?)
+            }
+            Driver::Mssql => {
+                Pool::Mssql(backend::mssql::Client::connect(&host, port, user, password, db).await?)
+            }
+            Driver::Clickhouse => Pool::Ch(
+                backend::clickhouse::Client::connect(&host, port, user, password, db).await?,
+            ),
         };
         Ok(Self {
             config: config.clone(),
@@ -232,6 +251,7 @@ impl Connection {
             Pool::Pg(p) => PoolRef::Pg(p),
             Pool::My(p) => PoolRef::My(p),
             Pool::Lite(p) => PoolRef::Lite(p),
+            _ => PoolRef::Other,
         }
     }
 
@@ -244,11 +264,16 @@ impl Connection {
         self.config.kind
     }
 
+    pub fn driver(&self) -> Driver {
+        self.config.kind.driver()
+    }
+
     pub async fn close(&self) {
         match &self.pool {
             Pool::Pg(p) => p.close().await,
             Pool::My(p) => p.close().await,
             Pool::Lite(p) => p.close().await,
+            _ => {}
         }
     }
 
@@ -258,26 +283,39 @@ impl Connection {
             return self.query_read_only(sql, limit).await;
         }
         let started = Instant::now();
-        let results = match &self.pool {
-            Pool::Pg(p) => run_script!(p, sql, limit, pg_value),
-            Pool::My(p) => run_script!(p, sql, limit, my_value),
-            Pool::Lite(p) => run_script!(p, sql, limit, lite_value),
-        };
+        let results = self.run(sql, limit).await?;
         Ok(QueryOutput {
             results,
             elapsed_ms: started.elapsed().as_millis(),
         })
     }
 
+    async fn run(&self, sql: &str, limit: usize) -> Result<Vec<QueryResult>> {
+        Ok(match &self.pool {
+            Pool::Pg(p) => run_script!(p, sql, limit, pg_value),
+            Pool::My(p) => run_script!(p, sql, limit, my_value),
+            Pool::Lite(p) => run_script!(p, sql, limit, lite_value),
+            Pool::Duck(c) => c.run(sql, limit, false).await?,
+            Pool::Mssql(c) => c.run(sql, limit, false).await?,
+            Pool::Ch(c) => c.run(sql, limit, false).await?,
+        })
+    }
+
     /// Run a script that must not modify anything. Two layers:
-    /// the [`guard`] classifier, then a read-only transaction / `query_only` session.
+    /// the [`guard`] classifier, then a read-only transaction / session setting.
     pub async fn query_read_only(&self, sql: &str, limit: usize) -> Result<QueryOutput> {
         guard::check_read_only(sql).map_err(Error::ReadOnly)?;
         let started = Instant::now();
         let results = match &self.pool {
             Pool::Pg(p) => {
                 let mut c = p.acquire().await?;
-                sqlx::raw_sql("BEGIN READ ONLY").execute(&mut *c).await?;
+                // Redshift doesn't know READ ONLY transactions; the guard still applies.
+                let begin = if self.kind() == DbKind::Redshift {
+                    "BEGIN"
+                } else {
+                    "BEGIN READ ONLY"
+                };
+                sqlx::raw_sql(begin).execute(&mut *c).await?;
                 let r: Result<Vec<QueryResult>> =
                     async { Ok(run_script!(&mut *c, sql, limit, pg_value)) }.await;
                 sqlx::raw_sql("ROLLBACK").execute(&mut *c).await?;
@@ -305,11 +343,56 @@ impl Connection {
                     .await?;
                 r?
             }
+            Pool::Duck(c) => c.run(sql, limit, true).await?,
+            Pool::Mssql(c) => c.run(sql, limit, true).await?,
+            Pool::Ch(c) => c.run(sql, limit, true).await?,
         };
         Ok(QueryOutput {
             results,
             elapsed_ms: started.elapsed().as_millis(),
         })
+    }
+
+    /// Run statements atomically (where the database supports transactions);
+    /// each statement's affected-row count must satisfy its [`Expect`].
+    pub(crate) async fn exec_tx(&self, stmts: Vec<(Expect, String)>) -> Result<u64> {
+        macro_rules! sqlx_tx {
+            ($pool:expr) => {{
+                let mut tx = $pool.begin().await?;
+                let mut total = 0u64;
+                for (expect, s) in &stmts {
+                    let n = sqlx::raw_sql(AssertSqlSafe(s.clone()))
+                        .execute(&mut *tx)
+                        .await?
+                        .rows_affected();
+                    if !expect.check(n) {
+                        tx.rollback().await?;
+                        return Err(Error::Other(format!(
+                            "expected 1 row, {n} affected — rolled back.\n{s}"
+                        )));
+                    }
+                    total += n;
+                }
+                tx.commit().await?;
+                Ok(total)
+            }};
+        }
+        match &self.pool {
+            Pool::Pg(p) => sqlx_tx!(p),
+            Pool::My(p) => sqlx_tx!(p),
+            Pool::Lite(p) => sqlx_tx!(p),
+            Pool::Duck(c) => c.exec_tx(stmts).await,
+            Pool::Mssql(c) => c.exec_tx(stmts).await,
+            Pool::Ch(c) => {
+                if stmts.iter().any(|(e, _)| *e != Expect::Any) {
+                    return Err(Error::Other(
+                        "editing rows is not supported for ClickHouse (no transactions)".into(),
+                    ));
+                }
+                c.exec_all(&stmts.into_iter().map(|(_, s)| s).collect::<Vec<_>>())
+                    .await
+            }
+        }
     }
 
     /// Quick health check.
@@ -318,21 +401,25 @@ impl Connection {
     }
 
     pub async fn list_tables(&self) -> Result<Vec<TableInfo>> {
-        let sql = match self.kind() {
-            DbKind::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
-                 WHERE table_schema NOT IN ('pg_catalog','information_schema') \
-                 AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2"
-                .to_string(),
-            DbKind::Mysql => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
-                 WHERE (DATABASE() IS NULL AND table_schema NOT IN ('mysql','information_schema','performance_schema','sys')) \
-                 OR table_schema = DATABASE() ORDER BY 1, 2"
-                .to_string(),
-            DbKind::Sqlite => "SELECT 'main', name, type FROM sqlite_master \
-                 WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY 2"
-                .to_string(),
+        let sql = match self.driver() {
+            Driver::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
+                 WHERE table_schema NOT IN ('pg_catalog','information_schema','crdb_internal','pg_extension','pg_internal','gp_toolkit') \
+                 AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2",
+            Driver::Mysql => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
+                 WHERE (DATABASE() IS NULL AND LOWER(table_schema) NOT IN \
+                   ('mysql','information_schema','performance_schema','sys','metrics_schema','memsql','cluster')) \
+                 OR table_schema = DATABASE() ORDER BY 1, 2",
+            Driver::Sqlite => "SELECT 'main', name, type FROM sqlite_master \
+                 WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY 2",
+            Driver::Duckdb => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
+                 WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY 1, 2",
+            Driver::Mssql => "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES \
+                 WHERE TABLE_SCHEMA NOT IN ('sys','INFORMATION_SCHEMA') ORDER BY 1, 2",
+            Driver::Clickhouse => "SELECT database, name, engine FROM system.tables \
+                 WHERE database = currentDatabase() ORDER BY name",
         };
         Ok(self
-            .meta(&sql)
+            .meta(sql)
             .await?
             .rows
             .into_iter()
@@ -351,23 +438,29 @@ impl Connection {
 
     pub async fn describe_table(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
         let (s, t) = (self.literal(schema), self.literal(table));
-        let rows = match self.kind() {
-            DbKind::Postgres => {
-                let sql = format!(
-                    "SELECT c.column_name, \
-                       CASE WHEN c.data_type IN ('USER-DEFINED','ARRAY') THEN c.udt_name ELSE c.data_type END, \
-                       c.is_nullable, c.column_default, \
-                       EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
-                         JOIN information_schema.key_column_usage k \
-                           ON k.constraint_name = tc.constraint_name AND k.table_schema = tc.table_schema \
-                         WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = c.table_schema \
-                           AND tc.table_name = c.table_name AND k.column_name = c.column_name) \
-                     FROM information_schema.columns c \
-                     WHERE c.table_schema = {s} AND c.table_name = {t} ORDER BY c.ordinal_position"
+        // information_schema with a portable primary-key flag (Postgres family, DuckDB, SQL Server)
+        let info_schema = |type_expr: &str| {
+            format!(
+                "SELECT c.column_name, {type_expr}, c.is_nullable, c.column_default, \
+                   CASE WHEN EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
+                     JOIN information_schema.key_column_usage k \
+                       ON k.constraint_name = tc.constraint_name AND k.table_schema = tc.table_schema \
+                       AND k.table_name = tc.table_name \
+                     WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = c.table_schema \
+                       AND tc.table_name = c.table_name AND k.column_name = c.column_name) THEN 1 ELSE 0 END \
+                 FROM information_schema.columns c \
+                 WHERE c.table_schema = {s} AND c.table_name = {t} ORDER BY c.ordinal_position"
+            )
+        };
+        let rows = match self.driver() {
+            Driver::Postgres => {
+                let sql = info_schema(
+                    "CASE WHEN c.data_type IN ('USER-DEFINED','ARRAY') THEN c.udt_name ELSE c.data_type END",
                 );
                 self.meta(&sql).await?.rows
             }
-            DbKind::Mysql => {
+            Driver::Duckdb | Driver::Mssql => self.meta(&info_schema("c.data_type")).await?.rows,
+            Driver::Mysql => {
                 let sql = format!(
                     "SELECT column_name, column_type, is_nullable, column_default, column_key = 'PRI' \
                      FROM information_schema.columns WHERE table_schema = {s} AND table_name = {t} \
@@ -375,7 +468,16 @@ impl Connection {
                 );
                 self.meta(&sql).await?.rows
             }
-            DbKind::Sqlite => {
+            Driver::Clickhouse => {
+                let sql = format!(
+                    "SELECT name, type, if(startsWith(type, 'Nullable'), 'YES', 'NO'), \
+                       if(default_expression = '', NULL, default_expression), \
+                       is_in_primary_key \
+                     FROM system.columns WHERE database = {s} AND table = {t}"
+                );
+                self.meta(&sql).await?.rows
+            }
+            Driver::Sqlite => {
                 // cid, name, type, notnull, dflt_value, pk
                 let sql = format!("PRAGMA table_info({t})");
                 self.meta(&sql)
@@ -410,8 +512,11 @@ impl Connection {
             .collect())
     }
 
-    /// `SELECT * FROM <table> LIMIT n` with correct identifier quoting.
+    /// `SELECT * FROM <table> LIMIT n` (or `TOP n`) with correct identifier quoting.
     pub fn select_table_sql(&self, schema: &str, table: &str, limit: usize) -> String {
+        if self.driver() == Driver::Mssql {
+            return format!("SELECT TOP {limit} * FROM {}", self.target(schema, table));
+        }
         format!("{} LIMIT {limit}", self.select_all_sql(schema, table))
     }
 
@@ -421,26 +526,26 @@ impl Connection {
     }
 
     pub fn ident(&self, name: &str) -> String {
-        match self.kind() {
-            DbKind::Mysql => format!("`{}`", name.replace('`', "``")),
+        match self.driver() {
+            Driver::Mysql | Driver::Clickhouse => format!("`{}`", name.replace('`', "``")),
+            Driver::Mssql => format!("[{}]", name.replace(']', "]]")),
             _ => format!("\"{}\"", name.replace('"', "\"\"")),
         }
     }
 
     pub fn literal(&self, s: &str) -> String {
-        match self.kind() {
-            DbKind::Mysql => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''")),
+        match self.driver() {
+            Driver::Mysql | Driver::Clickhouse => {
+                format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
+            }
+            Driver::Mssql => format!("N'{}'", s.replace('\'', "''")),
             _ => format!("'{}'", s.replace('\'', "''")),
         }
     }
 
     /// Internal metadata query: first result set, no row limit, ignores read_only.
     async fn meta(&self, sql: &str) -> Result<QueryResult> {
-        let mut results = match &self.pool {
-            Pool::Pg(p) => run_script!(p, sql, usize::MAX, pg_value),
-            Pool::My(p) => run_script!(p, sql, usize::MAX, my_value),
-            Pool::Lite(p) => run_script!(p, sql, usize::MAX, lite_value),
-        };
+        let mut results = self.run(sql, usize::MAX).await?;
         Ok(if results.is_empty() {
             QueryResult::default()
         } else {

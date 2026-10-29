@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Bot, Database, Eye, Moon, Plus, SquareTerminal, Table2 } from "lucide-react";
+import { Bot, Database, Eye, History, Moon, Plus, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -16,6 +16,7 @@ export function CommandPalette({
   tables: TableInfo[];
   actions: {
     newQuery: () => void;
+    showHistory: () => void;
     newConnection: () => void;
     openTable: (t: TableInfo) => void;
     selectConnection: (id: string) => void;
@@ -72,6 +73,9 @@ export function CommandPalette({
           <Command.Group heading="Commands" className={group}>
             <Command.Item onSelect={run(actions.newQuery)} className={item}>
               <SquareTerminal size={13} className="text-subtle" /> New query tab
+            </Command.Item>
+            <Command.Item onSelect={run(actions.showHistory)} className={item}>
+              <History size={13} className="text-subtle" /> Query history
             </Command.Item>
             <Command.Item onSelect={run(actions.newConnection)} className={item}>
               <Plus size={13} className="text-subtle" /> New connection

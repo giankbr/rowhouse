@@ -2,6 +2,7 @@ import { Database, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConnectionDialog } from "./components/ConnectionDialog";
+import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -23,6 +24,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null }>({ open: false, edit: null });
   const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const setToast = useCallback(
@@ -98,13 +100,24 @@ export default function App() {
     [tables, tabs, loadTables],
   );
 
-  const newQuery = useCallback(() => {
-    if (!activeConn) return;
-    const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
-    const t: Tab = { id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql: "SELECT 1;" };
-    setTabs((ts) => [...ts, t]);
-    setActiveTab(t.id);
-  }, [activeConn, tabs]);
+  const newQuery = useCallback(
+    (sql = "SELECT 1;") => {
+      if (!activeConn) return;
+      const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
+      const t: Tab = { id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql };
+      setTabs((ts) => [...ts, t]);
+      setActiveTab(t.id);
+    },
+    [activeConn, tabs],
+  );
+
+  const pickHistory = useCallback(
+    (sql: string) => {
+      if (tab?.kind === "query") patchTab(tab.id, { sql });
+      else newQuery(sql);
+    },
+    [tab, patchTab, newQuery],
+  );
 
   const openTable = useCallback(
     async (info: TableInfo) => {
@@ -176,6 +189,7 @@ export default function App() {
       else if (k === "t") (e.preventDefault(), newQuery());
       else if (k === "w" && activeTab) (e.preventDefault(), closeTab(activeTab));
       else if (k === "b") (e.preventDefault(), setSidebar((s) => !s));
+      else if (k === "y") (e.preventDefault(), setHistoryOpen((h) => !h));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -212,7 +226,7 @@ export default function App() {
         <main className="flex min-w-0 flex-1 flex-col">
           {conn ? (
             <>
-              <TabBar tabs={visibleTabs} activeId={tab?.id ?? null} onSelect={setActiveTab} onClose={closeTab} onNew={newQuery} />
+              <TabBar tabs={visibleTabs} activeId={tab?.id ?? null} onSelect={setActiveTab} onClose={closeTab} onNew={() => newQuery()} />
               {tab ? (
                 <Workspace
                   key={tab.id}
@@ -223,12 +237,13 @@ export default function App() {
                   onRun={(s) => runTab(tab, s)}
                   onView={setView}
                   onToast={setToast}
+                  onHistory={() => setHistoryOpen((h) => !h)}
                 />
               ) : (
                 <Empty>
                   <p className="text-xs text-muted">Pick a table on the left, or start a query.</p>
                   <div className="flex gap-2">
-                    <Button variant="primary" onClick={newQuery}>
+                    <Button variant="primary" onClick={() => newQuery()}>
                       New query
                     </Button>
                   </div>
@@ -252,6 +267,7 @@ export default function App() {
             </Empty>
           )}
         </main>
+        <HistoryPanel connId={activeConn} open={historyOpen && !!conn} onClose={() => setHistoryOpen(false)} onPick={pickHistory} />
       </div>
 
       <StatusBar tab={tab} connected={!!(activeConn && connected[activeConn])} />
@@ -281,7 +297,8 @@ export default function App() {
         connections={connections}
         tables={connTables}
         actions={{
-          newQuery,
+          newQuery: () => newQuery(),
+          showHistory: () => setHistoryOpen(true),
           newConnection: () => setDialog({ open: true, edit: null }),
           openTable,
           selectConnection,
@@ -314,6 +331,7 @@ function Shortcuts() {
     ["New query", [mod, "T"]],
     ["Run query", [mod, "↵"]],
     ["Toggle sidebar", [mod, "B"]],
+    ["Query history", [mod, "Y"]],
   ];
   return (
     <div className="mt-2 grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-2xs text-muted">

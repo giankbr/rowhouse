@@ -20,6 +20,11 @@ sqlx = { version = "0.9", default-features = false, features = [
 
 russh = { version = "0.65", default-features = false, features = ["ring", "flate2", "rsa"] }
 csv = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+duckdb = { version = "1", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"
