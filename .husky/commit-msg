@@ -1,1 +1,5 @@
+# Strip AI attribution trailers from the commit message (any session).
+tmp="$(mktemp)"
+grep -viE '^(Co-Authored-By: (Claude|Anthropic)|Claude-Session:)' "$1" > "$tmp" && mv "$tmp" "$1"
+
 pnpm exec commitlint --edit "$1"
