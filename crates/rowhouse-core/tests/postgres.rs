@@ -48,7 +48,8 @@ async fn pg_types_and_meta() {
         .any(|t| t.schema == "public" && t.name == "rowhouse_t"));
     let cols = c.describe_table("public", "rowhouse_t").await.unwrap();
     assert!(cols[0].primary_key && cols[0].default.is_some());
-    assert_eq!(cols[5].data_type, "_text");
+    assert_eq!(cols[5].data_type, "text[]");
+    assert_eq!(cols[2].data_type, "numeric(12,2)");
 
     // grid edits: string literals coerce to numeric / bool / jsonb
     use rowhouse_core::{ChangeSet, RowUpdate};
@@ -101,6 +102,119 @@ async fn pg_types_and_meta() {
         ),
         ("rowhouse_t", "parent_id", "id")
     );
+    // query plans
+    c.query(
+        "INSERT INTO rh_child SELECT g, 1 FROM generate_series(1, 20000) g; ANALYZE rh_child",
+        10,
+    )
+    .await
+    .unwrap();
+    let p = c
+        .explain_plan("SELECT * FROM rh_child WHERE parent_id = 1", false)
+        .await
+        .unwrap();
+    assert_eq!(p.nodes[0].label, "Seq Scan");
+    assert!(p.nodes[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .starts_with("rh_child"));
+    assert!(p.nodes[0].cost.unwrap() > 0.0);
+    let a = c
+        .explain_plan(
+            "SELECT count(*) FROM rh_child c JOIN rowhouse_t t ON t.id = c.parent_id",
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(a.analyzed && a.execution_ms.is_some());
+    assert!(a.nodes[0].actual_ms.is_some());
+    fn any_warn(n: &rowhouse_core::plan::PlanNode) -> bool {
+        n.warnings.iter().any(|w| w.contains("full table scan")) || n.children.iter().any(any_warn)
+    }
+    assert!(any_warn(&a.nodes[0]), "{:#?}", a.nodes);
+    // ANALYZE executes → writes are refused
+    assert!(c.explain_plan("DELETE FROM rh_child", true).await.is_err());
+    assert_eq!(
+        c.query("SELECT count(*) FROM rh_child", 10)
+            .await
+            .unwrap()
+            .results[0]
+            .rows[0][0],
+        20000
+    );
     c.query("DROP TABLE rh_child", 10).await.unwrap();
     c.query("DROP TABLE rowhouse_t", 10).await.unwrap();
+}
+
+#[tokio::test]
+async fn pg_schema_compare_roundtrip() {
+    let Some(c) = conn().await else { return };
+    c.query(
+        "DROP SCHEMA IF EXISTS rh_a CASCADE; DROP SCHEMA IF EXISTS rh_b CASCADE;
+         CREATE SCHEMA rh_a; CREATE SCHEMA rh_b;
+         CREATE TABLE rh_a.users (id int PRIMARY KEY, email varchar(120) NOT NULL, active bool DEFAULT true, bio text);
+         CREATE TABLE rh_a.teams (id int PRIMARY KEY, name text NOT NULL);
+         CREATE TABLE rh_b.users (id int PRIMARY KEY, email varchar(64), legacy int);
+         CREATE TABLE rh_b.old_stuff (id int);",
+        10,
+    )
+    .await
+    .unwrap();
+    let d = c.compare_schema("rh_b", &c, "rh_a").await.unwrap();
+    let kinds: Vec<String> = d
+        .changes
+        .iter()
+        .map(|ch| {
+            serde_json::to_value(ch).unwrap()["kind"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    for k in [
+        "tableAdded",
+        "tableRemoved",
+        "columnAdded",
+        "columnRemoved",
+        "columnChanged",
+    ] {
+        assert!(kinds.iter().any(|x| x == k), "missing {k} in {kinds:?}");
+    }
+    assert!(
+        d.sql.contains("-- DROP TABLE \"rh_b\".\"old_stuff\";"),
+        "{}",
+        d.sql
+    );
+    assert!(
+        d.sql.contains(
+            "ALTER TABLE \"rh_b\".\"users\" ALTER COLUMN \"email\" TYPE character varying(120)"
+        ),
+        "{}",
+        d.sql
+    );
+
+    // apply it: afterwards only the (commented) drops remain as differences
+    c.query(&d.sql, 10).await.unwrap();
+    let again = c.compare_schema("rh_b", &c, "rh_a").await.unwrap();
+    let left: Vec<String> = again
+        .changes
+        .iter()
+        .map(|ch| {
+            serde_json::to_value(ch).unwrap()["kind"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        left,
+        vec!["columnRemoved", "tableRemoved"],
+        "{:#?}",
+        again.changes
+    );
+    assert!(again.identical.contains(&"teams".to_string()));
+    c.query("DROP SCHEMA rh_a CASCADE; DROP SCHEMA rh_b CASCADE", 10)
+        .await
+        .unwrap();
 }

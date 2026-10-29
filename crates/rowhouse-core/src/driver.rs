@@ -453,6 +453,23 @@ impl Connection {
             )
         };
         let rows = match self.driver() {
+            // Redshift's catalog is too old for this query; it uses information_schema below.
+            Driver::Postgres if self.kind() != DbKind::Redshift => {
+                // pg_catalog gives full types (varchar(64), numeric(12,2), text[]) and real defaults
+                let sql = format!(
+                    "SELECT a.attname, format_type(a.atttypid, a.atttypmod), \
+                       CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END, \
+                       pg_get_expr(d.adbin, d.adrelid), \
+                       CASE WHEN EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.oid AND i.indisprimary \
+                         AND a.attnum = ANY(i.indkey)) THEN 1 ELSE 0 END \
+                     FROM pg_attribute a \
+                     JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+                     WHERE n.nspname = {s} AND c.relname = {t} AND a.attnum > 0 AND NOT a.attisdropped \
+                     ORDER BY a.attnum"
+                );
+                self.meta(&sql).await?.rows
+            }
             Driver::Postgres => {
                 let sql = info_schema(
                     "CASE WHEN c.data_type IN ('USER-DEFINED','ARRAY') THEN c.udt_name ELSE c.data_type END",

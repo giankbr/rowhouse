@@ -280,3 +280,55 @@ async fn erd_finds_foreign_keys() {
     assert_eq!(pair.columns, vec!["pa", "pb"]);
     assert_eq!(pair.ref_columns, vec!["a", "b"]);
 }
+
+#[tokio::test]
+async fn sqlite_query_plan() {
+    let (_d, c) = setup().await;
+    let p = c
+        .explain_plan("SELECT * FROM users WHERE name = 'x' ORDER BY score", false)
+        .await
+        .unwrap();
+    assert!(
+        p.nodes.iter().any(|n| n.label.starts_with("SCAN users")
+            && n.warnings.iter().any(|w| w == "full table scan")),
+        "{:#?}",
+        p.nodes
+    );
+    assert!(p.raw.contains("TEMP B-TREE"));
+    let p = c
+        .explain_plan("SELECT * FROM users WHERE id = 1", false)
+        .await
+        .unwrap();
+    assert!(p.nodes[0].label.contains("INTEGER PRIMARY KEY") && p.nodes[0].warnings.is_empty());
+}
+
+#[tokio::test]
+async fn sqlite_vs_sqlite_compare() {
+    let (_d1, a) = setup().await;
+    let (_d2, b) = setup().await;
+    a.query("ALTER TABLE users ADD COLUMN nick TEXT DEFAULT 'x'", 10)
+        .await
+        .unwrap();
+    b.query("CREATE TABLE extra (id INTEGER)", 10)
+        .await
+        .unwrap();
+    let d = b.compare_schema("main", &a, "main").await.unwrap();
+    assert!(!d.cross_dialect);
+    assert_eq!(d.changes.len(), 2, "{:#?}", d.changes);
+    assert!(
+        d.sql
+            .contains("ALTER TABLE \"users\" ADD COLUMN \"nick\" TEXT DEFAULT 'x';"),
+        "{}",
+        d.sql
+    );
+    assert!(d.sql.contains("-- DROP TABLE \"extra\";"));
+    b.query(&d.sql, 10).await.unwrap();
+    assert_eq!(
+        b.compare_schema("main", &a, "main")
+            .await
+            .unwrap()
+            .changes
+            .len(),
+        1
+    ); // only the commented drop
+}

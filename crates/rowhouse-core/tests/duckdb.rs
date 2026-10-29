@@ -107,6 +107,16 @@ async fn duckdb_end_to_end() {
         ("t", vec!["t_id".to_string()], vec!["id".to_string()])
     );
 
+    let plan = c
+        .explain_plan("SELECT * FROM t WHERE id > 1", false)
+        .await
+        .unwrap();
+    assert!(
+        plan.nodes.is_empty() && plan.raw.to_uppercase().contains("SCAN"),
+        "{}",
+        plan.raw
+    );
+
     // select sql + quoting
     assert_eq!(
         c.select_table_sql("main", "t", 5),

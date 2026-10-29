@@ -67,6 +67,41 @@ async fn mysql() {
 }
 
 #[tokio::test]
+async fn mysql_schema_compare() {
+    let Ok(spec) = std::env::var("ROWHOUSE_TEST_MYSQL") else {
+        return;
+    };
+    let p: Vec<&str> = spec.split(':').collect();
+    let mut cfg = ConnectionConfig::new("my", DbKind::Mysql);
+    cfg.host = Some(p[0].into());
+    cfg.port = p[1].parse().ok();
+    cfg.user = Some(p[2].into());
+    let c = Connection::connect_with(&cfg, Some(p[3])).await.unwrap();
+    c.query(
+        "DROP DATABASE IF EXISTS rh_a; DROP DATABASE IF EXISTS rh_b; CREATE DATABASE rh_a; CREATE DATABASE rh_b;
+         CREATE TABLE rh_a.users (id INT PRIMARY KEY, email VARCHAR(120) NOT NULL, active TINYINT(1) DEFAULT 1);
+         CREATE TABLE rh_a.teams (id INT PRIMARY KEY, name VARCHAR(50));
+         CREATE TABLE rh_b.users (id INT PRIMARY KEY, email VARCHAR(64));",
+        10,
+    )
+    .await
+    .unwrap();
+    let d = c.compare_schema("rh_b", &c, "rh_a").await.unwrap();
+    assert!(
+        d.sql
+            .contains("MODIFY COLUMN `email` varchar(120) NOT NULL"),
+        "{}",
+        d.sql
+    );
+    c.query(&d.sql, 10).await.unwrap();
+    let again = c.compare_schema("rh_b", &c, "rh_a").await.unwrap();
+    assert!(again.changes.is_empty(), "{:#?}", again.changes);
+    c.query("DROP DATABASE rh_a; DROP DATABASE rh_b", 10)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn cockroach() {
     let Ok(spec) = std::env::var("ROWHOUSE_TEST_COCKROACH") else {
         return;

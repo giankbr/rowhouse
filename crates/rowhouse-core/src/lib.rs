@@ -7,6 +7,7 @@
 pub mod ai;
 pub mod backend;
 pub mod changes;
+pub mod compare;
 pub mod config;
 pub mod driver;
 pub mod erd;
@@ -16,12 +17,13 @@ pub mod history;
 pub mod import;
 pub mod io;
 pub mod model;
+pub mod plan;
 pub mod tunnel;
 
 pub use changes::{ChangeSet, RowUpdate};
 pub use config::{ConnectionConfig, ConnectionStore, DbKind};
 pub use driver::Connection;
 pub use error::{Error, Result};
-pub use history::{History, HistoryEntry};
+pub use history::{History, HistoryEntry, Snippet};
 pub use io::{ExportFormat, ImportOptions};
 pub use model::*;
