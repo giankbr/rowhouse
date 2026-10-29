@@ -345,6 +345,64 @@ async fn ai_explain(state: State<'_, AppState>, id: String, sql: String) -> CmdR
 
 // ---- safety, ERD, import ---------------------------------------------------
 
+// ---- snippets, plans, compare -------------------------------------------------
+
+#[tauri::command]
+async fn list_snippets(
+    state: State<'_, AppState>,
+    id: Option<String>,
+    search: Option<String>,
+) -> CmdResult<Vec<rowhouse_core::Snippet>> {
+    match &state.history {
+        Some(h) => h.list_snippets(id.as_deref(), search.as_deref()).await,
+        None => Ok(vec![]),
+    }
+}
+
+#[tauri::command]
+async fn save_snippet(
+    state: State<'_, AppState>,
+    snippet: rowhouse_core::Snippet,
+) -> CmdResult<rowhouse_core::Snippet> {
+    match &state.history {
+        Some(h) => h.save_snippet(&snippet).await,
+        None => Err(Error::Other("storage unavailable".into())),
+    }
+}
+
+#[tauri::command]
+async fn delete_snippet(state: State<'_, AppState>, snippet_id: i64) -> CmdResult<()> {
+    match &state.history {
+        Some(h) => h.delete_snippet(snippet_id).await,
+        None => Ok(()),
+    }
+}
+
+#[tauri::command]
+async fn explain_plan(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    analyze: bool,
+) -> CmdResult<rowhouse_core::plan::Plan> {
+    state.conn(&id).await?.explain_plan(&sql, analyze).await
+}
+
+#[tauri::command]
+async fn compare_schema(
+    state: State<'_, AppState>,
+    source_id: String,
+    source_schema: String,
+    target_id: String,
+    target_schema: String,
+) -> CmdResult<rowhouse_core::compare::SchemaDiff> {
+    let source = state.conn(&source_id).await?;
+    let target = state.conn(&target_id).await?;
+    target
+        .compare_schema(&target_schema, &source, &source_schema)
+        .await
+}
+
 /// Write a text file chosen by the user in a save dialog (ERD export).
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> CmdResult<()> {
@@ -455,6 +513,11 @@ pub fn run() {
             import_csv,
             mcp_info,
             write_text_file,
+            list_snippets,
+            save_snippet,
+            delete_snippet,
+            explain_plan,
+            compare_schema,
             check_destructive,
             erd,
             import_detect,

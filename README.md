@@ -22,6 +22,9 @@ assistants can explore your databases safely.
 - ER diagram (`Diagram` in the sidebar): built from foreign keys, pan / zoom / drag, click to focus a table's relations, double-click to open it, export SVG
 - Split panes (`⌘/Ctrl+\\`) and drag-and-drop tabs between them
 - Import connections from DBeaver, TablePlus and Navicat (auto-detects their files; passwords are re-entered once)
+- Query plan viewer (**Plan**): EXPLAIN as a tree with cost/time bars and hints (full scans, bad estimates, disk sorts); `ANALYZE` on PostgreSQL runs read-only
+- Saved queries: **Save** in a query tab, find them under *Saved* in the history drawer (per connection or global)
+- Schema compare between any two connections/schemas, with a migration script for the target (drops commented out)
 - Query history (`⌘/Ctrl+Y`) shared with the MCP server — every query an AI assistant runs shows up, tagged “AI”
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
@@ -140,7 +143,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [ ] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import
-- [ ] Query plan viewer, schema/data compare, saved snippets
+- [x] Query plan viewer, schema compare, saved queries
+- [ ] Data compare, scheduled queries, MongoDB / Redis drivers
 - [ ] ERD view, table structure editor
 - [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [ ] Auto-update, code signing (macOS notarization, Windows signing)

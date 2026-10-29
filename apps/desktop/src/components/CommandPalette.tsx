@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Bot, Columns2, Database, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Bot, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -18,6 +18,7 @@ export function CommandPalette({
     newQuery: () => void;
     showHistory: () => void;
     openErd: () => void;
+    openCompare: () => void;
     importConnections: () => void;
     splitRight: () => void;
     showSettings: () => void;
@@ -80,6 +81,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.openErd)} className={item}>
               <Network size={13} className="text-subtle" /> Open diagram (ERD)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.openCompare)} className={item}>
+              <GitCompareArrows size={13} className="text-subtle" /> Compare schemas
             </Command.Item>
             <Command.Item onSelect={run(actions.splitRight)} className={item}>
               <Columns2 size={13} className="text-subtle" /> Split right

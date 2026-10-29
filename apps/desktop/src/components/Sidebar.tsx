@@ -1,4 +1,4 @@
-import { ChevronRight, Database, Eye, FileInput, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
+import { ChevronRight, Database, Eye, FileInput, GitCompareArrows, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { KindBadge } from "./KindBadge";
@@ -17,6 +17,7 @@ export function Sidebar({
   onRefresh,
   onImport,
   onErd,
+  onCompare,
 }: {
   connections: ConnectionConfig[];
   activeId: string | null;
@@ -29,6 +30,7 @@ export function Sidebar({
   onRefresh: () => void;
   onImport: () => void;
   onErd: () => void;
+  onCompare: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -108,6 +110,9 @@ export function Sidebar({
                 className="h-6 w-full rounded-md bg-transparent pr-2 pl-6.5 text-xs outline-none placeholder:text-subtle hover:bg-hover focus:bg-elevated focus:ring-1 focus:ring-line-strong"
               />
             </div>
+            <Button variant="ghost" size="icon" onClick={onCompare} title="Compare schemas">
+              <GitCompareArrows size={12} />
+            </Button>
             <Button variant="ghost" size="icon" onClick={onErd} title="Diagram (ERD)">
               <Network size={12} />
             </Button>

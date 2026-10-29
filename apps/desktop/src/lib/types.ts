@@ -3,7 +3,7 @@ import type { Pending } from "./pending";
 
 export interface Tab {
   id: string;
-  kind: "query" | "table" | "erd";
+  kind: "query" | "table" | "erd" | "compare";
   /** split pane the tab lives in */
   pane?: 0 | 1;
   title: string;
@@ -18,6 +18,13 @@ export interface Tab {
   resultIndex?: number;
   error?: string;
   running?: boolean;
+  /** results area shows the query plan instead of rows */
+  showPlan?: boolean;
+  plan?: import("./api").Plan;
+  planError?: string;
+  planLoading?: boolean;
+  /** saved-query id this tab was opened from / saved as */
+  snippetId?: number;
   /** unsaved grid edits (table tabs only) */
   pending?: Pending;
 }

@@ -1,12 +1,13 @@
-import { AlertCircle, BookOpen, Check, Download, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Bookmark, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { AiPanel, type AiState } from "./AiPanel";
+import { PlanView } from "./PlanView";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
-import { Button, Menu, Modal, Segmented, cx } from "./ui";
+import { Button, Field, Input, Menu, Modal, Segmented, Switch, cx } from "./ui";
 
 export function Workspace({
   tab,
@@ -131,6 +132,38 @@ export function Workspace({
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // ---- query plan -----------------------------------------------------------
+  const [analyze, setAnalyze] = useState(false);
+  const canAnalyze = conn?.kind === "postgres" || conn?.kind === "greenplum";
+  const explainPlan = async (withAnalyze = analyze) => {
+    onChange({ showPlan: true, planLoading: true, planError: undefined });
+    try {
+      onChange({ plan: await api.explainPlan(tab.connId, tab.sql, withAnalyze && canAnalyze), planLoading: false });
+    } catch (e) {
+      onChange({ planError: String(e), planLoading: false, plan: undefined });
+    }
+  };
+
+  // ---- saved queries --------------------------------------------------------
+  const [saveDlg, setSaveDlg] = useState<{ name: string; global: boolean } | null>(null);
+  const saveSnippet = async () => {
+    if (!saveDlg?.name.trim()) return;
+    try {
+      const saved = await api.saveSnippet({
+        id: tab.snippetId ?? 0,
+        name: saveDlg.name.trim(),
+        sql: tab.sql,
+        connectionId: saveDlg.global ? null : tab.connId,
+        updatedAt: 0,
+      });
+      onChange({ snippetId: saved.id, title: saved.name });
+      setSaveDlg(null);
+      onToast(`Saved “${saved.name}”`, "ok");
+    } catch (e) {
+      onToast(String(e));
+    }
+  };
+
   // ---- import / export ----------------------------------------------------
   const exportAs = async (format: ExportFormat) => {
     const base = isTable ? tab.table! : "query";
@@ -213,8 +246,27 @@ export function Workspace({
             <Button variant="ghost" size="xs" onClick={askAi} title={`Ask AI (${mod}+I)`}>
               <Sparkles size={11} className="text-accent" /> Ask AI
             </Button>
-            <Button variant="ghost" size="xs" onClick={explainWithAi} disabled={!tab.sql.trim()} title="Explain this query">
+            <Button variant="ghost" size="xs" onClick={explainWithAi} disabled={!tab.sql.trim()} title="Explain this query with AI">
               <BookOpen size={11} /> Explain
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => (tab.showPlan ? onChange({ showPlan: false }) : explainPlan())}
+              disabled={!tab.sql.trim()}
+              title="Show the query plan (EXPLAIN)"
+              className={cx(tab.showPlan && "bg-selected text-fg")}
+            >
+              <GanttChart size={11} /> Plan
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setSaveDlg({ name: tab.snippetId ? tab.title : "", global: false })}
+              disabled={!tab.sql.trim()}
+              title="Save this query"
+            >
+              <Bookmark size={11} className={cx(tab.snippetId && "fill-current text-accent")} /> Save
             </Button>
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
             <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
@@ -271,6 +323,15 @@ export function Workspace({
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
           <Structure tab={tab} />
+        ) : tab.kind === "query" && tab.showPlan ? (
+          <PlanView
+            plan={tab.plan}
+            loading={tab.planLoading}
+            error={tab.planError}
+            canAnalyze={canAnalyze}
+            analyze={analyze}
+            onAnalyze={(v) => (setAnalyze(v), explainPlan(v))}
+          />
         ) : tab.error ? (
           <div className="selectable m-3 flex gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-xs text-danger">
             <AlertCircle size={14} className="mt-px shrink-0" />
@@ -293,6 +354,36 @@ export function Workspace({
         )}
         {tab.running && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-accent" />}
       </div>
+
+      <Modal
+        open={!!saveDlg}
+        onClose={() => setSaveDlg(null)}
+        width={420}
+        title={tab.snippetId ? "Update saved query" : "Save query"}
+        footer={
+          <>
+            <span className="flex-1" />
+            <Button onClick={() => setSaveDlg(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveSnippet} disabled={!saveDlg?.name.trim()}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        {saveDlg && (
+          <form className="flex flex-col gap-3" onSubmit={(e) => (e.preventDefault(), saveSnippet())}>
+            <Field label="Name">
+              <Input autoFocus value={saveDlg.name} placeholder="e.g. Revenue by month" onChange={(e) => setSaveDlg({ ...saveDlg, name: e.target.value })} />
+            </Field>
+            <Switch
+              checked={saveDlg.global}
+              onChange={(g) => setSaveDlg({ ...saveDlg, global: g })}
+              label={<span className="text-xs">Show for all connections</span>}
+            />
+            <pre className="max-h-32 overflow-auto rounded-md bg-panel p-2 font-mono text-[11px] text-muted">{tab.sql}</pre>
+          </form>
+        )}
+      </Modal>
 
       <Modal
         open={!!review}

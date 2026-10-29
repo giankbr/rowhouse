@@ -2,6 +2,7 @@ import { Database, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDestructive } from "./components/ConfirmDestructive";
+import { CompareView } from "./components/CompareView";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { ErdView } from "./components/ErdView";
 import { ImportDialog } from "./components/ImportDialog";
@@ -14,7 +15,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, ENVIRONMENTS, type ConnectionConfig, type Destructive, type TableInfo } from "./lib/api";
+import { api, ENVIRONMENTS, type ConnectionConfig, type Destructive, type Snippet, type TableInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 
 export default function App() {
@@ -140,7 +141,7 @@ export default function App() {
 
   const execTab = useCallback(
     async (t: Tab, sqlOverride?: string) => {
-      patchTab(t.id, { running: true, error: undefined });
+      patchTab(t.id, { running: true, error: undefined, showPlan: false });
       try {
         const output = await api.runQuery(t.connId, sqlOverride ?? t.sql);
         setConnected((c) => ({ ...c, [t.connId]: true }));
@@ -196,11 +197,36 @@ export default function App() {
   }, [activeConn, tabs, addTab, selectTab]);
 
   const pickHistory = useCallback(
-    (sql: string) => {
+    (sql: string, snippet?: Snippet) => {
+      if (snippet) {
+        if (!activeConn) return;
+        const open = tabs.find((t) => t.snippetId === snippet.id && t.connId === activeConn);
+        if (open) return selectTab(open.id);
+        return addTab({ id: uid(), kind: "query", title: snippet.name, connId: activeConn, sql, snippetId: snippet.id });
+      }
       if (tab?.kind === "query") patchTab(tab.id, { sql });
       else newQuery(sql);
     },
-    [tab, patchTab, newQuery],
+    [tab, patchTab, newQuery, activeConn, tabs, selectTab, addTab],
+  );
+
+  const openCompare = useCallback(() => {
+    if (!activeConn) return;
+    const existing = tabs.find((t) => t.kind === "compare" && t.connId === activeConn);
+    if (existing) return selectTab(existing.id);
+    addTab({ id: uid(), kind: "compare", title: "Compare", connId: activeConn, sql: "" });
+  }, [activeConn, tabs, addTab, selectTab]);
+
+  /** Open SQL in a new query tab on (possibly another) connection. */
+  const openSqlOn = useCallback(
+    (connId: string, sql: string) => {
+      setActiveConn(connId);
+      if (!tables[connId]?.length) loadTables(connId);
+      const t: Tab = { id: uid(), kind: "query", title: "Migration", connId, sql, pane: focused };
+      setTabs((ts) => [...ts, t]);
+      setActiveByPane((a) => (focused === 0 ? [t.id, a[1]] : [a[0], t.id]));
+    },
+    [tables, loadTables, focused],
   );
 
   const openTable = useCallback(
@@ -308,7 +334,9 @@ export default function App() {
           onDragState={setDraggingTab}
         />
         {t ? (
-          t.kind === "erd" ? (
+          t.kind === "compare" ? (
+            <CompareView key={t.id} connections={connections} currentId={t.connId} onOpenSql={openSqlOn} onToast={setToast} />
+          ) : t.kind === "erd" ? (
             <ErdView
               key={t.id}
               connId={t.connId}
@@ -385,6 +413,7 @@ export default function App() {
               onRefresh={() => activeConn && loadTables(activeConn)}
               onImport={() => setImportOpen(true)}
               onErd={openErd}
+              onCompare={openCompare}
             />
           </div>
         </div>
@@ -482,6 +511,7 @@ export default function App() {
         actions={{
           newQuery: () => newQuery(),
           openErd,
+          openCompare,
           importConnections: () => setImportOpen(true),
           splitRight,
           showHistory: () => setHistoryOpen(true),

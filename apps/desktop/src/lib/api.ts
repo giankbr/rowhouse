@@ -179,6 +179,46 @@ export interface ImportCandidate {
   skippedReason: string | null;
 }
 
+export interface Snippet {
+  id: number;
+  name: string;
+  sql: string;
+  connectionId: string | null;
+  updatedAt: number;
+}
+
+export interface PlanNode {
+  label: string;
+  detail: string | null;
+  cost: number | null;
+  rows: number | null;
+  actual_ms: number | null;
+  actual_rows: number | null;
+  loops: number | null;
+  warnings: string[];
+  children: PlanNode[];
+}
+export interface Plan {
+  nodes: PlanNode[];
+  raw: string;
+  analyzed: boolean;
+  execution_ms: number | null;
+  planning_ms: number | null;
+}
+
+export type SchemaChange =
+  | { kind: "tableAdded"; table: string; columns: ColumnInfo[] }
+  | { kind: "tableRemoved"; table: string }
+  | { kind: "columnAdded"; table: string; column: ColumnInfo }
+  | { kind: "columnRemoved"; table: string; column: string }
+  | { kind: "columnChanged"; table: string; column: string; from: ColumnInfo; to: ColumnInfo; aspects: string[] };
+export interface SchemaDiff {
+  changes: SchemaChange[];
+  identical: string[];
+  sql: string;
+  crossDialect: boolean;
+}
+
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -224,6 +264,12 @@ export const api = {
   clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
   writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
+  listSnippets: (id?: string, search?: string) => call<Snippet[]>("list_snippets", { id, search }),
+  saveSnippet: (snippet: Snippet) => call<Snippet>("save_snippet", { snippet }),
+  deleteSnippet: (snippetId: number) => call<void>("delete_snippet", { snippetId }),
+  explainPlan: (id: string, sql: string, analyze: boolean) => call<Plan>("explain_plan", { id, sql, analyze }),
+  compareSchema: (sourceId: string, sourceSchema: string, targetId: string, targetSchema: string) =>
+    call<SchemaDiff>("compare_schema", { sourceId, sourceSchema, targetId, targetSchema }),
   checkDestructive: (sql: string) => call<Destructive[]>("check_destructive", { sql }),
   erd: (id: string, schema?: string) => call<Erd>("erd", { id, schema }),
   importDetect: () => call<{ source: ImportSource; path: string }[]>("import_detect"),
@@ -336,6 +382,11 @@ const mockCols: ColumnInfo[] = [
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let mockSnippets: Snippet[] = [
+  { id: 1, name: "Revenue by month", sql: "SELECT date_trunc('month', created_at) AS month, sum(total)\nFROM orders WHERE status = 'paid'\nGROUP BY 1 ORDER BY 1;", connectionId: "local-pg", updatedAt: Math.floor(Date.now() / 1000) - 3600 },
+  { id: 2, name: "Table sizes", sql: "SELECT relname, pg_size_pretty(pg_total_relation_size(relid))\nFROM pg_catalog.pg_statio_user_tables ORDER BY 2 DESC;", connectionId: null, updatedAt: Math.floor(Date.now() / 1000) - 86400 },
+];
 
 const mockAi: { settings: AiSettings; hasKey: boolean } = {
   settings: { enabled: true, provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-mock" },
@@ -452,6 +503,75 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
         explanation:
           "Lists active users with their email, newest signups first. It scans users once; an index on (active, created_at) would avoid a sort on large tables.",
       } satisfies AiAnswer;
+    case "list_snippets": {
+      const q = String(a.search ?? "").toLowerCase();
+      return mockSnippets.filter((x) => (!x.connectionId || x.connectionId === a.id) && (!q || x.name.toLowerCase().includes(q) || x.sql.toLowerCase().includes(q)));
+    }
+    case "save_snippet": {
+      const sn = a.snippet as Snippet;
+      const saved = { ...sn, id: sn.id || Math.max(0, ...mockSnippets.map((x) => x.id)) + 1, updatedAt: Math.floor(Date.now() / 1000) };
+      mockSnippets = [saved, ...mockSnippets.filter((x) => x.id !== saved.id)];
+      return saved;
+    }
+    case "delete_snippet":
+      mockSnippets = mockSnippets.filter((x) => x.id !== a.snippetId);
+      return null;
+    case "explain_plan": {
+      await sleep(250);
+      const an = !!a.analyze;
+      const n = (label: string, detail: string | null, cost: number, rows: number, ms: number, children: PlanNode[] = [], warnings: string[] = []): PlanNode => ({
+        label, detail, cost, rows, actual_ms: an ? ms : null, actual_rows: an ? rows * 0.9 : null, loops: an ? 1 : null, warnings, children,
+      });
+      return {
+        nodes: [
+          n("Limit", null, 1840.2, 10, 48.1, [
+            n("Sort", "sort key: (sum(o.total)) DESC", 1840.1, 1200, 47.9, [
+              n("HashAggregate", "group key: u.id", 1790.4, 1200, 41.2, [
+                n("Hash Join", "hash cond: (o.user_id = u.id)", 1610.0, 48000, 33.5, [
+                  n("Seq Scan", "orders o · filter: (status = 'paid'::text)", 1200.0, 48000, 21.8, [], ["full table scan on a large table — consider an index"]),
+                  n("Hash", null, 32.0, 1200, 1.4, [n("Seq Scan", "users u", 32.0, 1200, 0.6)]),
+                ]),
+              ]),
+            ]),
+          ]),
+        ],
+        raw: '[{"Plan": {"Node Type": "Limit", "…": "…"}}]',
+        analyzed: an,
+        execution_ms: an ? 48.6 : null,
+        planning_ms: an ? 0.4 : null,
+      } satisfies Plan;
+    }
+    case "compare_schema": {
+      await sleep(300);
+      const col = (name: string, t: string, nullable = true, def: string | null = null, pk = false): ColumnInfo => ({ name, data_type: t, nullable, default: def, primary_key: pk });
+      const changes: SchemaChange[] = [
+        { kind: "tableAdded", table: "coupons", columns: [col("id", "bigint", false, null, true), col("code", "varchar(32)", false), col("percent_off", "int")] },
+        { kind: "columnAdded", table: "users", column: col("last_login_at", "timestamptz") },
+        { kind: "columnChanged", table: "users", column: "email", from: col("email", "varchar(64)"), to: col("email", "varchar(120)", false), aspects: ["type", "nullable"] },
+        { kind: "columnChanged", table: "orders", column: "status", from: col("status", "text", true, null), to: col("status", "text", true, "'pending'::text"), aspects: ["default"] },
+        { kind: "columnRemoved", table: "orders", column: "legacy_ref" },
+        { kind: "tableRemoved", table: "tmp_import_2024" },
+      ];
+      return {
+        changes,
+        identical: ["products", "order_items", "invoices", "sessions"],
+        crossDialect: false,
+        sql: `-- Generated by Rowhouse schema compare. Review before running.
+-- Drops are commented out on purpose.
+CREATE TABLE "public"."coupons" (
+  "id" bigint NOT NULL,
+  "code" varchar(32) NOT NULL,
+  "percent_off" int,
+  PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."users" ADD COLUMN "last_login_at" timestamptz;
+ALTER TABLE "public"."users" ALTER COLUMN "email" TYPE varchar(120) USING "email"::varchar(120);
+ALTER TABLE "public"."users" ALTER COLUMN "email" SET NOT NULL;
+ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
+-- ALTER TABLE "public"."orders" DROP COLUMN "legacy_ref";
+-- DROP TABLE "public"."tmp_import_2024";`,
+      } satisfies SchemaDiff;
+    }
     case "write_text_file":
       return null;
     case "check_destructive": {
