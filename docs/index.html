@@ -114,7 +114,7 @@
   .nav-links a.txt:hover, .nav-links a.txt.active { color: var(--fg); background: var(--surface-2); }
   @media (max-width: 720px) { .nav-links a.txt { display: none; } }
 
-  .btn { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; font-family: var(--f-sans); padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); cursor: pointer; transition: border-color .14s, background .14s, transform .08s, box-shadow .14s; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; font-size: 13.5px; font-weight: 500; font-family: var(--f-sans); padding: 0 14px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); cursor: pointer; transition: border-color .14s, background .14s, transform .08s, box-shadow .14s; }
   .btn:hover { border-color: var(--faint); }
   .btn:active { transform: translateY(0.5px); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -122,7 +122,7 @@
   @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .btn.primary { color: #fff; } }
   .btn.primary:hover { filter: brightness(1.06); border-color: var(--accent); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 60%, transparent); }
   .btn svg { display: block; }
-  .theme-btn { padding: 7px; }
+  .theme-btn { width: 34px; padding: 0; }
 
   /* ---------- hero ---------- */
   .hero { padding-block: clamp(44px, 8vw, 84px) 0; }
