@@ -343,6 +343,61 @@ async fn ai_explain(state: State<'_, AppState>, id: String, sql: String) -> CmdR
     AiClient::from_saved()?.explain(&c, &sql).await
 }
 
+// ---- safety, ERD, import ---------------------------------------------------
+
+/// Write a text file chosen by the user in a save dialog (ERD export).
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> CmdResult<()> {
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+/// Statements that need a typed confirmation before they run.
+#[tauri::command]
+fn check_destructive(sql: String) -> Vec<rowhouse_core::guard::Destructive> {
+    rowhouse_core::guard::destructive(&sql)
+}
+
+#[tauri::command]
+async fn erd(
+    state: State<'_, AppState>,
+    id: String,
+    schema: Option<String>,
+) -> CmdResult<rowhouse_core::erd::Erd> {
+    state.conn(&id).await?.erd(schema.as_deref()).await
+}
+
+#[tauri::command]
+fn import_detect() -> Vec<rowhouse_core::import::DetectedFile> {
+    rowhouse_core::import::detect()
+}
+
+#[derive(serde::Serialize)]
+struct ImportPreview {
+    source: rowhouse_core::import::Source,
+    candidates: Vec<rowhouse_core::import::Candidate>,
+}
+
+#[tauri::command]
+fn import_parse(path: String) -> CmdResult<ImportPreview> {
+    let (source, candidates) = rowhouse_core::import::parse_file(std::path::Path::new(&path))?;
+    Ok(ImportPreview { source, candidates })
+}
+
+/// Save the selected imported profiles (fresh ids, no passwords).
+#[tauri::command]
+fn import_save(
+    state: State<'_, AppState>,
+    configs: Vec<ConnectionConfig>,
+) -> CmdResult<Vec<ConnectionConfig>> {
+    let mut saved = Vec::new();
+    for mut c in configs {
+        c.id = ConnectionConfig::new("", c.kind).id;
+        saved.push(state.store.save(c)?);
+    }
+    Ok(saved)
+}
+
 /// Info for the "Connect an AI assistant" panel.
 #[tauri::command]
 fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
@@ -399,6 +454,12 @@ pub fn run() {
             table_sql_all,
             import_csv,
             mcp_info,
+            write_text_file,
+            check_destructive,
+            erd,
+            import_detect,
+            import_parse,
+            import_save,
             ai_get_settings,
             ai_save_settings,
             ai_list_models,

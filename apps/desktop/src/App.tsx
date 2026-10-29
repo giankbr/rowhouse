@@ -1,7 +1,10 @@
 import { Database, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
+import { ConfirmDestructive } from "./components/ConfirmDestructive";
 import { ConnectionDialog } from "./components/ConnectionDialog";
+import { ErdView } from "./components/ErdView";
+import { ImportDialog } from "./components/ImportDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -9,9 +12,9 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
-import { Button, Kbd, cx } from "./components/ui";
+import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, type ConnectionConfig, type TableInfo } from "./lib/api";
+import { api, ENVIRONMENTS, type ConnectionConfig, type Destructive, type TableInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 
 export default function App() {
@@ -21,7 +24,12 @@ export default function App() {
   const [tables, setTables] = useState<Record<string, TableInfo[]>>({});
   const [loadingTables, setLoadingTables] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeTab, setActiveTab] = useState<string | null>(null);
+  // per split pane: last selected tab (falls back to the pane's last tab)
+  const [activeByPane, setActiveByPane] = useState<[string | null, string | null]>([null, null]);
+  const [focusedPane, setFocusedPane] = useState<0 | 1>(0);
+  const [draggingTab, setDraggingTab] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ tab: Tab; sql: string; items: Destructive[] } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -57,7 +65,58 @@ export default function App() {
   const conn = connections.find((c) => c.id === activeConn) ?? null;
   const connTables = (activeConn && tables[activeConn]) || [];
   const visibleTabs = useMemo(() => tabs.filter((t) => t.connId === activeConn), [tabs, activeConn]);
-  const tab = visibleTabs.find((t) => t.id === activeTab) ?? null;
+  const paneTabs = useCallback((p: 0 | 1) => visibleTabs.filter((t) => (t.pane ?? 0) === p), [visibleTabs]);
+  const split = paneTabs(1).length > 0;
+  const focused: 0 | 1 = split ? focusedPane : 0;
+  const activeIn = useCallback(
+    (p: 0 | 1) => {
+      const list = paneTabs(p);
+      return list.find((t) => t.id === activeByPane[p]) ?? list[list.length - 1] ?? null;
+    },
+    [paneTabs, activeByPane],
+  );
+  const tab = activeIn(focused);
+  const activeTab = tab?.id ?? null;
+
+  const selectTab = useCallback(
+    (id: string) => {
+      const t = tabs.find((x) => x.id === id);
+      if (!t) return;
+      const p = (t.pane ?? 0) as 0 | 1;
+      setActiveByPane((a) => (p === 0 ? [id, a[1]] : [a[0], id]));
+      setFocusedPane(p);
+    },
+    [tabs],
+  );
+
+  /** Add a tab to the focused pane and select it. */
+  const addTab = useCallback(
+    (t: Tab) => {
+      const p = focused;
+      setTabs((ts) => [...ts, { ...t, pane: p }]);
+      setActiveByPane((a) => (p === 0 ? [t.id, a[1]] : [a[0], t.id]));
+      setFocusedPane(p);
+    },
+    [focused],
+  );
+
+  /** Drag & drop: move a tab into `pane`, before `beforeId` or at the end. */
+  const moveTab = useCallback((id: string, pane: 0 | 1, beforeId: string | null) => {
+    setTabs((ts) => {
+      const t = ts.find((x) => x.id === id);
+      if (!t) return ts;
+      const rest = ts.filter((x) => x.id !== id);
+      const moved = { ...t, pane };
+      let at = beforeId ? rest.findIndex((x) => x.id === beforeId) : -1;
+      if (at < 0) {
+        const lastInPane = rest.reduce((acc, x, i) => (x.connId === t.connId && (x.pane ?? 0) === pane ? i : acc), -1);
+        at = lastInPane + 1 || rest.length;
+      }
+      return [...rest.slice(0, at), moved, ...rest.slice(at)];
+    });
+    setActiveByPane((a) => (pane === 0 ? [id, a[1]] : [a[0], id]));
+    setFocusedPane(pane);
+  }, []);
 
   const patchTab = useCallback((id: string, patch: Partial<Tab>) => {
     setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -79,7 +138,7 @@ export default function App() {
     }
   }, []);
 
-  const runTab = useCallback(
+  const execTab = useCallback(
     async (t: Tab, sqlOverride?: string) => {
       patchTab(t.id, { running: true, error: undefined });
       try {
@@ -95,28 +154,46 @@ export default function App() {
     [patchTab, loadTables],
   );
 
+  /** Run, but stop for a typed confirmation on DROP / TRUNCATE / unfiltered DELETE & UPDATE. */
+  const runTab = useCallback(
+    async (t: Tab, sqlOverride?: string) => {
+      const sql = sqlOverride ?? t.sql;
+      if (t.kind === "query") {
+        const items = await api.checkDestructive(sql).catch(() => [] as Destructive[]);
+        if (items.length) {
+          // close editor popups (autocomplete) before the modal takes over
+          (document.activeElement as HTMLElement | null)?.blur();
+          return setConfirm({ tab: t, sql, items });
+        }
+      }
+      execTab(t, sqlOverride);
+    },
+    [execTab],
+  );
+
   const selectConnection = useCallback(
     (id: string) => {
       setActiveConn(id);
       if (!tables[id]?.length) loadTables(id);
-      setActiveTab((cur) => {
-        const mine = tabs.filter((t) => t.connId === id);
-        return mine.find((t) => t.id === cur)?.id ?? mine[mine.length - 1]?.id ?? null;
-      });
     },
-    [tables, tabs, loadTables],
+    [tables, loadTables],
   );
 
   const newQuery = useCallback(
     (sql = "SELECT 1;") => {
       if (!activeConn) return;
       const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
-      const t: Tab = { id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql };
-      setTabs((ts) => [...ts, t]);
-      setActiveTab(t.id);
+      addTab({ id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql });
     },
-    [activeConn, tabs],
+    [activeConn, tabs, addTab],
   );
+
+  const openErd = useCallback(() => {
+    if (!activeConn) return;
+    const existing = tabs.find((t) => t.kind === "erd" && t.connId === activeConn);
+    if (existing) return selectTab(existing.id);
+    addTab({ id: uid(), kind: "erd", title: "Diagram", connId: activeConn, sql: "" });
+  }, [activeConn, tabs, addTab, selectTab]);
 
   const pickHistory = useCallback(
     (sql: string) => {
@@ -132,7 +209,7 @@ export default function App() {
       const existing = tabs.find(
         (t) => t.kind === "table" && t.connId === activeConn && t.schema === info.schema && t.table === info.name,
       );
-      if (existing) return setActiveTab(existing.id);
+      if (existing) return selectTab(existing.id);
       const sql = await api.tableSql(activeConn, info.schema, info.name);
       const t: Tab = {
         id: uid(),
@@ -144,8 +221,7 @@ export default function App() {
         table: info.name,
         view: "data",
       };
-      setTabs((ts) => [...ts, t]);
-      setActiveTab(t.id);
+      addTab(t);
       runTab(t);
       // Column metadata (primary key) decides whether the grid is editable.
       api
@@ -153,37 +229,39 @@ export default function App() {
         .then((columns) => patchTab(t.id, { columns }))
         .catch((e) => setToast(String(e)));
     },
-    [activeConn, tabs, runTab, patchTab],
+    [activeConn, tabs, runTab, patchTab, addTab, selectTab, setToast],
   );
 
-  const closeTab = useCallback(
-    (id: string) => {
-      setTabs((ts) => {
-        const i = ts.findIndex((t) => t.id === id);
-        const next = ts.filter((t) => t.id !== id);
-        if (id === activeTab) {
-          const mine = next.filter((t) => t.connId === activeConn);
-          setActiveTab(mine[Math.min(i, mine.length - 1)]?.id ?? null);
-        }
-        return next;
-      });
-    },
-    [activeTab, activeConn],
-  );
+  const closeTab = useCallback((id: string) => {
+    // the pane falls back to its last remaining tab; an empty right pane closes the split
+    setTabs((ts) => ts.filter((t) => t.id !== id));
+  }, []);
+
+  const splitRight = useCallback(() => {
+    const left = paneTabs(0);
+    const cur = activeIn(0);
+    if (cur && left.length > 1) moveTab(cur.id, 1, null);
+    else if (activeConn) {
+      const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
+      const t: Tab = { id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql: "SELECT 1;", pane: 1 };
+      setTabs((ts) => [...ts, t]);
+      setActiveByPane((a) => [a[0], t.id]);
+      setFocusedPane(1);
+    }
+  }, [paneTabs, activeIn, moveTab, activeConn, tabs]);
 
   const setView = useCallback(
-    async (v: "data" | "structure") => {
-      if (!tab) return;
-      patchTab(tab.id, { view: v });
-      if (!tab.columns && tab.schema && tab.table) {
+    async (t: Tab, v: "data" | "structure") => {
+      patchTab(t.id, { view: v });
+      if (!t.columns && t.schema && t.table) {
         try {
-          patchTab(tab.id, { columns: await api.describeTable(tab.connId, tab.schema, tab.table) });
+          patchTab(t.id, { columns: await api.describeTable(t.connId, t.schema, t.table) });
         } catch (e) {
           setToast(String(e));
         }
       }
     },
-    [tab, patchTab],
+    [patchTab, setToast],
   );
 
   // Global shortcuts
@@ -197,13 +275,91 @@ export default function App() {
       else if (k === "w" && activeTab) (e.preventDefault(), closeTab(activeTab));
       else if (k === "b") (e.preventDefault(), setSidebar((s) => !s));
       else if (k === "y") (e.preventDefault(), setHistoryOpen((h) => !h));
+      else if (k === "\\") (e.preventDefault(), splitRight());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newQuery, closeTab, activeTab]);
+  }, [newQuery, closeTab, activeTab, splitRight]);
+
+  const schemas = useMemo(() => [...new Set(connTables.map((t) => t.schema))], [connTables]);
+  const env = conn?.env && conn.env !== "none" ? ENVIRONMENTS.find((e) => e.value === conn.env) : undefined;
+  const frame =
+    conn && (conn.env === "production" || conn.env === "staging")
+      ? (TAG_COLORS[conn.color ?? env?.color ?? "red"] ?? conn.color ?? "#ef4444")
+      : null;
+
+  const renderPane = (p: 0 | 1) => {
+    const t = activeIn(p);
+    const isFocused = focused === p;
+    return (
+      <div
+        className={cx("@container flex min-w-0 flex-1 flex-col", p === 1 && "border-l border-line")}
+        onMouseDownCapture={() => p !== focusedPane && setFocusedPane(p)}
+      >
+        <TabBar
+          tabs={paneTabs(p)}
+          activeId={t?.id ?? null}
+          focused={isFocused && split}
+          onSelect={selectTab}
+          onClose={closeTab}
+          onNew={() => (setFocusedPane(p), newQuery())}
+          onDropTab={(id, before) => moveTab(id, p, before)}
+          onSplit={!split && p === 0 ? splitRight : undefined}
+          onDragState={setDraggingTab}
+        />
+        {t ? (
+          t.kind === "erd" ? (
+            <ErdView
+              key={t.id}
+              connId={t.connId}
+              schemas={schemas}
+              onToast={setToast}
+              onOpenTable={(schema, name) => {
+                const info = connTables.find((x) => x.schema === schema && x.name === name);
+                if (info) openTable(info);
+              }}
+            />
+          ) : (
+            <Workspace
+              key={t.id}
+              tab={t}
+              conn={conn ?? undefined}
+              tables={connTables}
+              active={isFocused}
+              onChange={(patch) => patchTab(t.id, patch)}
+              onRun={(sql) => runTab(t, sql)}
+              onView={(v) => setView(t, v)}
+              onToast={setToast}
+              onHistory={() => setHistoryOpen((h) => !h)}
+              aiEnabled={aiEnabled}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          )
+        ) : (
+          <Empty>
+            <p className="text-xs text-muted">Pick a table on the left, start a query, or open the diagram.</p>
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={() => newQuery()}>
+                New query
+              </Button>
+              <Button onClick={openErd}>Diagram</Button>
+            </div>
+            <Shortcuts />
+          </Empty>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex h-full flex-col">
+      {frame && (
+        <div
+          className="pointer-events-none fixed inset-0 z-[60] rounded-[inherit]"
+          style={{ boxShadow: `inset 0 0 0 2px ${frame}` }}
+          title={`${env?.label} connection`}
+        />
+      )}
       <Titlebar
         conn={conn}
         dark={dark}
@@ -227,38 +383,29 @@ export default function App() {
               onNew={() => setDialog({ open: true, edit: null })}
               onOpenTable={openTable}
               onRefresh={() => activeConn && loadTables(activeConn)}
+              onImport={() => setImportOpen(true)}
+              onErd={openErd}
             />
           </div>
         </div>
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="relative flex min-w-0 flex-1">
           {conn ? (
             <>
-              <TabBar tabs={visibleTabs} activeId={tab?.id ?? null} onSelect={setActiveTab} onClose={closeTab} onNew={() => newQuery()} />
-              {tab ? (
-                <Workspace
-                  key={tab.id}
-                  tab={tab}
-                  conn={conn}
-                  tables={connTables}
-                  onChange={(p) => patchTab(tab.id, p)}
-                  onRun={(s) => runTab(tab, s)}
-                  onView={setView}
-                  onToast={setToast}
-                  onHistory={() => setHistoryOpen((h) => !h)}
-                  aiEnabled={aiEnabled}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                />
-              ) : (
-                <Empty>
-                  <p className="text-xs text-muted">Pick a table on the left, or start a query.</p>
-                  <div className="flex gap-2">
-                    <Button variant="primary" onClick={() => newQuery()}>
-                      New query
-                    </Button>
-                  </div>
-                  <Shortcuts />
-                </Empty>
+              {renderPane(0)}
+              {split && renderPane(1)}
+              {draggingTab && !split && paneTabs(0).length > 1 && (
+                <div
+                  className="animate-fade absolute inset-y-0 right-0 z-20 flex w-1/3 items-center justify-center border-2 border-dashed border-accent bg-accent-soft/60 text-xs font-medium text-accent"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    const id = e.dataTransfer.getData("application/x-rowhouse-tab");
+                    setDraggingTab(null);
+                    if (id) moveTab(id, 1, null);
+                  }}
+                >
+                  Drop to split right
+                </div>
               )}
             </>
           ) : (
@@ -270,9 +417,12 @@ export default function App() {
                 <h1 className="text-sm font-semibold">Welcome to Rowhouse</h1>
                 <p className="mt-1 text-xs text-muted">Select a connection or create a new one.</p>
               </div>
-              <Button variant="primary" onClick={() => setDialog({ open: true, edit: null })}>
-                <Plus size={13} /> New connection
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="primary" onClick={() => setDialog({ open: true, edit: null })}>
+                  <Plus size={13} /> New connection
+                </Button>
+                <Button onClick={() => setImportOpen(true)}>Import from DBeaver / TablePlus / Navicat</Button>
+              </div>
               <Shortcuts />
             </Empty>
           )}
@@ -301,6 +451,24 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <ImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={(saved) => {
+          setConnections((cs) => [...cs, ...saved]);
+          setImportOpen(false);
+          setToast(`Imported ${saved.length} connection${saved.length === 1 ? "" : "s"} — enter passwords on first connect`, "ok");
+        }}
+      />
+      <ConfirmDestructive
+        items={confirm?.items ?? null}
+        conn={conn}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          if (confirm) execTab(confirm.tab, confirm.sql);
+          setConfirm(null);
+        }}
+      />
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -313,6 +481,9 @@ export default function App() {
         tables={connTables}
         actions={{
           newQuery: () => newQuery(),
+          openErd,
+          importConnections: () => setImportOpen(true),
+          splitRight,
           showHistory: () => setHistoryOpen(true),
           showSettings: () => setSettingsOpen(true),
           newConnection: () => setDialog({ open: true, edit: null }),
@@ -349,6 +520,7 @@ function Shortcuts() {
     ["Toggle sidebar", [mod, "B"]],
     ["Query history", [mod, "Y"]],
     ["Ask AI", [mod, "I"]],
+    ["Split right", [mod, "\\"]],
   ];
   return (
     <div className="mt-2 grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-2xs text-muted">

@@ -3,7 +3,9 @@ import type { Pending } from "./pending";
 
 export interface Tab {
   id: string;
-  kind: "query" | "table";
+  kind: "query" | "table" | "erd";
+  /** split pane the tab lives in */
+  pane?: 0 | 1;
   title: string;
   connId: string;
   sql: string;

@@ -358,12 +358,12 @@ export function ResultsGrid({
             <Undo2 size={12} /> Revert
           </Button>
           <span className="flex-1" />
-          <span className="hidden items-center gap-1 lg:flex">
+          <span className="hidden items-center gap-1 whitespace-nowrap @3xl:flex">
             Double-click or <Kbd>↵</Kbd> to edit · <Kbd>{mod}</Kbd>
             <Kbd>⌫</Kbd> NULL · <Kbd>{mod}</Kbd>
             <Kbd>S</Kbd> commit
           </span>
-          {countPending(pending) > 0 && <span className="ml-2 text-warning">{countPending(pending)} pending</span>}
+          {countPending(pending) > 0 && <span className="ml-2 whitespace-nowrap text-warning">{countPending(pending)} pending</span>}
         </div>
       )}
     </div>

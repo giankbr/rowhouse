@@ -19,6 +19,7 @@ export function Workspace({
   onHistory,
   aiEnabled,
   onOpenSettings,
+  active = true,
 }: {
   tab: Tab;
   conn: ConnectionConfig | undefined;
@@ -30,6 +31,8 @@ export function Workspace({
   onHistory: () => void;
   aiEnabled: boolean;
   onOpenSettings: () => void;
+  /** focused pane: only it reacts to global shortcuts */
+  active?: boolean;
 }) {
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -117,7 +120,7 @@ export function Workspace({
   };
 
   useEffect(() => {
-    if (tab.kind !== "query") return;
+    if (tab.kind !== "query" || !active) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
         e.preventDefault();
@@ -172,6 +175,7 @@ export function Workspace({
 
   // Mod+S opens the review for pending edits.
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
@@ -180,7 +184,7 @@ export function Workspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pendingCount, review, openReview]);
+  }, [pendingCount, review, openReview, active]);
 
   return (
     <div ref={boxRef} className="flex min-h-0 flex-1 flex-col">
@@ -324,7 +328,7 @@ export function Workspace({
 }
 
 function Toolbar({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-2">{children}</div>;
+  return <div className="flex h-9 shrink-0 items-center gap-2 overflow-x-auto border-b border-line px-2 whitespace-nowrap">{children}</div>;
 }
 
 function ResultSwitcher({ count, idx, onPick }: { count: number; idx: number; onPick: (i: number) => void }) {

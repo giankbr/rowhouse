@@ -1,6 +1,6 @@
 import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind } from "../lib/api";
+import { api, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
 
@@ -121,6 +121,18 @@ export function ConnectionDialog({
           </div>
         </div>
 
+        <Field label="Environment" hint={c.env === "production" ? "Production starts read-only, gets a red window frame, and asks you to type the table name before DROP / TRUNCATE / unfiltered DELETE." : undefined}>
+          <Segmented
+            value={(c.env ?? "none") as Environment}
+            onChange={(env) => {
+              const e = ENVIRONMENTS.find((x) => x.value === env)!;
+              // production defaults to read-only; the user can still opt in to writes below
+              set({ env, color: c.color ?? e.color, ...(env === "production" ? { readOnly: true } : {}) });
+            }}
+            options={ENVIRONMENTS.map((e) => ({ value: e.value, label: e.label }))}
+          />
+        </Field>
+
         <Field label="Name">
           <Input autoFocus value={c.name} placeholder={defaultName(c)} onChange={(e) => set({ name: e.target.value })} />
         </Field>
@@ -239,7 +251,11 @@ export function ConnectionDialog({
         )}
 
         <div className="flex flex-col gap-2 rounded-lg bg-panel p-3">
-          <Switch checked={c.readOnly} onChange={(v) => set({ readOnly: v })} label="Read-only — block writes from the app" />
+          <Switch
+            checked={c.readOnly}
+            onChange={(v) => set({ readOnly: v })}
+            label={c.env === "production" && !c.readOnly ? "Read-only — OFF: writes to production are allowed" : "Read-only — block writes from the app"}
+          />
           <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v })} label="Expose to AI assistants via MCP (read-only)" />
         </div>
         <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>

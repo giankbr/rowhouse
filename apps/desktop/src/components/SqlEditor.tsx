@@ -1,6 +1,7 @@
 import { sql, PostgreSQL, MySQL, SQLite, MSSQL, StandardSQL, type SQLNamespace } from "@codemirror/lang-sql";
 import { keymap, EditorView } from "@codemirror/view";
 import { Prec } from "@codemirror/state";
+import { closeCompletion } from "@codemirror/autocomplete";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
@@ -67,6 +68,7 @@ export function SqlEditor({
           {
             key: "Mod-Enter",
             run: (view) => {
+              closeCompletion(view);
               const s = view.state.selection.main;
               runRef.current(s.empty ? undefined : view.state.sliceDoc(s.from, s.to));
               return true;

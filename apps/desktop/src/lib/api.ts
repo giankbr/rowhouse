@@ -60,6 +60,16 @@ export interface SshConfig {
   hostKey?: string | null;
 }
 
+export type Environment = "none" | "local" | "development" | "staging" | "production";
+
+export const ENVIRONMENTS: { value: Environment; label: string; color: string | null }[] = [
+  { value: "none", label: "None", color: null },
+  { value: "local", label: "Local", color: "gray" },
+  { value: "development", label: "Dev", color: "blue" },
+  { value: "staging", label: "Staging", color: "orange" },
+  { value: "production", label: "Production", color: "red" },
+];
+
 export interface ConnectionConfig {
   id: string;
   name: string;
@@ -73,6 +83,7 @@ export interface ConnectionConfig {
   mcpEnabled: boolean;
   color?: string | null;
   ssh?: SshConfig | null;
+  env?: Environment;
 }
 
 export interface TableInfo {
@@ -135,6 +146,39 @@ export interface AiAnswer {
   explanation: string;
 }
 
+export interface Destructive {
+  kind: "drop" | "truncate" | "delete-all" | "update-all" | "drop-column";
+  object: string;
+  statement: string;
+}
+
+export interface ErdTable {
+  schema: string;
+  name: string;
+  kind: string;
+  columns: ColumnInfo[];
+}
+export interface ForeignKey {
+  name: string;
+  schema: string;
+  table: string;
+  columns: string[];
+  ref_schema: string;
+  ref_table: string;
+  ref_columns: string[];
+}
+export interface Erd {
+  tables: ErdTable[];
+  foreign_keys: ForeignKey[];
+  truncated: boolean;
+}
+
+export type ImportSource = "dbeaver" | "tableplus" | "navicat";
+export interface ImportCandidate {
+  config: ConnectionConfig;
+  skippedReason: string | null;
+}
+
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -179,6 +223,12 @@ export const api = {
     call<HistoryEntry[]>("list_history", { id, search, limit }),
   clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
+  writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
+  checkDestructive: (sql: string) => call<Destructive[]>("check_destructive", { sql }),
+  erd: (id: string, schema?: string) => call<Erd>("erd", { id, schema }),
+  importDetect: () => call<{ source: ImportSource; path: string }[]>("import_detect"),
+  importParse: (path: string) => call<{ source: ImportSource; candidates: ImportCandidate[] }>("import_parse", { path }),
+  importSave: (configs: ConnectionConfig[]) => call<ConnectionConfig[]>("import_save", { configs }),
   ai: {
     getSettings: () => call<{ settings: AiSettings; hasKey: boolean }>("ai_get_settings"),
     saveSettings: (settings: AiSettings, apiKey?: string) => call<void>("ai_save_settings", { settings, apiKey }),
@@ -199,6 +249,12 @@ export const dialogs = {
     if (!isTauri) return `/mock/${defaultName}`;
     const { save } = await import("@tauri-apps/plugin-dialog");
     return save({ defaultPath: defaultName, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
+  },
+  async openAny(name: string, extensions: string[]): Promise<string | null> {
+    if (!isTauri) return "/mock/connections.ncx";
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const r = await open({ multiple: false, directory: false, filters: [{ name, extensions }] });
+    return typeof r === "string" ? r : null;
   },
   async openCsv(): Promise<string | null> {
     if (!isTauri) return "/mock/import.csv";
@@ -223,6 +279,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
     mcpEnabled: true,
     color: null,
     ssh: null,
+    env: "none",
   };
 }
 
@@ -232,7 +289,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
 
 const mockConns: ConnectionConfig[] = [
   { ...newConnection("postgres"), id: "local-pg", name: "Local Postgres", database: "app_dev", color: "green" },
-  { ...newConnection("mysql"), id: "prod-my", name: "Production MySQL", host: "db.internal", database: "shop", readOnly: true, color: "red" },
+  { ...newConnection("mysql"), id: "prod-my", name: "Production MySQL", host: "db.internal", database: "shop", readOnly: true, color: "red", env: "production" },
   { ...newConnection("sqlite"), id: "lite", name: "analytics.db", file: "~/data/analytics.db" },
   { ...newConnection("clickhouse"), id: "ch", name: "Events (ClickHouse)", database: "events", color: "yellow" },
 ];
@@ -289,7 +346,7 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
   await sleep(cmd === "run_query" ? 180 : 60);
   switch (cmd) {
     case "list_connections":
-      return mockConns;
+      return [...mockConns];
     case "save_connection": {
       const c = a.config as ConnectionConfig;
       const i = mockConns.findIndex((x) => x.id === c.id);
@@ -395,6 +452,64 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
         explanation:
           "Lists active users with their email, newest signups first. It scans users once; an index on (active, created_at) would avoid a sort on large tables.",
       } satisfies AiAnswer;
+    case "write_text_file":
+      return null;
+    case "check_destructive": {
+      const out: Destructive[] = [];
+      for (const st of String(a.sql).split(";").map((x) => x.trim()).filter(Boolean)) {
+        const m =
+          /^drop\s+\w+\s+(?:if\s+exists\s+)?([\w."]+)/i.exec(st) ??
+          /^truncate\s+(?:table\s+)?([\w."]+)/i.exec(st);
+        if (m) out.push({ kind: /^drop/i.test(st) ? "drop" : "truncate", object: m[1].replace(/"/g, ""), statement: st });
+        const d = /^delete\s+from\s+([\w."]+)/i.exec(st);
+        if (d && !/\bwhere\b/i.test(st)) out.push({ kind: "delete-all", object: d[1].replace(/"/g, ""), statement: st });
+        const u = /^update\s+([\w."]+)/i.exec(st);
+        if (u && !/\bwhere\b/i.test(st)) out.push({ kind: "update-all", object: u[1].replace(/"/g, ""), statement: st });
+      }
+      return out;
+    }
+    case "erd": {
+      const col = (name: string, t: string, pk = false, nullable = true): ColumnInfo => ({ name, data_type: t, primary_key: pk, nullable, default: null });
+      const tables: ErdTable[] = [
+        { schema: "public", name: "users", kind: "table", columns: [col("id", "bigint", true, false), col("full_name", "text"), col("email", "citext", false, false), col("team_id", "bigint"), col("created_at", "timestamptz")] },
+        { schema: "public", name: "teams", kind: "table", columns: [col("id", "bigint", true, false), col("name", "text"), col("plan_id", "int")] },
+        { schema: "public", name: "orders", kind: "table", columns: [col("id", "bigint", true, false), col("user_id", "bigint", false, false), col("status", "text"), col("total", "numeric(12,2)"), col("created_at", "timestamptz")] },
+        { schema: "public", name: "order_items", kind: "table", columns: [col("order_id", "bigint", true, false), col("product_id", "bigint", true, false), col("qty", "int"), col("price", "numeric(12,2)")] },
+        { schema: "public", name: "products", kind: "table", columns: [col("id", "bigint", true, false), col("sku", "text"), col("name", "text"), col("price", "numeric(12,2)")] },
+        { schema: "public", name: "invoices", kind: "table", columns: [col("id", "bigint", true, false), col("order_id", "bigint"), col("due_at", "date"), col("paid", "boolean")] },
+        { schema: "public", name: "sessions", kind: "table", columns: [col("id", "uuid", true, false), col("user_id", "bigint"), col("expires_at", "timestamptz")] },
+        { schema: "public", name: "audit_log", kind: "table", columns: [col("id", "bigint", true, false), col("actor_id", "bigint"), col("action", "text"), col("at", "timestamptz")] },
+        { schema: "billing", name: "plans", kind: "table", columns: [col("id", "int", true, false), col("name", "text"), col("price", "numeric")] },
+      ];
+      const fk = (table: string, c: string, ref_table: string, rs = "public", s = "public"): ForeignKey => ({ name: `${table}_${c}_fkey`, schema: s, table, columns: [c], ref_schema: rs, ref_table, ref_columns: ["id"] });
+      return {
+        tables,
+        foreign_keys: [
+          fk("users", "team_id", "teams"), fk("orders", "user_id", "users"), fk("order_items", "order_id", "orders"),
+          fk("order_items", "product_id", "products"), fk("invoices", "order_id", "orders"), fk("sessions", "user_id", "users"),
+          fk("audit_log", "actor_id", "users"), fk("teams", "plan_id", "plans", "billing"),
+        ],
+        truncated: false,
+      } satisfies Erd;
+    }
+    case "import_detect":
+      return [{ source: "tableplus", path: "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist" }];
+    case "import_parse":
+      return {
+        source: "navicat",
+        candidates: [
+          { config: { ...newConnection("postgres"), name: "Main PG", host: "pg.internal", port: 5433, database: "main", env: "production", readOnly: true }, skippedReason: null },
+          { config: { ...newConnection("mariadb"), name: "Legacy shop", host: "10.0.0.7", database: "shop", ssh: { host: "bastion", port: 22, user: "ops", auth: "key", keyPath: "~/.ssh/id_rsa" } }, skippedReason: null },
+          { config: { ...newConnection("sqlite"), name: "Notes", file: "/Users/me/notes.db" }, skippedReason: null },
+          { config: { ...newConnection("postgres"), name: "Mongo cluster" }, skippedReason: "MONGODB is not supported yet" },
+        ],
+      };
+    case "import_save": {
+      const cs = a.configs as ConnectionConfig[];
+      const saved = cs.map((c) => ({ ...c, id: crypto.randomUUID() }));
+      mockConns.push(...saved);
+      return saved;
+    }
     case "mcp_info":
       return {
         command: "/Applications/Rowhouse.app/Contents/MacOS/rowhouse-mcp",

@@ -1,4 +1,4 @@
-import { ChevronRight, Database, Eye, Lock, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
+import { ChevronRight, Database, Eye, FileInput, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { KindBadge } from "./KindBadge";
@@ -15,6 +15,8 @@ export function Sidebar({
   onNew,
   onOpenTable,
   onRefresh,
+  onImport,
+  onErd,
 }: {
   connections: ConnectionConfig[];
   activeId: string | null;
@@ -25,6 +27,8 @@ export function Sidebar({
   onNew: () => void;
   onOpenTable: (t: TableInfo) => void;
   onRefresh: () => void;
+  onImport: () => void;
+  onErd: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -43,9 +47,14 @@ export function Sidebar({
     <aside className="flex h-full w-full flex-col bg-panel">
       <div className="flex h-8 items-center justify-between pr-1.5 pl-3">
         <span className="text-2xs font-semibold tracking-wide text-subtle uppercase">Connections</span>
-        <Button variant="ghost" size="icon" onClick={onNew} title="New connection">
-          <Plus size={14} />
-        </Button>
+        <span className="flex">
+          <Button variant="ghost" size="icon" onClick={onImport} title="Import from DBeaver / TablePlus / Navicat">
+            <FileInput size={13} />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={onNew} title="New connection">
+            <Plus size={14} />
+          </Button>
+        </span>
       </div>
 
       <div className="flex flex-col gap-px px-1.5">
@@ -99,6 +108,9 @@ export function Sidebar({
                 className="h-6 w-full rounded-md bg-transparent pr-2 pl-6.5 text-xs outline-none placeholder:text-subtle hover:bg-hover focus:bg-elevated focus:ring-1 focus:ring-line-strong"
               />
             </div>
+            <Button variant="ghost" size="icon" onClick={onErd} title="Diagram (ERD)">
+              <Network size={12} />
+            </Button>
             <Button variant="ghost" size="icon" onClick={onRefresh} title="Refresh">
               <RefreshCw size={12} className={cx(loadingTables && "animate-spin")} />
             </Button>

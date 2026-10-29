@@ -18,6 +18,10 @@ assistants can explore your databases safely.
 - SSH tunnels: private key (incl. encrypted), SSH agent (incl. 1Password / Pageant / Windows OpenSSH), or password; host key checked against `~/.ssh/known_hosts`, otherwise pinned on first connect
 - Export query/table results to CSV, JSON or SQL INSERTs (streamed, no row limit); import CSV into a table in one transaction
 - AI, bring your own model (opt-in): **Ask AI** (`⌘/Ctrl+I`) turns a sentence into SQL, **Fix with AI** on errors, **Explain** — proposals are shown as a diff and only applied when you accept. Works with OpenAI-compatible APIs (OpenAI, OpenRouter, Ollama, LM Studio, …) and Anthropic. Only the schema (names/types) and your SQL are sent — never rows
+- Production safety: tag connections Local / Dev / Staging / Production — production starts read-only, gets a red window frame, and every DROP / TRUNCATE / DELETE or UPDATE without WHERE asks you to type the table name first
+- ER diagram (`Diagram` in the sidebar): built from foreign keys, pan / zoom / drag, click to focus a table's relations, double-click to open it, export SVG
+- Split panes (`⌘/Ctrl+\\`) and drag-and-drop tabs between them
+- Import connections from DBeaver, TablePlus and Navicat (auto-detects their files; passwords are re-entered once)
 - Query history (`⌘/Ctrl+Y`) shared with the MCP server — every query an AI assistant runs shows up, tagged “AI”
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
@@ -135,7 +139,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [ ] MongoDB, Redis, LibSQL/Turso, D1, Cassandra drivers
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [ ] AI: streaming responses, inline completions in the editor
-- [ ] Split panes, ERD, query plan viewer, schema/data compare
+- [x] Production safety rails, ERD, split panes, connection import
+- [ ] Query plan viewer, schema/data compare, saved snippets
 - [ ] ERD view, table structure editor
 - [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [ ] Auto-update, code signing (macOS notarization, Windows signing)

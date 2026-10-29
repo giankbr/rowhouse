@@ -1,5 +1,5 @@
 import { Bot, Command, Moon, PanelLeft, Settings, Sun } from "lucide-react";
-import { kindInfo, type ConnectionConfig } from "../lib/api";
+import { ENVIRONMENTS, kindInfo, type ConnectionConfig } from "../lib/api";
 import { isMac, mod } from "../lib/types";
 import { Button, Dot, Kbd, cx } from "./ui";
 
@@ -39,6 +39,16 @@ export function Titlebar({
             <span className="truncate text-muted">
               {kindInfo(conn.kind).file ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}${conn.database ? "/" + conn.database : ""}`}
             </span>
+            {conn.env && conn.env !== "none" && (
+              <span
+                className={cx(
+                  "rounded px-1.5 py-px text-[10px] font-semibold uppercase",
+                  conn.env === "production" ? "bg-danger text-white" : conn.env === "staging" ? "bg-warning/20 text-warning" : "bg-hover text-muted",
+                )}
+              >
+                {ENVIRONMENTS.find((e) => e.value === conn.env)?.label}
+              </span>
+            )}
             {conn.readOnly && (
               <span className="rounded bg-warning/15 px-1.5 py-px text-[10px] font-semibold text-warning">READ-ONLY</span>
             )}
