@@ -1,0 +1,3 @@
+# Fast checks only — full test suite runs in CI.
+cargo fmt --all --check || { echo "✖ Run 'cargo fmt --all' and re-stage."; exit 1; }
+pnpm typecheck
