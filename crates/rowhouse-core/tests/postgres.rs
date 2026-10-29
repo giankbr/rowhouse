@@ -50,6 +50,28 @@ async fn pg_types_and_meta() {
     assert!(cols[0].primary_key && cols[0].default.is_some());
     assert_eq!(cols[5].data_type, "_text");
 
+    // grid edits: string literals coerce to numeric / bool / jsonb
+    use rowhouse_core::{ChangeSet, RowUpdate};
+    let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+    let cs = ChangeSet {
+        schema: "public".into(),
+        table: "rowhouse_t".into(),
+        updates: vec![RowUpdate {
+            key: obj(serde_json::json!({"id": 1})),
+            set: obj(serde_json::json!({"ok": "false", "amount": "99.10", "meta": "{\"b\":2}"})),
+        }],
+        inserts: vec![obj(serde_json::json!({"ok": true}))],
+        deletes: vec![],
+    };
+    assert_eq!(c.apply_changes(&cs).await.unwrap(), 2);
+    let out = c
+        .query("SELECT ok, amount, meta FROM rowhouse_t WHERE id = 1", 10)
+        .await
+        .unwrap();
+    assert_eq!(out.results[0].rows[0][0], false);
+    assert_eq!(out.results[0].rows[0][1], "99.10");
+    assert_eq!(out.results[0].rows[0][2]["b"], 2);
+
     // read-only transaction catches what the keyword guard can't see
     assert!(c
         .query_read_only("SELECT nextval('rowhouse_t_id_seq')", 10)

@@ -95,3 +95,67 @@ fn store_roundtrip() {
     store.delete(&cfg.id).unwrap();
     assert!(store.list().unwrap().is_empty());
 }
+
+fn map(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    v.as_object().unwrap().clone()
+}
+
+#[tokio::test]
+async fn apply_changes_roundtrip() {
+    use rowhouse_core::{ChangeSet, RowUpdate};
+    let (_d, c) = setup().await;
+    let cs = ChangeSet {
+        schema: "main".into(),
+        table: "users".into(),
+        updates: vec![RowUpdate {
+            key: map(serde_json::json!({"id": 1})),
+            set: map(serde_json::json!({"name": "ana o'neil", "score": null})),
+        }],
+        inserts: vec![map(serde_json::json!({"name": "dodi", "score": "7.25"}))],
+        deletes: vec![map(serde_json::json!({"id": 2}))],
+    };
+    let sql = c.preview_changes(&cs).unwrap();
+    assert_eq!(
+        sql[0],
+        r#"UPDATE "users" SET "name" = 'ana o''neil', "score" = NULL WHERE "id" = 1"#
+    );
+    assert_eq!(c.apply_changes(&cs).await.unwrap(), 3);
+    let out = c
+        .query("SELECT id, name, score FROM users ORDER BY id", 10)
+        .await
+        .unwrap();
+    let rows = &out.results[0].rows;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0],
+        serde_json::json!([1, "ana o'neil", null])
+            .as_array()
+            .unwrap()
+            .clone()
+    );
+    assert_eq!(rows[1][1], "dodi");
+    assert_eq!(rows[1][2], 7.25);
+}
+
+#[tokio::test]
+async fn apply_changes_rolls_back_on_missing_row() {
+    use rowhouse_core::{ChangeSet, RowUpdate};
+    let (_d, c) = setup().await;
+    let cs = ChangeSet {
+        schema: "main".into(),
+        table: "users".into(),
+        updates: vec![RowUpdate {
+            key: map(serde_json::json!({"id": 1})),
+            set: map(serde_json::json!({"name": "changed"})),
+        }],
+        inserts: vec![],
+        deletes: vec![map(serde_json::json!({"id": 999}))],
+    };
+    let err = c.apply_changes(&cs).await.unwrap_err().to_string();
+    assert!(err.contains("rolled back"), "{err}");
+    let out = c
+        .query("SELECT name FROM users WHERE id = 1", 10)
+        .await
+        .unwrap();
+    assert_eq!(out.results[0].rows[0][0], "ana");
+}

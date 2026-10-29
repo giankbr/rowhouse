@@ -72,7 +72,7 @@ export default function App() {
       try {
         const output = await api.runQuery(t.connId, sqlOverride ?? t.sql);
         setConnected((c) => ({ ...c, [t.connId]: true }));
-        patchTab(t.id, { output, running: false, resultIndex: 0 });
+        patchTab(t.id, { output, running: false, resultIndex: 0, pending: undefined });
         // DDL may have changed the schema.
         if (/^\s*(create|drop|alter)\b/i.test(sqlOverride ?? t.sql)) loadTables(t.connId);
       } catch (e) {
@@ -123,8 +123,13 @@ export default function App() {
       setTabs((ts) => [...ts, t]);
       setActiveTab(t.id);
       runTab(t);
+      // Column metadata (primary key) decides whether the grid is editable.
+      api
+        .describeTable(activeConn, info.schema, info.name)
+        .then((columns) => patchTab(t.id, { columns }))
+        .catch((e) => setToast(String(e)));
     },
-    [activeConn, tabs, runTab],
+    [activeConn, tabs, runTab, patchTab],
   );
 
   const closeTab = useCallback(
@@ -146,7 +151,7 @@ export default function App() {
     async (v: "data" | "structure") => {
       if (!tab) return;
       patchTab(tab.id, { view: v });
-      if (v === "structure" && !tab.columns && tab.schema && tab.table) {
+      if (!tab.columns && tab.schema && tab.table) {
         try {
           patchTab(tab.id, { columns: await api.describeTable(tab.connId, tab.schema, tab.table) });
         } catch (e) {

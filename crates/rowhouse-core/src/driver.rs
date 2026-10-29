@@ -78,6 +78,12 @@ enum Pool {
     Lite(SqlitePool),
 }
 
+pub(crate) enum PoolRef<'a> {
+    Pg(&'a PgPool),
+    My(&'a MySqlPool),
+    Lite(&'a SqlitePool),
+}
+
 pub struct Connection {
     pub config: ConnectionConfig,
     pool: Pool,
@@ -160,6 +166,14 @@ impl Connection {
             config: config.clone(),
             pool,
         })
+    }
+
+    pub(crate) fn pool(&self) -> PoolRef<'_> {
+        match &self.pool {
+            Pool::Pg(p) => PoolRef::Pg(p),
+            Pool::My(p) => PoolRef::My(p),
+            Pool::Lite(p) => PoolRef::Lite(p),
+        }
     }
 
     pub fn kind(&self) -> DbKind {

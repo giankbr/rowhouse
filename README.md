@@ -14,6 +14,7 @@ assistants can explore your databases safely.
 - SQL editor (CodeMirror 6): dialect-aware highlighting, table autocomplete, `⌘/Ctrl+↵` runs the selection or the whole script
 - Multi-statement scripts → multiple result sets
 - Virtualized result grid: sort, resize columns, keyboard navigation, `⌘/Ctrl+C` copies a cell
+- Inline editing for tables with a primary key: edit / NULL / add / delete rows, review the generated SQL, commit atomically (`⌘/Ctrl+S`); every UPDATE/DELETE must hit exactly one row or the transaction rolls back
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
 
@@ -105,7 +106,7 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 
 ## Roadmap
 
-- [ ] Inline cell editing with pending-changes buffer → SQL preview → commit in a transaction
+- [x] Inline cell editing with pending-changes buffer → SQL preview → commit in a transaction
 - [ ] Filters / sort pushed down to SQL, pagination for large tables
 - [ ] SSH tunnel (russh) and TLS options
 - [ ] Import / export (CSV, JSON, SQL dump)

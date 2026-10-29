@@ -1,4 +1,5 @@
 import { Plus, SquareTerminal, Table2, X } from "lucide-react";
+import { countPending } from "../lib/pending";
 import type { Tab } from "../lib/types";
 import { Button, cx } from "./ui";
 
@@ -31,6 +32,7 @@ export function TabBar({
             {t.kind === "table" ? <Table2 size={12} className="shrink-0 text-subtle" /> : <SquareTerminal size={12} className="shrink-0 text-subtle" />}
             <span className="flex-1 truncate">{t.title}</span>
             {t.running && <span className="size-1.5 animate-pulse rounded-full bg-accent" />}
+            {countPending(t.pending) > 0 && <span title="Unsaved changes" className="size-1.5 rounded-full bg-warning" />}
             <button
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => onClose(t.id)}

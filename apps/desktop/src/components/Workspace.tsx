@@ -1,10 +1,11 @@
-import { AlertCircle, KeyRound, Play, RefreshCw } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
-import type { ConnectionConfig, TableInfo } from "../lib/api";
+import { AlertCircle, Check, KeyRound, Lock, Play, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type ConnectionConfig, type TableInfo } from "../lib/api";
+import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
-import { Button, Kbd, Segmented, cx } from "./ui";
+import { Button, Kbd, Modal, Segmented, cx } from "./ui";
 
 export function Workspace({
   tab,
@@ -42,6 +43,48 @@ export function Workspace({
   const idx = Math.min(tab.resultIndex ?? 0, Math.max(0, results.length - 1));
   const result = results[idx];
 
+  // ---- inline editing (table tabs) ----------------------------------------
+  const isTable = tab.kind === "table";
+  const blocker = !isTable ? null : conn?.readOnly ? "Read-only connection" : editBlocker(result, tab.columns);
+  const editable = isTable && !blocker && !tab.running;
+  const pendingCount = countPending(tab.pending);
+  const [review, setReview] = useState<{ sql: string[]; error?: string; busy?: boolean } | null>(null);
+
+  const openReview = useCallback(async () => {
+    if (!result || !tab.columns || !tab.schema || !tab.table || !tab.pending) return;
+    const cs = toChangeSet(tab.pending, result, tab.columns, tab.schema, tab.table);
+    try {
+      setReview({ sql: await api.previewChanges(tab.connId, cs) });
+    } catch (e) {
+      setReview({ sql: [], error: String(e) });
+    }
+  }, [result, tab]);
+
+  const commit = async () => {
+    if (!result || !tab.columns || !tab.schema || !tab.table || !tab.pending || !review) return;
+    setReview({ ...review, busy: true, error: undefined });
+    try {
+      await api.applyChanges(tab.connId, toChangeSet(tab.pending, result, tab.columns, tab.schema, tab.table));
+      setReview(null);
+      onChange({ pending: undefined });
+      onRun();
+    } catch (e) {
+      setReview({ ...review, busy: false, error: String(e) });
+    }
+  };
+
+  // Mod+S opens the review for pending edits.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (pendingCount > 0 && !review) openReview();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pendingCount, review, openReview]);
+
   return (
     <div ref={boxRef} className="flex min-h-0 flex-1 flex-col">
       {tab.kind === "query" ? (
@@ -76,9 +119,28 @@ export function Workspace({
           />
           <span className="truncate font-mono text-2xs text-subtle">{tab.sql}</span>
           <span className="flex-1" />
-          <Button variant="ghost" size="xs" onClick={() => onRun()} disabled={tab.running}>
-            <RefreshCw size={11} className={cx(tab.running && "animate-spin")} /> Refresh
-          </Button>
+          {blocker && blocker !== "loading" && (
+            <span className="flex items-center gap-1 text-2xs whitespace-nowrap text-subtle">
+              <Lock size={11} /> {blocker}
+            </span>
+          )}
+          {pendingCount > 0 ? (
+            <>
+              <span className="text-2xs whitespace-nowrap text-warning">
+                {pendingCount} change{pendingCount === 1 ? "" : "s"}
+              </span>
+              <Button variant="ghost" size="xs" onClick={() => onChange({ pending: undefined })}>
+                Discard
+              </Button>
+              <Button variant="primary" size="xs" onClick={openReview}>
+                <Check size={12} /> Review & commit
+              </Button>
+            </>
+          ) : (
+            <Button variant="ghost" size="xs" onClick={() => onRun()} disabled={tab.running}>
+              <RefreshCw size={11} className={cx(tab.running && "animate-spin")} /> Refresh
+            </Button>
+          )}
         </Toolbar>
       )}
 
@@ -91,7 +153,10 @@ export function Workspace({
             <pre className="whitespace-pre-wrap">{tab.error}</pre>
           </div>
         ) : result ? (
-          <ResultsGrid result={result} />
+          <ResultsGrid
+            result={result}
+            edit={editable ? { pending: tab.pending ?? { edits: {}, deletes: [], inserts: [] }, onChange: (p) => onChange({ pending: p }) } : undefined}
+          />
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-subtle">
             {tab.running ? "Running…" : "Run a query to see results"}
@@ -99,6 +164,36 @@ export function Workspace({
         )}
         {tab.running && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-accent" />}
       </div>
+
+      <Modal
+        open={!!review}
+        onClose={() => !review?.busy && setReview(null)}
+        width={640}
+        title={`Review ${pendingCount} change${pendingCount === 1 ? "" : "s"} · ${tab.table}`}
+        footer={
+          <>
+            <span className="flex-1 text-2xs text-subtle">Runs in one transaction · each UPDATE/DELETE must hit exactly 1 row</span>
+            <Button onClick={() => setReview(null)} disabled={review?.busy}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={commit} disabled={review?.busy || !review?.sql.length}>
+              {review?.busy ? "Committing…" : "Commit"}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2">
+          <pre className="selectable max-h-72 overflow-auto rounded-lg border border-line bg-panel p-3 font-mono text-2xs leading-relaxed whitespace-pre-wrap">
+            {review?.sql.map((s) => s + ";").join("\n")}
+          </pre>
+          {review?.error && (
+            <div className="selectable flex gap-2 rounded-lg border border-danger/30 bg-danger/5 p-2.5 font-mono text-2xs text-danger">
+              <AlertCircle size={13} className="shrink-0" />
+              <pre className="whitespace-pre-wrap">{review.error}</pre>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

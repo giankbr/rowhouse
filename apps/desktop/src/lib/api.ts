@@ -45,6 +45,14 @@ export interface QueryOutput {
   elapsed_ms: number;
 }
 
+export interface ChangeSet {
+  schema: string;
+  table: string;
+  updates: { key: Record<string, Cell>; set: Record<string, Cell> }[];
+  inserts: Record<string, Cell>[];
+  deletes: Record<string, Cell>[];
+}
+
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -77,6 +85,8 @@ export const api = {
     call<string>("table_sql", { id, schema, table, limit }),
   runQuery: (id: string, sql: string, limit?: number) =>
     call<QueryOutput>("run_query", { id, sql, limit }),
+  previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
+  applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
 };
 
@@ -189,6 +199,21 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       }
       if (sql.startsWith("err")) throw 'database error: syntax error at or near "err"';
       return { elapsed_ms: 4, results: [{ columns: [], rows: [], rows_affected: 3, truncated: false }] };
+    }
+    case "preview_changes": {
+      const c = a.changes as ChangeSet;
+      const t = `"${c.schema}"."${c.table}"`;
+      const lit = (v: Cell) => (v === null ? "NULL" : typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : JSON.stringify(v));
+      const where = (k: Record<string, Cell>) => Object.entries(k).map(([n, v]) => `"${n}" = ${lit(v)}`).join(" AND ");
+      return [
+        ...c.updates.map((u) => `UPDATE ${t} SET ${Object.entries(u.set).map(([n, v]) => `"${n}" = ${lit(v)}`).join(", ")} WHERE ${where(u.key)}`),
+        ...c.inserts.map((r) => `INSERT INTO ${t} (${Object.keys(r).map((n) => `"${n}"`).join(", ")}) VALUES (${Object.values(r).map(lit).join(", ")})`),
+        ...c.deletes.map((k) => `DELETE FROM ${t} WHERE ${where(k)}`),
+      ];
+    }
+    case "apply_changes": {
+      const c = a.changes as ChangeSet;
+      return c.updates.length + c.inserts.length + c.deletes.length;
     }
     case "mcp_info":
       return {

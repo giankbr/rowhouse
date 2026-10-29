@@ -4,12 +4,14 @@
 //! * [`driver`]  — one `Connection` type over Postgres / MySQL / SQLite
 //! * [`guard`]   — read-only SQL classifier (used by MCP + read-only profiles)
 
+pub mod changes;
 pub mod config;
 pub mod driver;
 pub mod error;
 pub mod guard;
 pub mod model;
 
+pub use changes::{ChangeSet, RowUpdate};
 pub use config::{ConnectionConfig, ConnectionStore, DbKind};
 pub use driver::Connection;
 pub use error::{Error, Result};

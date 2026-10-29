@@ -3,7 +3,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use rowhouse_core::{
-    ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error, QueryOutput, TableInfo,
+    ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error, QueryOutput,
+    TableInfo,
 };
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
@@ -129,6 +130,24 @@ async fn run_query(
     .await
 }
 
+#[tauri::command]
+async fn preview_changes(
+    state: State<'_, AppState>,
+    id: String,
+    changes: ChangeSet,
+) -> CmdResult<Vec<String>> {
+    state.conn(&id).await?.preview_changes(&changes)
+}
+
+#[tauri::command]
+async fn apply_changes(
+    state: State<'_, AppState>,
+    id: String,
+    changes: ChangeSet,
+) -> CmdResult<u64> {
+    state.conn(&id).await?.apply_changes(&changes).await
+}
+
 /// Info for the "Connect an AI assistant" panel.
 #[tauri::command]
 fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
@@ -172,6 +191,8 @@ pub fn run() {
             describe_table,
             table_sql,
             run_query,
+            preview_changes,
+            apply_changes,
             mcp_info,
         ])
         .run(tauri::generate_context!())
