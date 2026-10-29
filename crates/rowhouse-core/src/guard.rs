@@ -191,6 +191,159 @@ pub fn first_keyword(stmt: &str) -> String {
         .unwrap_or_default()
 }
 
+/// A statement that destroys data or schema and deserves a typed confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Destructive {
+    /// "drop" | "truncate" | "delete-all" | "update-all" | "drop-column"
+    pub kind: String,
+    /// Object name as written (unquoted, may be schema-qualified).
+    pub object: String,
+    pub statement: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Word(String),  // bare word, original case
+    Ident(String), // quoted identifier, unquoted
+    Dot,
+    Other,
+}
+
+fn tokenize(stmt: &str) -> Vec<Tok> {
+    let c: Vec<char> = stmt.chars().collect();
+    let mut i = 0;
+    let mut out = Vec::new();
+    while i < c.len() {
+        let ch = c[i];
+        if ch.is_whitespace() {
+            i += 1;
+        } else if ch == '-' && c.get(i + 1) == Some(&'-') {
+            while i < c.len() && c[i] != '\n' {
+                i += 1;
+            }
+        } else if ch == '/' && c.get(i + 1) == Some(&'*') {
+            i += 2;
+            while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+        } else if ch == '"' || ch == '`' || ch == '[' {
+            let close = if ch == '[' { ']' } else { ch };
+            let mut j = i + 1;
+            let mut s = String::new();
+            while j < c.len() {
+                if c[j] == close {
+                    if c.get(j + 1) == Some(&close) {
+                        s.push(close);
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                s.push(c[j]);
+                j += 1;
+            }
+            out.push(Tok::Ident(s));
+            i = j + 1;
+        } else if ch == '\'' {
+            let mut j = i + 1;
+            while j < c.len() && !(c[j] == '\'' && c.get(j + 1) != Some(&'\'')) {
+                if c[j] == '\'' {
+                    j += 1;
+                }
+                j += 1;
+            }
+            out.push(Tok::Other);
+            i = j + 1;
+        } else if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            let mut j = i;
+            while j < c.len() && (c[j].is_alphanumeric() || c[j] == '_' || c[j] == '$') {
+                j += 1;
+            }
+            out.push(Tok::Word(c[i..j].iter().collect()));
+            i = j;
+        } else {
+            out.push(if ch == '.' { Tok::Dot } else { Tok::Other });
+            i += 1;
+        }
+    }
+    out
+}
+
+fn kw(t: Option<&Tok>, k: &str) -> bool {
+    matches!(t, Some(Tok::Word(w)) if w.eq_ignore_ascii_case(k))
+}
+
+/// Read a (possibly dotted) object name starting at `i`.
+fn object_at(toks: &[Tok], mut i: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    loop {
+        match toks.get(i) {
+            Some(Tok::Word(w)) | Some(Tok::Ident(w)) => parts.push(w.clone()),
+            _ => break,
+        }
+        if toks.get(i + 1) == Some(&Tok::Dot) {
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("."))
+}
+
+fn has_kw(toks: &[Tok], k: &str) -> bool {
+    toks.iter().any(|t| kw(Some(t), k))
+}
+
+/// Find statements that drop / truncate objects, or DELETE / UPDATE without WHERE.
+pub fn destructive(sql: &str) -> Vec<Destructive> {
+    let mut out = Vec::new();
+    for stmt in split_statements(sql) {
+        let t = tokenize(&stmt);
+        let mut push = |kind: &str, object: Option<String>| {
+            out.push(Destructive {
+                kind: kind.into(),
+                object: object.unwrap_or_else(|| "?".into()),
+                statement: stmt.clone(),
+            })
+        };
+        if kw(t.first(), "drop") {
+            // DROP [TEMPORARY] TABLE|VIEW|SCHEMA|DATABASE|INDEX|… [IF EXISTS] name
+            let mut i = 1;
+            while matches!(t.get(i), Some(Tok::Word(w)) if ["temporary", "temp", "materialized", "unlogged"].contains(&w.to_lowercase().as_str()))
+            {
+                i += 1;
+            }
+            i += 1; // object type
+            if kw(t.get(i), "if") && kw(t.get(i + 1), "exists") {
+                i += 2;
+            }
+            push("drop", object_at(&t, i));
+        } else if kw(t.first(), "truncate") {
+            let i = if kw(t.get(1), "table") { 2 } else { 1 };
+            push("truncate", object_at(&t, i));
+        } else if kw(t.first(), "delete") && !has_kw(&t, "where") {
+            let i = if kw(t.get(1), "from") { 2 } else { 1 };
+            push("delete-all", object_at(&t, i));
+        } else if kw(t.first(), "update") && !has_kw(&t, "where") {
+            push("update-all", object_at(&t, 1));
+        } else if kw(t.first(), "alter") && kw(t.get(1), "table") {
+            let mut i = 2;
+            if kw(t.get(i), "if") && kw(t.get(i + 1), "exists") {
+                i += 2;
+            }
+            let obj = object_at(&t, i);
+            let dropping = t.windows(2).any(|w| {
+                kw(Some(&w[0]), "drop") && !kw(Some(&w[1]), "default") && !kw(Some(&w[1]), "not")
+            });
+            if dropping {
+                push("drop-column", obj);
+            }
+        }
+    }
+    out
+}
+
 fn words(stmt: &str) -> impl Iterator<Item = &str> {
     stmt.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|w| !w.is_empty())
@@ -250,6 +403,33 @@ mod tests {
             vec!["select [a;b] from t"]
         );
         assert_eq!(first_keyword("  -- hi\n  SELECT 1"), "select");
+    }
+
+    #[test]
+    fn finds_destructive_statements() {
+        let d = destructive(
+            "select 1; DROP TABLE IF EXISTS \"public\".\"Users\"; truncate orders; \
+             delete from logs; delete from logs where id = 1; UPDATE t SET a = 1; \
+             alter table t drop column c; alter table t alter column c drop default; \
+             DROP SCHEMA app CASCADE; -- drop table nope\n select 'drop table x'",
+        );
+        let got: Vec<(&str, &str)> = d
+            .iter()
+            .map(|x| (x.kind.as_str(), x.object.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("drop", "public.Users"),
+                ("truncate", "orders"),
+                ("delete-all", "logs"),
+                ("update-all", "t"),
+                ("drop-column", "t"),
+                ("drop", "app"),
+            ]
+        );
+        assert!(destructive("update t set a = 'where' ").len() == 1);
+        assert!(destructive("DELETE FROM [dbo].[x] WHERE 1=1").is_empty());
     }
 
     #[test]

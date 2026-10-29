@@ -246,3 +246,37 @@ async fn export_csv_json_sql_and_reimport() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn erd_finds_foreign_keys() {
+    let (_d, c) = setup().await;
+    c.query(
+        "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT);
+         CREATE TABLE members (id INTEGER PRIMARY KEY, team_id INTEGER REFERENCES teams, user_id INTEGER REFERENCES users(id));
+         CREATE TABLE pairs (a INTEGER, b INTEGER, PRIMARY KEY (a, b));
+         CREATE TABLE pair_notes (pa INTEGER, pb INTEGER, note TEXT, FOREIGN KEY (pa, pb) REFERENCES pairs(a, b));",
+        10,
+    )
+    .await
+    .unwrap();
+    let erd = c.erd(None).await.unwrap();
+    assert!(erd
+        .tables
+        .iter()
+        .any(|t| t.name == "members" && t.columns.len() == 3));
+    let fk = |t: &str, rt: &str| {
+        erd.foreign_keys
+            .iter()
+            .find(|f| f.table == t && f.ref_table == rt)
+            .cloned()
+    };
+    let team = fk("members", "teams").unwrap();
+    assert_eq!(
+        (team.columns, team.ref_columns),
+        (vec!["team_id".to_string()], vec!["id".to_string()])
+    );
+    assert_eq!(fk("members", "users").unwrap().ref_columns, vec!["id"]);
+    let pair = fk("pair_notes", "pairs").unwrap();
+    assert_eq!(pair.columns, vec!["pa", "pb"]);
+    assert_eq!(pair.ref_columns, vec!["a", "b"]);
+}

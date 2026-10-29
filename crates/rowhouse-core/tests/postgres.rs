@@ -81,5 +81,26 @@ async fn pg_types_and_meta() {
         .query_read_only("DELETE FROM rowhouse_t", 10)
         .await
         .is_err());
+    c.query(
+        "DROP TABLE IF EXISTS rh_child; CREATE TABLE rh_child (id int PRIMARY KEY, parent_id int REFERENCES rowhouse_t(id))",
+        10,
+    )
+    .await
+    .unwrap();
+    let erd = c.erd(Some("public")).await.unwrap();
+    let fk = erd
+        .foreign_keys
+        .iter()
+        .find(|f| f.table == "rh_child")
+        .unwrap();
+    assert_eq!(
+        (
+            fk.ref_table.as_str(),
+            fk.columns[0].as_str(),
+            fk.ref_columns[0].as_str()
+        ),
+        ("rowhouse_t", "parent_id", "id")
+    );
+    c.query("DROP TABLE rh_child", 10).await.unwrap();
     c.query("DROP TABLE rowhouse_t", 10).await.unwrap();
 }

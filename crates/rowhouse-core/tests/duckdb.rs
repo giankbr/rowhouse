@@ -85,6 +85,28 @@ async fn duckdb_end_to_end() {
         "id,name\n2,two\n3,three\n"
     );
 
+    // foreign keys
+    c.query(
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, t_id INTEGER REFERENCES t(id))",
+        10,
+    )
+    .await
+    .unwrap();
+    let erd = c.erd(None).await.unwrap();
+    let fk = erd
+        .foreign_keys
+        .iter()
+        .find(|f| f.table == "child")
+        .expect("fk");
+    assert_eq!(
+        (
+            fk.ref_table.as_str(),
+            fk.columns.clone(),
+            fk.ref_columns.clone()
+        ),
+        ("t", vec!["t_id".to_string()], vec!["id".to_string()])
+    );
+
     // select sql + quoting
     assert_eq!(
         c.select_table_sql("main", "t", 5),

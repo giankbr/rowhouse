@@ -72,5 +72,17 @@ async fn sqlserver_end_to_end() {
     assert!(c.apply_changes(&bad).await.is_err());
     let out = c.query("SELECT COUNT(*) FROM dbo.rh_t", 10).await.unwrap();
     assert_eq!(out.results[0].rows[0][0], 2);
+    c.query(
+        "CREATE TABLE dbo.rh_c (id INT PRIMARY KEY, t_id INT REFERENCES dbo.rh_t(id))",
+        10,
+    )
+    .await
+    .unwrap();
+    let erd = c.erd(Some("dbo")).await.unwrap();
+    assert!(erd
+        .foreign_keys
+        .iter()
+        .any(|f| f.table == "rh_c" && f.ref_table == "rh_t" && f.columns == ["t_id"]));
+    c.query("DROP TABLE dbo.rh_c", 10).await.unwrap();
     c.query("DROP TABLE dbo.rh_t", 10).await.unwrap();
 }

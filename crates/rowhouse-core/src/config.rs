@@ -121,9 +121,23 @@ pub struct ConnectionConfig {
     /// Tag color shown in the sidebar (e.g. "red" for production).
     #[serde(default)]
     pub color: Option<String>,
+    /// Environment label; `production` turns on the safety rails in the UI.
+    #[serde(default)]
+    pub env: Environment,
     /// Optional SSH tunnel (bastion / jump host).
     #[serde(default)]
     pub ssh: Option<SshConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Environment {
+    #[default]
+    None,
+    Local,
+    Development,
+    Staging,
+    Production,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -176,6 +190,7 @@ impl ConnectionConfig {
             read_only: false,
             mcp_enabled: true,
             color: None,
+            env: Environment::None,
             ssh: None,
         }
     }
