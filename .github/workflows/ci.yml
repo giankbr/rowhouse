@@ -31,16 +31,40 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env: { MYSQL_ROOT_PASSWORD: root, MYSQL_DATABASE: rowhouse }
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -proot" --health-interval 5s --health-timeout 5s --health-retries 20
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env: { ACCEPT_EULA: "Y", MSSQL_SA_PASSWORD: "Rowhouse!Pass1" }
+        ports: ["1433:1433"]
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env: { CLICKHOUSE_USER: rh, CLICKHOUSE_PASSWORD: rh, CLICKHOUSE_DB: default }
+        ports: ["8123:8123"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt }
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo test -p rowhouse-core -p rowhouse-mcp
+      - name: Start CockroachDB
+        run: docker run -d --name crdb -p 26257:26257 cockroachdb/cockroach:latest-v24.3 start-single-node --insecure
+      - name: Wait for SQL Server
+        run: |
+          for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/1433) 2>/dev/null && break; sleep 2; done
+          sleep 10
+      - run: cargo test -p rowhouse-core -p rowhouse-mcp --no-fail-fast
         env:
           ROWHOUSE_TEST_PG: localhost:5432:postgres
           ROWHOUSE_TEST_PG_PASSWORD: postgres
+          ROWHOUSE_TEST_MYSQL: localhost:3306:root:root:rowhouse
+          ROWHOUSE_TEST_MSSQL: localhost:1433:sa:Rowhouse!Pass1
+          ROWHOUSE_TEST_CH: localhost:8123:rh:rh
+          ROWHOUSE_TEST_COCKROACH: localhost:26257:root
 
   desktop:
     strategy:
