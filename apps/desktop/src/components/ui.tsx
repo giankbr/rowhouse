@@ -1,6 +1,6 @@
 // Tiny compact UI kit. Sized for dense desktop tools: 24–28px controls, 12–13px text.
 import clsx from "clsx";
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 
 export const cx = clsx;
 
@@ -148,7 +148,7 @@ export function Modal({
     >
       <div className="animate-pop overflow-hidden rounded-xl bg-elevated shadow-pop" style={{ width }}>
         <div className="flex h-10 items-center border-b border-line px-4 text-sm font-semibold">{title}</div>
-        <div className="p-4">{children}</div>
+        <div className="max-h-[68vh] overflow-y-auto p-4">{children}</div>
         {footer && <div className="flex items-center gap-2 border-t border-line bg-panel/60 px-4 py-2.5">{footer}</div>}
       </div>
     </div>
@@ -171,5 +171,46 @@ export function Dot({ color, className }: { color?: string | null; className?: s
       className={cx("inline-block size-2 shrink-0 rounded-full", className)}
       style={{ background: color ? TAG_COLORS[color] ?? color : "var(--subtle)" }}
     />
+  );
+}
+
+/** Minimal dropdown menu: a trigger button + a popover list. */
+export function Menu({
+  label,
+  items,
+  disabled,
+}: {
+  label: ReactNode;
+  items: { label: ReactNode; hint?: string; onSelect: () => void }[];
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <Button variant="ghost" size="xs" disabled={disabled} onClick={() => setOpen((o) => !o)}>
+        {label}
+      </Button>
+      {open && (
+        <div className="animate-pop absolute top-7 right-0 z-30 min-w-44 rounded-lg bg-elevated p-1 shadow-pop">
+          {items.map((it, i) => (
+            <button
+              key={i}
+              onClick={() => (setOpen(false), it.onSelect())}
+              className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-hover"
+            >
+              {it.label}
+              {it.hint && <span className="ml-auto text-2xs text-subtle">{it.hint}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

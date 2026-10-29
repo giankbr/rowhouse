@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, newConnection, type ConnectionConfig, type DbKind } from "../lib/api";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
@@ -18,6 +18,7 @@ export function ConnectionDialog({
 }) {
   const [c, setC] = useState<ConnectionConfig>(newConnection());
   const [password, setPassword] = useState<string>("");
+  const [sshSecret, setSshSecret] = useState<string>("");
   const [test, setTest] = useState<{ state: "idle" | "busy" | "ok" | "err"; msg?: string }>({ state: "idle" });
   const isNew = !initial;
 
@@ -25,6 +26,7 @@ export function ConnectionDialog({
     if (open) {
       setC(initial ?? newConnection());
       setPassword("");
+      setSshSecret("");
       setTest({ state: "idle" });
     }
   }, [open, initial]);
@@ -36,11 +38,16 @@ export function ConnectionDialog({
   };
   // Empty password field on an existing profile = keep the stored one.
   const pw = password === "" && !isNew ? undefined : password;
+  const sshPw = sshSecret === "" && !isNew ? undefined : sshSecret;
+  const ssh = c.ssh;
+  const setSsh = (patch: Partial<NonNullable<ConnectionConfig["ssh"]>>) =>
+    setC((x) => ({ ...x, ssh: x.ssh ? { ...x.ssh, ...patch } : null }));
 
   const runTest = async () => {
     setTest({ state: "busy" });
     try {
-      await api.testConnection(c, pw);
+      const fp = await api.testConnection(c, pw, sshPw);
+      if (fp && c.ssh && !c.ssh.hostKey) setSsh({ hostKey: fp }); // pin on save
       setTest({ state: "ok", msg: "Connection successful" });
     } catch (e) {
       setTest({ state: "err", msg: String(e) });
@@ -48,7 +55,7 @@ export function ConnectionDialog({
   };
 
   const save = async () => {
-    const saved = await api.saveConnection({ ...c, name: c.name.trim() || defaultName(c) }, pw);
+    const saved = await api.saveConnection({ ...c, name: c.name.trim() || defaultName(c) }, pw, sshPw);
     onSaved(saved);
   };
 
@@ -142,11 +149,76 @@ export function ConnectionDialog({
           </>
         )}
 
+        {c.kind !== "sqlite" && (
+          <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
+            <Switch
+              checked={!!ssh}
+              onChange={(v) =>
+                set({ ssh: v ? { host: "", port: 22, user: "", auth: "key", keyPath: "~/.ssh/id_ed25519", hostKey: null } : null })
+              }
+              label="Connect through SSH tunnel"
+            />
+            {ssh && (
+              <>
+                <div className="grid grid-cols-[1fr_72px_1fr] gap-2">
+                  <Field label="SSH host">
+                    <Input value={ssh.host} placeholder="bastion.example.com" onChange={(e) => setSsh({ host: e.target.value, hostKey: null })} />
+                  </Field>
+                  <Field label="Port">
+                    <Input
+                      value={ssh.port ?? ""}
+                      inputMode="numeric"
+                      onChange={(e) => setSsh({ port: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })}
+                    />
+                  </Field>
+                  <Field label="SSH user">
+                    <Input value={ssh.user} placeholder="ubuntu" onChange={(e) => setSsh({ user: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Segmented
+                    value={ssh.auth}
+                    onChange={(auth) => setSsh({ auth })}
+                    options={[
+                      { value: "key", label: "Private key" },
+                      { value: "password", label: "Password" },
+                    ]}
+                  />
+                </div>
+                <div className={cx("grid gap-2", ssh.auth === "key" ? "grid-cols-2" : "grid-cols-1")}>
+                  {ssh.auth === "key" && (
+                    <Field label="Key file">
+                      <Input value={ssh.keyPath ?? ""} placeholder="~/.ssh/id_ed25519" onChange={(e) => setSsh({ keyPath: e.target.value })} />
+                    </Field>
+                  )}
+                  <Field label={ssh.auth === "key" ? "Passphrase" : "SSH password"}>
+                    <Input
+                      type="password"
+                      value={sshSecret}
+                      placeholder={isNew ? (ssh.auth === "key" ? "if encrypted" : "") : "•••••• (unchanged)"}
+                      onChange={(e) => setSshSecret(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                {ssh.hostKey && (
+                  <div className="flex items-center gap-1.5 text-2xs text-muted">
+                    <ShieldCheck size={12} className="shrink-0 text-success" />
+                    <span className="truncate font-mono">{ssh.hostKey}</span>
+                    <button type="button" className="ml-auto shrink-0 text-subtle hover:text-fg" onClick={() => setSsh({ hostKey: null })}>
+                      Forget
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-2 rounded-lg bg-panel p-3">
           <Switch checked={c.readOnly} onChange={(v) => set({ readOnly: v })} label="Read-only — block writes from the app" />
           <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v })} label="Expose to AI assistants via MCP (read-only)" />
         </div>
-        <p className="text-2xs text-subtle">Passwords are stored in the system keychain, never in plain text.</p>
+        <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>
         <button type="submit" hidden />
       </form>
     </Modal>

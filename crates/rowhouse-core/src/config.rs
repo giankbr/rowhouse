@@ -62,6 +62,35 @@ pub struct ConnectionConfig {
     /// Tag color shown in the sidebar (e.g. "red" for production).
     #[serde(default)]
     pub color: Option<String>,
+    /// Optional SSH tunnel (bastion / jump host).
+    #[serde(default)]
+    pub ssh: Option<SshConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SshAuth {
+    #[default]
+    Key,
+    Password,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfig {
+    pub host: String,
+    #[serde(default)]
+    pub port: Option<u16>,
+    pub user: String,
+    #[serde(default)]
+    pub auth: SshAuth,
+    /// Private key path (for `auth = key`). `~` is expanded.
+    #[serde(default)]
+    pub key_path: Option<String>,
+    /// Pinned server key fingerprint (`SHA256:...`). Filled on first connect
+    /// when the host is not in ~/.ssh/known_hosts (trust on first use).
+    #[serde(default)]
+    pub host_key: Option<String>,
 }
 
 fn yes() -> bool {
@@ -82,6 +111,7 @@ impl ConnectionConfig {
             read_only: false,
             mcp_enabled: true,
             color: None,
+            ssh: None,
         }
     }
 
@@ -97,8 +127,30 @@ impl ConnectionConfig {
         }
     }
 
+    /// SSH password, or the private key's passphrase.
+    pub fn ssh_secret(&self) -> Result<Option<String>> {
+        if self.ssh.is_none() {
+            return Ok(None);
+        }
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &format!("{}:ssh", self.id))?;
+        match entry.get_password() {
+            Ok(p) => Ok(Some(p)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_ssh_secret(&self, secret: Option<&str>) -> Result<()> {
+        Self::store_secret(&format!("{}:ssh", self.id), secret)
+    }
+
     pub fn set_password(&self, password: Option<&str>) -> Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &self.id)?;
+        Self::store_secret(&self.id, password)
+    }
+
+    fn store_secret(account: &str, secret: Option<&str>) -> Result<()> {
+        let entry = keyring::Entry::new(KEYRING_SERVICE, account)?;
+        let password = secret;
         match password {
             Some(p) if !p.is_empty() => entry.set_password(p)?,
             _ => match entry.delete_credential() {

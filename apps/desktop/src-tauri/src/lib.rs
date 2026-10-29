@@ -3,8 +3,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use rowhouse_core::{
-    ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error, QueryOutput,
-    TableInfo,
+    ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error, ExportFormat,
+    ImportOptions, QueryOutput, TableInfo,
 };
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
@@ -22,8 +22,16 @@ impl AppState {
         if let Some(c) = open.get(id) {
             return Ok(c.clone());
         }
-        let cfg = self.store.get(id)?;
-        let c = Arc::new(Connection::connect(&cfg).await?);
+        let mut cfg = self.store.get(id)?;
+        let c = Connection::connect(&cfg).await?;
+        // Trust-on-first-use: pin the SSH host key the first time we see it.
+        if let (Some(ssh), Some(fp)) = (cfg.ssh.as_mut(), c.ssh_host_key()) {
+            if ssh.host_key.is_none() && !fp.is_empty() {
+                ssh.host_key = Some(fp.to_string());
+                self.store.save(cfg)?;
+            }
+        }
+        let c = Arc::new(c);
         open.insert(id.to_string(), c.clone());
         Ok(c)
     }
@@ -45,10 +53,14 @@ async fn save_connection(
     state: State<'_, AppState>,
     config: ConnectionConfig,
     password: Option<String>,
+    ssh_secret: Option<String>,
 ) -> CmdResult<ConnectionConfig> {
-    // `None` = keep existing password, `Some("")` = clear it.
+    // `None` = keep existing secret, `Some("")` = clear it.
     if let Some(p) = password.as_deref() {
         config.set_password(Some(p))?;
+    }
+    if let Some(s) = ssh_secret.as_deref() {
+        config.set_ssh_secret(Some(s))?;
     }
     state.drop_conn(&config.id).await;
     state.store.save(config)
@@ -63,16 +75,21 @@ async fn delete_connection(state: State<'_, AppState>, id: String) -> CmdResult<
     state.store.delete(&id)
 }
 
+/// Returns the SSH host-key fingerprint when tunnelled, so the UI can show / pin it.
 #[tauri::command]
-async fn test_connection(config: ConnectionConfig, password: Option<String>) -> CmdResult<()> {
-    let password = match password {
-        Some(p) => Some(p),
-        None => config.password().ok().flatten(),
-    };
-    let c = Connection::connect_with(&config, password.as_deref()).await?;
+async fn test_connection(
+    config: ConnectionConfig,
+    password: Option<String>,
+    ssh_secret: Option<String>,
+) -> CmdResult<Option<String>> {
+    let password = password.or_else(|| config.password().ok().flatten());
+    let ssh_secret = ssh_secret.or_else(|| config.ssh_secret().ok().flatten());
+    let c = Connection::connect_with_secrets(&config, password.as_deref(), ssh_secret.as_deref())
+        .await?;
     c.ping().await?;
+    let fp = c.ssh_host_key().map(str::to_string);
     c.close().await;
-    Ok(())
+    Ok(fp)
 }
 
 #[tauri::command]
@@ -148,6 +165,53 @@ async fn apply_changes(
     state.conn(&id).await?.apply_changes(&changes).await
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn export_query(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    format: ExportFormat,
+    path: String,
+    schema: Option<String>,
+    table: Option<String>,
+) -> CmdResult<u64> {
+    let c = state.conn(&id).await?;
+    let target = schema.as_deref().zip(table.as_deref());
+    c.export(&sql, format, std::path::Path::new(&path), target)
+        .await
+}
+
+/// `SELECT * FROM table` without a row limit (for full-table export).
+#[tauri::command]
+async fn table_sql_all(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<String> {
+    Ok(state.conn(&id).await?.select_all_sql(&schema, &table))
+}
+
+#[tauri::command]
+async fn import_csv(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    path: String,
+    options: Option<ImportOptions>,
+) -> CmdResult<u64> {
+    let opts = options.unwrap_or(ImportOptions {
+        empty_as_null: true,
+    });
+    state
+        .conn(&id)
+        .await?
+        .import_csv(&schema, &table, std::path::Path::new(&path), &opts)
+        .await
+}
+
 /// Info for the "Connect an AI assistant" panel.
 #[tauri::command]
 fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
@@ -173,6 +237,7 @@ fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(AppState {
                 store: ConnectionStore::open_default(),
@@ -193,6 +258,9 @@ pub fn run() {
             run_query,
             preview_changes,
             apply_changes,
+            export_query,
+            table_sql_all,
+            import_csv,
             mcp_info,
         ])
         .run(tauri::generate_context!())

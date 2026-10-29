@@ -15,6 +15,8 @@ assistants can explore your databases safely.
 - Multi-statement scripts → multiple result sets
 - Virtualized result grid: sort, resize columns, keyboard navigation, `⌘/Ctrl+C` copies a cell
 - Inline editing for tables with a primary key: edit / NULL / add / delete rows, review the generated SQL, commit atomically (`⌘/Ctrl+S`); every UPDATE/DELETE must hit exactly one row or the transaction rolls back
+- SSH tunnels: private key (incl. encrypted) or password; host key checked against `~/.ssh/known_hosts`, otherwise pinned on first connect
+- Export query/table results to CSV, JSON or SQL INSERTs (streamed, no row limit); import CSV into a table in one transaction
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
 
@@ -44,7 +46,12 @@ pnpm test             # cargo test --workspace
 pnpm build            # release MCP binary + installers (.dmg/.app, .msi/.exe)
 ```
 
-Postgres integration test: `ROWHOUSE_TEST_PG=localhost:5432:postgres cargo test -p rowhouse-core --test postgres`
+Integration tests (skipped unless configured):
+
+```bash
+ROWHOUSE_TEST_PG=localhost:5432:postgres cargo test -p rowhouse-core --test postgres
+ROWHOUSE_TEST_PG=localhost:5432:postgres ROWHOUSE_TEST_SSH=127.0.0.1:22:me:~/.ssh/id_ed25519 cargo test -p rowhouse-core --test ssh
+```
 
 ## Contributing
 
@@ -108,8 +115,9 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 
 - [x] Inline cell editing with pending-changes buffer → SQL preview → commit in a transaction
 - [ ] Filters / sort pushed down to SQL, pagination for large tables
-- [ ] SSH tunnel (russh) and TLS options
-- [ ] Import / export (CSV, JSON, SQL dump)
+- [x] SSH tunnel (russh): key / password auth, host-key pinning
+- [ ] TLS options (CA / client certs), SSH agent auth
+- [x] Export (CSV, JSON, SQL INSERTs) and CSV import
 - [ ] Query history & saved queries (local SQLite)
 - [ ] SQL Server, MongoDB, Redis, DuckDB, ClickHouse drivers
 - [ ] ERD view, table structure editor

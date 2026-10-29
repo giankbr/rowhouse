@@ -24,7 +24,11 @@ export default function App() {
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null }>({ open: false, edit: null });
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
+  const setToast = useCallback(
+    (msg: string | null, kind: "ok" | "err" = "err") => setToastState(msg ? { msg, kind } : null),
+    [],
+  );
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
 
   useEffect(() => {
@@ -218,6 +222,7 @@ export default function App() {
                   onChange={(p) => patchTab(tab.id, p)}
                   onRun={(s) => runTab(tab, s)}
                   onView={setView}
+                  onToast={setToast}
                 />
               ) : (
                 <Empty>
@@ -286,8 +291,13 @@ export default function App() {
       />
 
       {toast && (
-        <div className="animate-pop fixed right-4 bottom-9 z-50 max-w-sm rounded-lg bg-elevated px-3 py-2 text-xs text-danger shadow-pop">
-          {toast}
+        <div
+          className={cx(
+            "animate-pop fixed right-4 bottom-9 z-50 max-w-sm rounded-lg bg-elevated px-3 py-2 text-xs shadow-pop",
+            toast.kind === "ok" ? "text-fg" : "text-danger",
+          )}
+        >
+          {toast.msg}
         </div>
       )}
     </div>

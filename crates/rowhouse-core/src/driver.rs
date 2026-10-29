@@ -25,6 +25,44 @@ use crate::{
     guard, ColumnInfo, Error, QueryOutput, QueryResult, Result, ResultColumn, TableInfo,
 };
 
+/// Stream the first result set of `$sql`, calling `$f(&columns, values)` per row.
+/// Evaluates to the number of rows seen.
+macro_rules! for_each_row {
+    ($exec:expr, $sql:expr, $decode:path, $f:expr) => {{
+        use futures_util::TryStreamExt as _;
+        use sqlx::{Column as _, Row as _, TypeInfo as _};
+        let mut stream = sqlx::raw_sql(sqlx::AssertSqlSafe($sql.to_string())).fetch_many($exec);
+        let mut cols: Option<Vec<$crate::ResultColumn>> = None;
+        let mut n = 0u64;
+        while let Some(item) = stream.try_next().await? {
+            match item {
+                sqlx::Either::Left(_) => {
+                    if cols.is_some() {
+                        break;
+                    }
+                }
+                sqlx::Either::Right(row) => {
+                    let c = cols.get_or_insert_with(|| {
+                        row.columns()
+                            .iter()
+                            .map(|c| $crate::ResultColumn {
+                                name: c.name().to_string(),
+                                data_type: c.type_info().name().to_string(),
+                            })
+                            .collect()
+                    });
+                    let vals: Vec<serde_json::Value> =
+                        (0..row.len()).map(|i| $decode(&row, i)).collect();
+                    $f(c, vals)?;
+                    n += 1;
+                }
+            }
+        }
+        n
+    }};
+}
+pub(crate) use for_each_row;
+
 /// Stream a script and fold it into one `QueryResult` per statement.
 macro_rules! run_script {
     ($exec:expr, $sql:expr, $limit:expr, $decode:ident) => {{
@@ -87,24 +125,46 @@ pub(crate) enum PoolRef<'a> {
 pub struct Connection {
     pub config: ConnectionConfig,
     pool: Pool,
+    /// Kept alive for as long as the connection; dropped = tunnel closed.
+    tunnel: Option<crate::tunnel::Tunnel>,
 }
 
 impl Connection {
-    /// Connect using the password stored in the OS keychain.
+    /// Connect using the secrets stored in the OS keychain.
     pub async fn connect(config: &ConnectionConfig) -> Result<Self> {
         let password = config.password()?;
-        Self::connect_with(config, password.as_deref()).await
+        let ssh_secret = config.ssh_secret()?;
+        Self::connect_with_secrets(config, password.as_deref(), ssh_secret.as_deref()).await
     }
 
-    /// Connect with an explicit password (used by "Test connection" before saving).
+    /// Connect with an explicit DB password (no SSH secret).
     pub async fn connect_with(config: &ConnectionConfig, password: Option<&str>) -> Result<Self> {
+        Self::connect_with_secrets(config, password, None).await
+    }
+
+    /// Connect with explicit secrets (used by "Test connection" before saving).
+    pub async fn connect_with_secrets(
+        config: &ConnectionConfig,
+        password: Option<&str>,
+        ssh_secret: Option<&str>,
+    ) -> Result<Self> {
         let timeout = Duration::from_secs(10);
-        let host = config.host.clone().unwrap_or_else(|| "localhost".into());
+        let mut host = config.host.clone().unwrap_or_else(|| "localhost".into());
+        let mut port = config.port.or(config.kind.default_port()).unwrap_or(0);
+        let tunnel = match (&config.ssh, config.kind) {
+            (Some(ssh), DbKind::Postgres | DbKind::Mysql) => {
+                let t = crate::tunnel::Tunnel::open(ssh, ssh_secret, &host, port).await?;
+                host = "127.0.0.1".into();
+                port = t.local_port;
+                Some(t)
+            }
+            _ => None,
+        };
         let pool = match config.kind {
             DbKind::Postgres => {
                 let mut o = PgConnectOptions::new()
                     .host(&host)
-                    .port(config.port.unwrap_or(5432))
+                    .port(port)
                     .application_name("rowhouse");
                 if let Some(u) = &config.user {
                     o = o.username(u);
@@ -124,9 +184,7 @@ impl Connection {
                 )
             }
             DbKind::Mysql => {
-                let mut o = MySqlConnectOptions::new()
-                    .host(&host)
-                    .port(config.port.unwrap_or(3306));
+                let mut o = MySqlConnectOptions::new().host(&host).port(port);
                 if let Some(u) = &config.user {
                     o = o.username(u);
                 }
@@ -165,6 +223,7 @@ impl Connection {
         Ok(Self {
             config: config.clone(),
             pool,
+            tunnel,
         })
     }
 
@@ -174,6 +233,11 @@ impl Connection {
             Pool::My(p) => PoolRef::My(p),
             Pool::Lite(p) => PoolRef::Lite(p),
         }
+    }
+
+    /// Fingerprint of the SSH host key accepted for this connection, if tunnelled.
+    pub fn ssh_host_key(&self) -> Option<&str> {
+        self.tunnel.as_ref().map(|t| t.host_key.as_str())
     }
 
     pub fn kind(&self) -> DbKind {
@@ -348,12 +412,12 @@ impl Connection {
 
     /// `SELECT * FROM <table> LIMIT n` with correct identifier quoting.
     pub fn select_table_sql(&self, schema: &str, table: &str, limit: usize) -> String {
-        let target = if self.kind() == DbKind::Sqlite {
-            self.ident(table)
-        } else {
-            format!("{}.{}", self.ident(schema), self.ident(table))
-        };
-        format!("SELECT * FROM {target} LIMIT {limit}")
+        format!("{} LIMIT {limit}", self.select_all_sql(schema, table))
+    }
+
+    /// `SELECT * FROM <table>` (no limit — for full exports).
+    pub fn select_all_sql(&self, schema: &str, table: &str) -> String {
+        format!("SELECT * FROM {}", self.target(schema, table))
     }
 
     pub fn ident(&self, name: &str) -> String {
@@ -424,7 +488,7 @@ fn num_from_str(s: &str) -> Value {
     }
 }
 
-fn pg_value(row: &PgRow, i: usize) -> Value {
+pub(crate) fn pg_value(row: &PgRow, i: usize) -> Value {
     let Ok(raw) = row.try_get_raw(i) else {
         return Value::Null;
     };
@@ -447,7 +511,7 @@ fn pg_value(row: &PgRow, i: usize) -> Value {
     }
 }
 
-fn my_value(row: &MySqlRow, i: usize) -> Value {
+pub(crate) fn my_value(row: &MySqlRow, i: usize) -> Value {
     let Ok(raw) = row.try_get_raw(i) else {
         return Value::Null;
     };
@@ -479,7 +543,7 @@ fn my_value(row: &MySqlRow, i: usize) -> Value {
     }
 }
 
-fn lite_value(row: &SqliteRow, i: usize) -> Value {
+pub(crate) fn lite_value(row: &SqliteRow, i: usize) -> Value {
     let Ok(raw) = row.try_get_raw(i) else {
         return Value::Null;
     };

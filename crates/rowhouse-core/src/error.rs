@@ -12,6 +12,10 @@ pub enum Error {
     Keyring(#[from] keyring::Error),
     #[error("connection not found: {0}")]
     NotFound(String),
+    #[error("ssh: {0}")]
+    Ssh(String),
+    #[error("csv: {0}")]
+    Csv(#[from] csv::Error),
     #[error("blocked: {0}")]
     ReadOnly(String),
     #[error("{0}")]

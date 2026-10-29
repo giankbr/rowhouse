@@ -159,3 +159,90 @@ async fn apply_changes_rolls_back_on_missing_row() {
         .unwrap();
     assert_eq!(out.results[0].rows[0][0], "ana");
 }
+
+#[tokio::test]
+async fn export_csv_json_sql_and_reimport() {
+    use rowhouse_core::{ExportFormat, ImportOptions};
+    let (d, c) = setup().await;
+    let csv = d.path().join("u.csv");
+    let n = c
+        .export(
+            "SELECT id, name, score FROM users ORDER BY id",
+            ExportFormat::Csv,
+            &csv,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+    assert_eq!(
+        std::fs::read_to_string(&csv).unwrap(),
+        "id,name,score\n1,ana,9.5\n2,budi,\n"
+    );
+
+    let json = d.path().join("u.json");
+    c.export(
+        "SELECT id, name FROM users ORDER BY id",
+        ExportFormat::Json,
+        &json,
+        None,
+    )
+    .await
+    .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+    assert_eq!(v[1]["name"], "budi");
+
+    let sql = d.path().join("u.sql");
+    c.export(
+        "SELECT name FROM users WHERE id = 1",
+        ExportFormat::Sql,
+        &sql,
+        Some(("main", "users")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&sql).unwrap(),
+        "INSERT INTO \"users\" (\"name\") VALUES ('ana');\n"
+    );
+
+    // import: names with quotes, empty → NULL, 1200 rows to cross batch boundaries
+    let imp = d.path().join("imp.csv");
+    let mut body = String::from("name,score\n");
+    body.push_str("\"o'hara, jr\",\n");
+    for i in 0..1199 {
+        body.push_str(&format!("user{i},{i}.5\n"));
+    }
+    std::fs::write(&imp, body).unwrap();
+    assert_eq!(
+        c.import_csv(
+            "main",
+            "users",
+            &imp,
+            &ImportOptions {
+                empty_as_null: true
+            }
+        )
+        .await
+        .unwrap(),
+        1200
+    );
+    let out = c
+        .query(
+            "SELECT count(*), sum(score IS NULL) FROM users; SELECT name FROM users WHERE id = 3",
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.results[0].rows[0][0], 1202);
+    assert_eq!(out.results[0].rows[0][1], 2);
+    assert_eq!(out.results[1].rows[0][0], "o'hara, jr");
+
+    // unknown column → error, nothing inserted
+    std::fs::write(&imp, "nope\nx\n").unwrap();
+    assert!(c
+        .import_csv("main", "users", &imp, &ImportOptions::default())
+        .await
+        .is_err());
+}

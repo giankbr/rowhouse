@@ -3,6 +3,16 @@
 
 export type DbKind = "postgres" | "mysql" | "sqlite";
 
+export interface SshConfig {
+  host: string;
+  port?: number | null;
+  user: string;
+  auth: "key" | "password";
+  keyPath?: string | null;
+  /** pinned SHA256 fingerprint (trust on first use) */
+  hostKey?: string | null;
+}
+
 export interface ConnectionConfig {
   id: string;
   name: string;
@@ -15,6 +25,7 @@ export interface ConnectionConfig {
   readOnly: boolean;
   mcpEnabled: boolean;
   color?: string | null;
+  ssh?: SshConfig | null;
 }
 
 export interface TableInfo {
@@ -71,11 +82,12 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 
 export const api = {
   listConnections: () => call<ConnectionConfig[]>("list_connections"),
-  saveConnection: (config: ConnectionConfig, password?: string) =>
-    call<ConnectionConfig>("save_connection", { config, password }),
+  saveConnection: (config: ConnectionConfig, password?: string, sshSecret?: string) =>
+    call<ConnectionConfig>("save_connection", { config, password, sshSecret }),
   deleteConnection: (id: string) => call<void>("delete_connection", { id }),
-  testConnection: (config: ConnectionConfig, password?: string) =>
-    call<void>("test_connection", { config, password }),
+  /** resolves to the SSH host-key fingerprint when tunnelled */
+  testConnection: (config: ConnectionConfig, password?: string, sshSecret?: string) =>
+    call<string | null>("test_connection", { config, password, sshSecret }),
   connect: (id: string) => call<void>("connect", { id }),
   disconnect: (id: string) => call<void>("disconnect", { id }),
   listTables: (id: string) => call<TableInfo[]>("list_tables", { id }),
@@ -87,7 +99,29 @@ export const api = {
     call<QueryOutput>("run_query", { id, sql, limit }),
   previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
   applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
+  exportQuery: (id: string, sql: string, format: ExportFormat, path: string, schema?: string, table?: string) =>
+    call<number>("export_query", { id, sql, format, path, schema, table }),
+  tableSqlAll: (id: string, schema: string, table: string) => call<string>("table_sql_all", { id, schema, table }),
+  importCsv: (id: string, schema: string, table: string, path: string) =>
+    call<number>("import_csv", { id, schema, table, path }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
+};
+
+export type ExportFormat = "csv" | "json" | "sql";
+
+/** Native save / open dialogs (mocked in the browser). */
+export const dialogs = {
+  async save(defaultName: string, ext: string): Promise<string | null> {
+    if (!isTauri) return `/mock/${defaultName}`;
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    return save({ defaultPath: defaultName, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
+  },
+  async openCsv(): Promise<string | null> {
+    if (!isTauri) return "/mock/import.csv";
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const r = await open({ multiple: false, directory: false, filters: [{ name: "CSV", extensions: ["csv", "tsv", "txt"] }] });
+    return typeof r === "string" ? r : null;
+  },
 };
 
 export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
@@ -103,6 +137,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
     readOnly: false,
     mcpEnabled: true,
     color: null,
+    ssh: null,
   };
 }
 
@@ -215,6 +250,14 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       const c = a.changes as ChangeSet;
       return c.updates.length + c.inserts.length + c.deletes.length;
     }
+    case "test_connection":
+      return (a.config as ConnectionConfig).ssh ? "SHA256:GFCDfRT4H3B+37G+mjBEKq0ZZhRZCUZ7H1027f1NUUU" : null;
+    case "export_query":
+      return 300;
+    case "table_sql_all":
+      return `SELECT * FROM "${a.schema}"."${a.table}"`;
+    case "import_csv":
+      return 1200;
     case "mcp_info":
       return {
         command: "/Applications/Rowhouse.app/Contents/MacOS/rowhouse-mcp",

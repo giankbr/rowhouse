@@ -1,11 +1,11 @@
-import { AlertCircle, Check, KeyRound, Lock, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, Check, Download, KeyRound, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ConnectionConfig, type TableInfo } from "../lib/api";
+import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
-import { Button, Kbd, Modal, Segmented, cx } from "./ui";
+import { Button, Kbd, Menu, Modal, Segmented, cx } from "./ui";
 
 export function Workspace({
   tab,
@@ -14,6 +14,7 @@ export function Workspace({
   onChange,
   onRun,
   onView,
+  onToast,
 }: {
   tab: Tab;
   conn: ConnectionConfig | undefined;
@@ -21,6 +22,7 @@ export function Workspace({
   onChange: (patch: Partial<Tab>) => void;
   onRun: (sql?: string) => void;
   onView: (v: "data" | "structure") => void;
+  onToast: (msg: string, kind?: "ok" | "err") => void;
 }) {
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -73,6 +75,48 @@ export function Workspace({
     }
   };
 
+  // ---- import / export ----------------------------------------------------
+  const exportAs = async (format: ExportFormat) => {
+    const base = isTable ? tab.table! : "query";
+    const path = await dialogs.save(`${base}.${format}`, format);
+    if (!path) return;
+    try {
+      const sql = isTable ? await api.tableSqlAll(tab.connId, tab.schema!, tab.table!) : tab.sql;
+      const n = await api.exportQuery(tab.connId, sql, format, path, tab.schema, tab.table);
+      onToast(`Exported ${n.toLocaleString()} rows → ${path.split(/[\\/]/).pop()}`, "ok");
+    } catch (e) {
+      onToast(String(e));
+    }
+  };
+
+  const importCsv = async () => {
+    const path = await dialogs.openCsv();
+    if (!path || !tab.schema || !tab.table) return;
+    try {
+      const n = await api.importCsv(tab.connId, tab.schema, tab.table, path);
+      onToast(`Imported ${n.toLocaleString()} rows into ${tab.table}`, "ok");
+      onRun();
+    } catch (e) {
+      onToast(String(e));
+    }
+  };
+
+  const exportMenu = (
+    <Menu
+      label={
+        <>
+          <Download size={11} /> Export
+        </>
+      }
+      disabled={tab.running}
+      items={[
+        { label: "CSV", hint: ".csv", onSelect: () => exportAs("csv") },
+        { label: "JSON", hint: ".json", onSelect: () => exportAs("json") },
+        { label: "SQL INSERTs", hint: ".sql", onSelect: () => exportAs("sql") },
+      ]}
+    />
+  );
+
   // Mod+S opens the review for pending edits.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -105,6 +149,7 @@ export function Workspace({
               <span className="ml-1">selection or all</span>
             </span>
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
+            <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
           </Toolbar>
         </>
       ) : (
@@ -137,9 +182,17 @@ export function Workspace({
               </Button>
             </>
           ) : (
-            <Button variant="ghost" size="xs" onClick={() => onRun()} disabled={tab.running}>
-              <RefreshCw size={11} className={cx(tab.running && "animate-spin")} /> Refresh
-            </Button>
+            <>
+              {!conn?.readOnly && (
+                <Button variant="ghost" size="xs" onClick={importCsv} disabled={tab.running}>
+                  <Upload size={11} /> Import
+                </Button>
+              )}
+              {exportMenu}
+              <Button variant="ghost" size="xs" onClick={() => onRun()} disabled={tab.running}>
+                <RefreshCw size={11} className={cx(tab.running && "animate-spin")} /> Refresh
+              </Button>
+            </>
           )}
         </Toolbar>
       )}

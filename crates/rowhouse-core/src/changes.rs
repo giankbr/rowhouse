@@ -40,7 +40,7 @@ enum Kind {
 }
 
 impl Connection {
-    fn target(&self, schema: &str, table: &str) -> String {
+    pub(crate) fn target(&self, schema: &str, table: &str) -> String {
         if self.kind() == DbKind::Sqlite {
             self.ident(table)
         } else {
@@ -49,7 +49,7 @@ impl Connection {
     }
 
     /// JSON value → SQL literal.
-    fn sql_value(&self, v: &Value) -> String {
+    pub(crate) fn sql_value(&self, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
             Value::Bool(b) => match self.kind() {
