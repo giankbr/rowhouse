@@ -1,6 +1,6 @@
-import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, Link2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment } from "../lib/api";
+import { api, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment, type TlsMode } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
 
@@ -28,6 +28,8 @@ export function ConnectionDialog({
       setC(initial ?? newConnection());
       setPassword("");
       setSshSecret("");
+      setUrl("");
+      setUrlError(null);
       setTest({ state: "idle" });
     }
   }, [open, initial]);
@@ -35,9 +37,25 @@ export function ConnectionDialog({
   const set = (patch: Partial<ConnectionConfig>) => setC((x) => ({ ...x, ...patch }));
   const setKind = (kind: DbKind) => {
     const d = newConnection(kind);
-    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null });
+    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null, tls: d.tls ?? c.tls ?? null });
   };
   const info = kindInfo(c.kind);
+  const [url, setUrl] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const applyUrl = async (u: string) => {
+    setUrl(u);
+    if (!u.includes("://")) return setUrlError(null);
+    try {
+      const r = await api.parseConnectionUrl(u);
+      setC((x) => ({ ...r.config, id: x.id, env: x.env, color: x.color, readOnly: x.readOnly, mcpEnabled: x.mcpEnabled }));
+      if (r.password) setPassword(r.password);
+      setUrlError(null);
+    } catch (e) {
+      setUrlError(String(e));
+    }
+  };
+  const tls = c.tls ?? { mode: "prefer" as TlsMode };
+  const setTls = (p: Partial<NonNullable<ConnectionConfig["tls"]>>) => set({ tls: { ...tls, ...p } });
   // Empty password field on an existing profile = keep the stored one.
   const pw = password === "" && !isNew ? undefined : password;
   const sshPw = sshSecret === "" && !isNew ? undefined : sshSecret;
@@ -65,7 +83,7 @@ export function ConnectionDialog({
     <Modal
       open={open}
       onClose={onClose}
-      width={520}
+      width={560}
       title={isNew ? "New connection" : `Edit · ${initial?.name}`}
       footer={
         <>
@@ -86,7 +104,21 @@ export function ConnectionDialog({
       }
     >
       <form className="flex flex-col gap-3" onSubmit={(e) => (e.preventDefault(), save())}>
-        <div className="grid grid-cols-6 gap-1">
+        {isNew && (
+          <div className="flex flex-col gap-1">
+            <div className="relative">
+              <Link2 size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-subtle" />
+              <Input
+                value={url}
+                onChange={(e) => applyUrl(e.target.value)}
+                placeholder="Paste a connection URL — postgresql://user:pass@host/db (Neon, Supabase, …)"
+                className="pl-7 font-mono"
+              />
+            </div>
+            {urlError && <span className="text-2xs text-danger">{urlError}</span>}
+          </div>
+        )}
+        <div className="grid grid-cols-7 gap-1">
           {KINDS.map((k) => (
             <button
               type="button"
@@ -176,6 +208,41 @@ export function ConnectionDialog({
               <Input value={c.database ?? ""} placeholder="optional" onChange={(e) => set({ database: e.target.value || null })} />
             </Field>
           </>
+        )}
+
+        {!info.file && (
+          <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs">TLS / SSL</span>
+              <Segmented
+                value={tls.mode}
+                onChange={(mode) => setTls({ mode })}
+                options={[
+                  { value: "disable", label: "Off" },
+                  { value: "prefer", label: "Prefer" },
+                  { value: "require", label: "Require" },
+                  { value: "verify-ca", label: "Verify CA" },
+                  { value: "verify-full", label: "Verify full" },
+                ]}
+              />
+            </div>
+            {(tls.mode === "verify-ca" || tls.mode === "verify-full" || tls.caCert || tls.clientCert) && (
+              <div className="grid grid-cols-3 gap-2">
+                <Field label="CA certificate">
+                  <Input value={tls.caCert ?? ""} placeholder="system roots" onChange={(e) => setTls({ caCert: e.target.value || null })} />
+                </Field>
+                <Field label="Client certificate">
+                  <Input value={tls.clientCert ?? ""} placeholder="optional" onChange={(e) => setTls({ clientCert: e.target.value || null })} />
+                </Field>
+                <Field label="Client key">
+                  <Input value={tls.clientKey ?? ""} placeholder="optional" onChange={(e) => setTls({ clientKey: e.target.value || null })} />
+                </Field>
+              </div>
+            )}
+            {info.tls && tls.mode !== "require" && tls.mode !== "verify-full" && tls.mode !== "verify-ca" && (
+              <span className="text-2xs text-warning">{info.label} requires TLS — set it to Require or stronger.</span>
+            )}
+          </div>
         )}
 
         {!info.file && (

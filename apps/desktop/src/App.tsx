@@ -142,6 +142,32 @@ export default function App() {
   const execTab = useCallback(
     async (t: Tab, sqlOverride?: string) => {
       patchTab(t.id, { running: true, error: undefined, showPlan: false });
+      if (t.kind === "table" && t.schema && t.table && !sqlOverride) {
+        // table tabs browse server-side: filters, sort and paging become SQL
+        try {
+          const page = await api.tablePage(t.connId, {
+            schema: t.schema,
+            table: t.table,
+            filters: t.filters ?? [],
+            sort: t.sort ?? null,
+            limit: t.pageSize ?? 300,
+            offset: t.offset ?? 0,
+            count: true,
+          });
+          setConnected((c) => ({ ...c, [t.connId]: true }));
+          patchTab(t.id, {
+            output: { results: [page.result], elapsed_ms: page.elapsed_ms },
+            total: page.total,
+            sql: page.sql,
+            running: false,
+            resultIndex: 0,
+            pending: undefined,
+          });
+        } catch (e) {
+          patchTab(t.id, { error: String(e), running: false, output: undefined });
+        }
+        return;
+      }
       try {
         const output = await api.runQuery(t.connId, sqlOverride ?? t.sql);
         setConnected((c) => ({ ...c, [t.connId]: true }));
@@ -356,6 +382,11 @@ export default function App() {
               active={isFocused}
               onChange={(patch) => patchTab(t.id, patch)}
               onRun={(sql) => runTab(t, sql)}
+              onBrowse={(patch) => {
+                const next = { ...t, ...patch };
+                patchTab(t.id, patch);
+                execTab(next);
+              }}
               onView={(v) => setView(t, v)}
               onToast={setToast}
               onHistory={() => setHistoryOpen((h) => !h)}

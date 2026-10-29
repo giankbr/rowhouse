@@ -1,9 +1,10 @@
-import { AlertCircle, Bookmark, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Bookmark, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { AiPanel, type AiState } from "./AiPanel";
+import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
@@ -21,6 +22,7 @@ export function Workspace({
   aiEnabled,
   onOpenSettings,
   active = true,
+  onBrowse,
 }: {
   tab: Tab;
   conn: ConnectionConfig | undefined;
@@ -34,7 +36,10 @@ export function Workspace({
   onOpenSettings: () => void;
   /** focused pane: only it reacts to global shortcuts */
   active?: boolean;
+  /** table tabs: change filters / sort / page and reload from the server */
+  onBrowse?: (patch: Pick<Tab, "filters" | "sort" | "offset">) => void;
 }) {
+  const [showFilters, setShowFilters] = useState((tab.filters?.length ?? 0) > 0);
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
   const onSql = useCallback((sql: string) => onChange({ sql }), [onChange]);
@@ -285,8 +290,29 @@ export function Workspace({
               { value: "structure", label: "Structure" },
             ]}
           />
-          <span className="truncate font-mono text-2xs text-subtle">{tab.sql}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setShowFilters((f) => !f)}
+            disabled={tab.view === "structure"}
+            className={cx((showFilters || (tab.filters?.length ?? 0) > 0) && "bg-selected text-fg")}
+          >
+            <FilterIcon size={11} /> Filter
+            {(tab.filters?.length ?? 0) > 0 && (
+              <span className="rounded bg-accent px-1 text-[10px] text-accent-fg">{tab.filters!.length}</span>
+            )}
+          </Button>
+          <span className="truncate font-mono text-2xs text-subtle" title={tab.sql}>{tab.sql}</span>
           <span className="flex-1" />
+          {tab.view !== "structure" && tab.total != null && (
+            <Pager
+              offset={tab.offset ?? 0}
+              size={tab.pageSize ?? 300}
+              total={tab.total}
+              disabled={tab.running || pendingCount > 0}
+              onPage={(offset) => onBrowse?.({ offset })}
+            />
+          )}
           {blocker && blocker !== "loading" && (
             <span className="flex items-center gap-1 text-2xs whitespace-nowrap text-subtle">
               <Lock size={11} /> {blocker}
@@ -320,6 +346,10 @@ export function Workspace({
         </Toolbar>
       )}
 
+      {tab.kind === "table" && tab.view !== "structure" && showFilters && tab.columns && (
+        <FilterBar columns={tab.columns} filters={tab.filters ?? []} onApply={(filters) => onBrowse?.({ filters, offset: 0 })} />
+      )}
+
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
           <Structure tab={tab} />
@@ -345,6 +375,8 @@ export function Workspace({
         ) : result ? (
           <ResultsGrid
             result={result}
+            serverSort={tab.kind === "table" ? (tab.sort ?? null) : undefined}
+            onServerSort={tab.kind === "table" && onBrowse ? (sort) => onBrowse({ sort, offset: 0 }) : undefined}
             edit={editable ? { pending: tab.pending ?? { edits: {}, deletes: [], inserts: [] }, onChange: (p) => onChange({ pending: p }) } : undefined}
           />
         ) : (
@@ -415,6 +447,36 @@ export function Workspace({
         </div>
       </Modal>
     </div>
+  );
+}
+
+function Pager({
+  offset,
+  size,
+  total,
+  disabled,
+  onPage,
+}: {
+  offset: number;
+  size: number;
+  total: number;
+  disabled?: boolean;
+  onPage: (offset: number) => void;
+}) {
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + size, total);
+  return (
+    <span className="flex items-center gap-0.5 text-2xs whitespace-nowrap text-muted tabular-nums">
+      <Button variant="ghost" size="icon" disabled={disabled || offset === 0} onClick={() => onPage(Math.max(0, offset - size))} title="Previous page">
+        <ChevronLeft size={13} />
+      </Button>
+      <span>
+        {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}
+      </span>
+      <Button variant="ghost" size="icon" disabled={disabled || to >= total} onClick={() => onPage(offset + size)} title="Next page">
+        <ChevronRight size={13} />
+      </Button>
+    </span>
   );
 }
 

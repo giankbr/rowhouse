@@ -46,9 +46,14 @@ function same(a: Cell | undefined, b: Cell | undefined) {
 export function ResultsGrid({
   result,
   edit,
+  serverSort,
+  onServerSort,
 }: {
   result: QueryResult;
   edit?: { pending: Pending; onChange: (p: Pending) => void };
+  /** when set, header clicks sort on the server instead of in memory */
+  serverSort?: { column: string; desc: boolean } | null;
+  onServerSort?: (s: { column: string; desc: boolean } | null) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
@@ -249,7 +254,15 @@ export function ResultsGrid({
               <div
                 key={ci}
                 onClick={() =>
-                  setSort((s) => (s?.c === ci ? (s.dir === 1 ? { c: ci, dir: -1 } : null) : { c: ci, dir: 1 }))
+                  onServerSort
+                    ? onServerSort(
+                        serverSort?.column === col.name
+                          ? serverSort.desc
+                            ? null
+                            : { column: col.name, desc: true }
+                          : { column: col.name, desc: false },
+                      )
+                    : setSort((s) => (s?.c === ci ? (s.dir === 1 ? { c: ci, dir: -1 } : null) : { c: ci, dir: 1 }))
                 }
                 className="group relative flex shrink-0 cursor-default items-center gap-1 border-r border-line px-2 font-sans hover:bg-hover"
                 style={{ width: widths[ci] }}
@@ -257,7 +270,9 @@ export function ResultsGrid({
               >
                 <span className="truncate font-medium text-fg">{col.name}</span>
                 <span className="truncate text-[10px] text-subtle lowercase">{col.data_type}</span>
-                {sort?.c === ci && <span className="ml-auto text-accent">{sort.dir === 1 ? "↑" : "↓"}</span>}
+                {onServerSort
+                  ? serverSort?.column === col.name && <span className="ml-auto text-accent">{serverSort.desc ? "↓" : "↑"}</span>
+                  : sort?.c === ci && <span className="ml-auto text-accent">{sort.dir === 1 ? "↑" : "↓"}</span>}
                 <span
                   onMouseDown={(e) => startResize(ci, e)}
                   className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"

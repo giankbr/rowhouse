@@ -18,6 +18,12 @@ export interface Tab {
   resultIndex?: number;
   error?: string;
   running?: boolean;
+  /** table tabs: server-side browsing */
+  filters?: import("./api").Filter[];
+  sort?: { column: string; desc: boolean } | null;
+  offset?: number;
+  pageSize?: number;
+  total?: number | null;
   /** results area shows the query plan instead of rows */
   showPlan?: boolean;
   plan?: import("./api").Plan;

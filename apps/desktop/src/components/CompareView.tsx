@@ -1,19 +1,19 @@
 import { ArrowRight, Check, Copy, GitCompareArrows, Loader2, Minus, PencilLine, Plus, SquareTerminal } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, kindInfo, type ConnectionConfig, type SchemaChange, type SchemaDiff } from "../lib/api";
+import { api, kindInfo, type Cell, type ConnectionConfig, type DataDiff, type RowDiff, type SchemaChange, type SchemaDiff } from "../lib/api";
 import { KindBadge } from "./KindBadge";
-import { Button, cx } from "./ui";
+import { Button, Segmented, cx } from "./ui";
 
 function useSchemas(connId: string) {
-  const [schemas, setSchemas] = useState<string[]>([]);
+  const [tables, setTables] = useState<{ schema: string; name: string; kind: string }[]>([]);
   useEffect(() => {
     if (!connId) return;
     api
       .listTables(connId)
-      .then((t) => setSchemas([...new Set(t.map((x) => x.schema))]))
-      .catch(() => setSchemas([]));
+      .then(setTables)
+      .catch(() => setTables([]));
   }, [connId]);
-  return schemas;
+  return { schemas: [...new Set(tables.map((x) => x.schema))], tables };
 }
 
 function Side({
@@ -23,6 +23,8 @@ function Side({
   schema,
   onConn,
   onSchema,
+  table,
+  onTable,
 }: {
   label: string;
   connections: ConnectionConfig[];
@@ -30,8 +32,15 @@ function Side({
   schema: string;
   onConn: (id: string) => void;
   onSchema: (s: string) => void;
+  /** data mode: pick a table too */
+  table?: string;
+  onTable?: (t: string) => void;
 }) {
-  const schemas = useSchemas(connId);
+  const { schemas, tables } = useSchemas(connId);
+  const tableNames = tables.filter((t) => t.schema === schema && t.kind === "table").map((t) => t.name);
+  useEffect(() => {
+    if (onTable && tableNames.length && !tableNames.includes(table ?? "")) onTable(tableNames[0]);
+  }, [tableNames.join(), onTable]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (schemas.length && !schemas.includes(schema)) onSchema(schemas.includes("public") ? "public" : schemas[0]);
   }, [schemas]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -49,11 +58,18 @@ function Side({
             </option>
           ))}
         </select>
-        <select value={schema} onChange={(e) => onSchema(e.target.value)} className={cx(sel, "w-32")}>
+        <select value={schema} onChange={(e) => onSchema(e.target.value)} className={cx(sel, "w-28")}>
           {schemas.map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>
+        {onTable && (
+          <select value={table} onChange={(e) => onTable(e.target.value)} className={cx(sel, "w-36 font-mono")}>
+            {tableNames.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+        )}
       </div>
     </div>
   );
@@ -108,6 +124,9 @@ export function CompareView({
   const preferred = others.find((c) => dialect(c) === dialect(current)) ?? others[0];
   const [source, setSource] = useState({ id: preferred?.id ?? currentId, schema: "public" });
   const [target, setTarget] = useState({ id: currentId, schema: "public" });
+  const [mode, setMode] = useState<"schema" | "data">("schema");
+  const [tables, setTables] = useState({ source: "", target: "" });
+  const [data, setData] = useState<DataDiff | null>(null);
   const [diff, setDiff] = useState<SchemaDiff | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -115,7 +134,8 @@ export function CompareView({
   const run = async () => {
     setBusy(true);
     try {
-      setDiff(await api.compareSchema(source.id, source.schema, target.id, target.schema));
+      if (mode === "data") setData(await api.compareData(source.id, source.schema, tables.source, target.id, target.schema, tables.target));
+      else setDiff(await api.compareSchema(source.id, source.schema, target.id, target.schema));
     } catch (e) {
       onToast(String(e));
     } finally {
@@ -130,15 +150,53 @@ export function CompareView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-end gap-3 border-b border-line px-3 py-2.5">
-        <Side label="Source (desired)" connections={connections} connId={source.id} schema={source.schema} onConn={(id) => setSource({ id, schema: "" })} onSchema={(schema) => setSource((s) => ({ ...s, schema }))} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10.5px] font-medium tracking-wide text-subtle uppercase">Compare</span>
+          <Segmented
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "schema", label: "Schema" },
+              { value: "data", label: "Data" },
+            ]}
+          />
+        </div>
+        <Side
+          label="Source (desired)"
+          connections={connections}
+          connId={source.id}
+          schema={source.schema}
+          onConn={(id) => setSource({ id, schema: "" })}
+          onSchema={(schema) => setSource((s) => ({ ...s, schema }))}
+          table={mode === "data" ? tables.source : undefined}
+          onTable={mode === "data" ? (t) => setTables((x) => ({ ...x, source: t, target: x.target || t })) : undefined}
+        />
         <ArrowRight size={14} className="mb-2 shrink-0 text-subtle" />
-        <Side label="Target (to update)" connections={connections} connId={target.id} schema={target.schema} onConn={(id) => setTarget({ id, schema: "" })} onSchema={(schema) => setTarget((s) => ({ ...s, schema }))} />
-        <Button variant="primary" onClick={run} disabled={busy || !source.schema || !target.schema}>
+        <Side
+          label="Target (to update)"
+          connections={connections}
+          connId={target.id}
+          schema={target.schema}
+          onConn={(id) => setTarget({ id, schema: "" })}
+          onSchema={(schema) => setTarget((s) => ({ ...s, schema }))}
+          table={mode === "data" ? tables.target : undefined}
+          onTable={mode === "data" ? (t) => setTables((x) => ({ ...x, target: t })) : undefined}
+        />
+        <Button variant="primary" onClick={run} disabled={busy || !source.schema || !target.schema || (mode === "data" && (!tables.source || !tables.target))}>
           {busy ? <Loader2 size={12} className="animate-spin" /> : <GitCompareArrows size={12} />} Compare
         </Button>
       </div>
 
-      {!diff ? (
+      {mode === "data" ? (
+        data ? (
+          <DataResult data={data} onOpenSql={() => onOpenSql(target.id, data.sql)} />
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-xs text-subtle">
+            <GitCompareArrows size={20} className="text-accent" />
+            Pick two tables — rows are matched by the target's primary key (up to 200,000 per side).
+          </div>
+        )
+      ) : !diff ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-xs text-subtle">
           <GitCompareArrows size={20} className="text-accent" />
           Pick two schemas — Rowhouse lists what differs and writes the migration for the target.
@@ -210,6 +268,95 @@ export function CompareView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const show = (v: Cell) => (v === null ? "NULL" : typeof v === "object" ? JSON.stringify(v) : String(v));
+const keyText = (r: RowDiff) => Object.entries(r.key).map(([k, v]) => `${k}=${show(v)}`).join(", ");
+
+function DataResult({ data, onOpenSql }: { data: DataDiff; onOpenSql: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const stat = (n: number, label: string, cls: string) => (
+    <div className="flex flex-col rounded-lg border border-line px-3 py-2">
+      <span className={cx("text-base font-semibold tabular-nums", cls)}>{n.toLocaleString()}</span>
+      <span className="text-[10.5px] text-subtle">{label}</span>
+    </div>
+  );
+  const section = (title: string, rows: RowDiff[], total: number, cls: string, render?: (r: RowDiff) => React.ReactNode) =>
+    total > 0 && (
+      <div className="border-b border-line/60 px-3 py-2">
+        <div className={cx("mb-1 text-xs font-medium", cls)}>
+          {title} <span className="text-subtle">({total.toLocaleString()}{rows.length < total ? `, first ${rows.length} shown` : ""})</span>
+        </div>
+        {rows.map((r, i) => (
+          <div key={i} className="py-0.5 font-mono text-[11px]">
+            <span className="text-muted">{keyText(r)}</span>
+            {render?.(r)}
+          </div>
+        ))}
+      </div>
+    );
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div className="flex w-[46%] min-w-72 flex-col border-r border-line">
+        <div className="grid shrink-0 grid-cols-4 gap-2 border-b border-line p-3">
+          {stat(data.onlyInSource, "to insert", "text-success")}
+          {stat(data.changed, "to update", "text-warning")}
+          {stat(data.onlyInTarget, "only in target", "text-danger")}
+          {stat(data.identical, "identical", "text-muted")}
+        </div>
+        <div className="border-b border-line px-3 py-1.5 text-2xs text-subtle">
+          key: <span className="font-mono">{data.keyColumns.join(", ")}</span> · {data.sourceRows.toLocaleString()} source rows ·{" "}
+          {data.targetRows.toLocaleString()} target rows
+          {data.truncated && <span className="text-warning"> · capped at 200,000 rows per side</span>}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {data.onlyInSource + data.changed + data.onlyInTarget === 0 && (
+            <div className="flex h-full items-center justify-center gap-1.5 text-xs text-success">
+              <Check size={14} /> Tables match
+            </div>
+          )}
+          {section("Changed", data.samplesChanged, data.changed, "text-warning", (r) => (
+            <div className="pl-3">
+              {Object.entries(r.changes).map(([c, [from, to]]) => (
+                <div key={c}>
+                  {c}: <span className="text-danger line-through">{show(from)}</span> → <span className="text-success">{show(to)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+          {section("Only in source → insert", data.samplesOnlyInSource, data.onlyInSource, "text-success")}
+          {section("Only in target", data.samplesOnlyInTarget, data.onlyInTarget, "text-danger")}
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel/60 px-3 text-2xs text-muted">
+          <span className="font-medium text-fg">Sync script for target</span>
+          <span className="flex-1" />
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              navigator.clipboard.writeText(data.sql);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            }}
+          >
+            {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "Copied" : "Copy"}
+          </Button>
+          <Button size="xs" onClick={onOpenSql}>
+            <SquareTerminal size={11} /> Open in query tab
+          </Button>
+        </div>
+        <pre className="selectable flex-1 overflow-auto p-3 font-mono text-[11.5px] leading-relaxed">
+          {data.sql.split("\n").map((l, i) => (
+            <div key={i} className={cx(l.startsWith("--") ? "text-subtle" : l.startsWith("INSERT") ? "text-success" : l.startsWith("UPDATE") ? "text-warning" : "")}>
+              {l || " "}
+            </div>
+          ))}
+        </pre>
+      </div>
     </div>
   );
 }

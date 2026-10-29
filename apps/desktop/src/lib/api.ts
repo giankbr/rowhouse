@@ -3,6 +3,8 @@
 
 export type DbKind =
   | "postgres"
+  | "neon"
+  | "supabase"
   | "cockroach"
   | "redshift"
   | "greenplum"
@@ -29,10 +31,14 @@ export interface KindInfo {
   file?: boolean;
   /** shown with a "beta" tag until tested against a real server in CI */
   beta?: boolean;
+  /** TLS required by default (hosted services) */
+  tls?: boolean;
 }
 
 export const KINDS: KindInfo[] = [
   { kind: "postgres", label: "PostgreSQL", abbr: "Pg", color: "#336791", dialect: "postgres", port: 5432, user: "postgres" },
+  { kind: "neon", label: "Neon", abbr: "Ne", color: "#00b386", dialect: "postgres", port: 5432, user: null, tls: true },
+  { kind: "supabase", label: "Supabase", abbr: "Sb", color: "#249361", dialect: "postgres", port: 5432, user: "postgres", tls: true },
   { kind: "mysql", label: "MySQL", abbr: "My", color: "#e48e00", dialect: "mysql", port: 3306, user: "root" },
   { kind: "mariadb", label: "MariaDB", abbr: "Ma", color: "#4b8b9b", dialect: "mysql", port: 3306, user: "root" },
   { kind: "sqlite", label: "SQLite", abbr: "Sl", color: "#7c3aed", dialect: "sqlite", port: null, user: null, file: true },
@@ -60,6 +66,14 @@ export interface SshConfig {
   hostKey?: string | null;
 }
 
+export type TlsMode = "disable" | "prefer" | "require" | "verify-ca" | "verify-full";
+export interface TlsConfig {
+  mode: TlsMode;
+  caCert?: string | null;
+  clientCert?: string | null;
+  clientKey?: string | null;
+}
+
 export type Environment = "none" | "local" | "development" | "staging" | "production";
 
 export const ENVIRONMENTS: { value: Environment; label: string; color: string | null }[] = [
@@ -84,6 +98,7 @@ export interface ConnectionConfig {
   color?: string | null;
   ssh?: SshConfig | null;
   env?: Environment;
+  tls?: TlsConfig | null;
 }
 
 export interface TableInfo {
@@ -179,6 +194,49 @@ export interface ImportCandidate {
   skippedReason: string | null;
 }
 
+export type FilterOp = "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "contains" | "starts-with" | "is-null" | "not-null" | "in";
+export interface Filter {
+  column: string;
+  op: FilterOp;
+  value: string;
+  numeric: boolean;
+}
+export interface PageRequest {
+  schema: string;
+  table: string;
+  filters: Filter[];
+  sort: { column: string; desc: boolean } | null;
+  limit: number;
+  offset: number;
+  count: boolean;
+}
+export interface Page {
+  result: QueryResult;
+  total: number | null;
+  sql: string;
+  elapsed_ms: number;
+}
+
+export interface RowDiff {
+  key: Record<string, Cell>;
+  changes: Record<string, [Cell, Cell]>;
+}
+export interface DataDiff {
+  keyColumns: string[];
+  comparedColumns: string[];
+  sourceRows: number;
+  targetRows: number;
+  onlyInSource: number;
+  onlyInTarget: number;
+  changed: number;
+  identical: number;
+  samplesOnlyInSource: RowDiff[];
+  samplesOnlyInTarget: RowDiff[];
+  samplesChanged: RowDiff[];
+  truncated: boolean;
+  sql: string;
+}
+
 export interface Snippet {
   id: number;
   name: string;
@@ -264,6 +322,10 @@ export const api = {
   clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
   writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
+  parseConnectionUrl: (url: string) => call<{ config: ConnectionConfig; password: string | null }>("parse_connection_url", { url }),
+  tablePage: (id: string, request: PageRequest) => call<Page>("table_page", { id, request }),
+  compareData: (sourceId: string, sourceSchema: string, sourceTable: string, targetId: string, targetSchema: string, targetTable: string) =>
+    call<DataDiff>("compare_data", { sourceId, sourceSchema, sourceTable, targetId, targetSchema, targetTable }),
   listSnippets: (id?: string, search?: string) => call<Snippet[]>("list_snippets", { id, search }),
   saveSnippet: (snippet: Snippet) => call<Snippet>("save_snippet", { snippet }),
   deleteSnippet: (snippetId: number) => call<void>("delete_snippet", { snippetId }),
@@ -326,6 +388,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
     color: null,
     ssh: null,
     env: "none",
+    tls: k.tls ? { mode: "require" } : null,
   };
 }
 
@@ -503,6 +566,84 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
         explanation:
           "Lists active users with their email, newest signups first. It scans users once; an index on (active, created_at) would avoid a sort on large tables.",
       } satisfies AiAnswer;
+    case "parse_connection_url": {
+      const u = new URL(String(a.url).replace(/^jdbc:/, ""));
+      const host = u.hostname;
+      const kind: DbKind = host.endsWith("neon.tech") ? "neon" : host.includes("supabase") ? "supabase" : u.protocol.startsWith("mysql") ? "mysql" : "postgres";
+      const db = decodeURIComponent(u.pathname.replace(/^\//, "")) || null;
+      return {
+        config: {
+          ...newConnection(kind),
+          name: kind === "neon" ? `Neon · ${db ?? "neondb"}` : kind === "supabase" ? `Supabase · ${host.split(".")[0]}` : `${db}@${host}`,
+          host, port: u.port ? Number(u.port) : kindInfo(kind).port, user: decodeURIComponent(u.username) || null, database: db,
+          tls: u.searchParams.get("sslmode") || kindInfo(kind).tls ? { mode: (u.searchParams.get("sslmode") as TlsMode) ?? "require" } : null,
+        },
+        password: decodeURIComponent(u.password) || null,
+      };
+    }
+    case "table_page": {
+      await sleep(120);
+      const r = a.request as PageRequest;
+      let rows = mockRows(1234);
+      const names = mockCols.map((c) => c.name);
+      for (const f of r.filters) {
+        const i = names.indexOf(f.column);
+        if (i < 0) continue;
+        const v = f.value.toLowerCase();
+        rows = rows.filter((row) => {
+          const x = row[i];
+          const s = x === null ? "" : String(typeof x === "object" ? JSON.stringify(x) : x).toLowerCase();
+          switch (f.op) {
+            case "is-null": return x === null;
+            case "not-null": return x !== null;
+            case "contains": return s.includes(v);
+            case "starts-with": return s.startsWith(v);
+            case "ne": return s !== v;
+            case "gt": return Number(x) > Number(v);
+            case "lt": return Number(x) < Number(v);
+            case "ge": return Number(x) >= Number(v);
+            case "le": return Number(x) <= Number(v);
+            case "in": return v.split(",").map((y) => y.trim()).includes(s);
+            default: return s === v;
+          }
+        });
+      }
+      if (r.sort) {
+        const i = names.indexOf(r.sort.column), d = r.sort.desc ? -1 : 1;
+        rows = [...rows].sort((p, q) => (String(p[i] ?? "") < String(q[i] ?? "") ? -d : d));
+        if (["id", "balance"].includes(r.sort.column)) rows = [...rows].sort((p, q) => (Number(p[i] ?? 0) - Number(q[i] ?? 0)) * d);
+      }
+      const where = r.filters.length ? " WHERE " + r.filters.map((f) => `"${f.column}" ${f.op} ${f.value}`).join(" AND ") : "";
+      return {
+        result: { columns: mockCols.map((c) => ({ name: c.name, data_type: c.data_type.toUpperCase() })), rows: rows.slice(r.offset, r.offset + r.limit), rows_affected: 0, truncated: false },
+        total: rows.length,
+        sql: `SELECT * FROM "${r.schema}"."${r.table}"${where}${r.sort ? ` ORDER BY "${r.sort.column}" ${r.sort.desc ? "DESC" : "ASC"}` : ""} LIMIT ${r.limit}${r.offset ? ` OFFSET ${r.offset}` : ""}`,
+        elapsed_ms: 9,
+      } satisfies Page;
+    }
+    case "compare_data": {
+      await sleep(300);
+      return {
+        keyColumns: ["id"], comparedColumns: ["id", "full_name", "email", "city", "balance", "active"],
+        sourceRows: 1240, targetRows: 1236, onlyInSource: 6, onlyInTarget: 2, changed: 3, identical: 1231,
+        samplesOnlyInSource: [1237, 1238, 1239, 1240, 1241, 1242].map((id) => ({ key: { id }, changes: {} })),
+        samplesOnlyInTarget: [88, 412].map((id) => ({ key: { id }, changes: {} })),
+        samplesChanged: [
+          { key: { id: 7 }, changes: { email: ["gita6@example.com", "gita@new-mail.id"] } },
+          { key: { id: 15 }, changes: { balance: ["1054.65", "980.00"], active: [true, false] } },
+          { key: { id: 301 }, changes: { city: ["Medan", "Bandung"] } },
+        ],
+        truncated: false,
+        sql: `-- Generated by Rowhouse data compare: make users match the source.
+-- Deletes are commented out on purpose. Review before running.
+UPDATE "public"."users" SET "email" = 'gita@new-mail.id' WHERE "id" = 7;
+UPDATE "public"."users" SET "active" = FALSE, "balance" = '980.00' WHERE "id" = 15;
+UPDATE "public"."users" SET "city" = 'Bandung' WHERE "id" = 301;
+INSERT INTO "public"."users" ("id", "full_name", "email") VALUES (1237, 'Rina P.', 'rina@example.com');
+-- DELETE FROM "public"."users" WHERE "id" = 88;
+-- DELETE FROM "public"."users" WHERE "id" = 412;`,
+      } satisfies DataDiff;
+    }
     case "list_snippets": {
       const q = String(a.search ?? "").toLowerCase();
       return mockSnippets.filter((x) => (!x.connectionId || x.connectionId === a.id) && (!q || x.name.toLowerCase().includes(q) || x.sql.toLowerCase().includes(q)));

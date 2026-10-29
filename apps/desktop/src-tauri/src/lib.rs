@@ -403,6 +403,52 @@ async fn compare_schema(
         .await
 }
 
+#[derive(serde::Serialize)]
+struct ParsedUrl {
+    config: ConnectionConfig,
+    password: Option<String>,
+}
+
+/// Paste-a-connection-string support (Neon, Supabase, any postgres:// / mysql:// URL).
+#[tauri::command]
+fn parse_connection_url(url: String) -> CmdResult<ParsedUrl> {
+    let (config, password) = rowhouse_core::conn_url::parse_connection_url(&url)?;
+    Ok(ParsedUrl { config, password })
+}
+
+#[tauri::command]
+async fn table_page(
+    state: State<'_, AppState>,
+    id: String,
+    request: rowhouse_core::browse::PageRequest,
+) -> CmdResult<rowhouse_core::browse::Page> {
+    state.conn(&id).await?.table_page(&request).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn compare_data(
+    state: State<'_, AppState>,
+    source_id: String,
+    source_schema: String,
+    source_table: String,
+    target_id: String,
+    target_schema: String,
+    target_table: String,
+) -> CmdResult<rowhouse_core::compare::DataDiff> {
+    let source = state.conn(&source_id).await?;
+    let target = state.conn(&target_id).await?;
+    target
+        .compare_data(
+            &target_schema,
+            &target_table,
+            &source,
+            &source_schema,
+            &source_table,
+        )
+        .await
+}
+
 /// Write a text file chosen by the user in a save dialog (ERD export).
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> CmdResult<()> {
@@ -513,6 +559,9 @@ pub fn run() {
             import_csv,
             mcp_info,
             write_text_file,
+            parse_connection_url,
+            table_page,
+            compare_data,
             list_snippets,
             save_snippet,
             delete_snippet,
