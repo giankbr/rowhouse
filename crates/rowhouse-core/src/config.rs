@@ -23,6 +23,8 @@ const KEYRING_SERVICE: &str = "rowhouse";
 #[serde(rename_all = "lowercase")]
 pub enum DbKind {
     Postgres,
+    Neon,
+    Supabase,
     Cockroach,
     Redshift,
     Greenplum,
@@ -48,8 +50,10 @@ pub enum Driver {
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 12] = [
+    pub const ALL: [DbKind; 14] = [
         DbKind::Postgres,
+        DbKind::Neon,
+        DbKind::Supabase,
         DbKind::Cockroach,
         DbKind::Redshift,
         DbKind::Greenplum,
@@ -66,7 +70,7 @@ impl DbKind {
     pub fn driver(self) -> Driver {
         use DbKind::*;
         match self {
-            Postgres | Cockroach | Redshift | Greenplum => Driver::Postgres,
+            Postgres | Neon | Supabase | Cockroach | Redshift | Greenplum => Driver::Postgres,
             Mysql | Mariadb | Tidb | Singlestore => Driver::Mysql,
             Sqlite => Driver::Sqlite,
             Duckdb => Driver::Duckdb,
@@ -83,7 +87,7 @@ impl DbKind {
     pub fn default_port(self) -> Option<u16> {
         use DbKind::*;
         match self {
-            Postgres | Greenplum => Some(5432),
+            Postgres | Greenplum | Neon | Supabase => Some(5432),
             Cockroach => Some(26257),
             Redshift => Some(5439),
             Mysql | Mariadb | Singlestore => Some(3306),
@@ -121,12 +125,45 @@ pub struct ConnectionConfig {
     /// Tag color shown in the sidebar (e.g. "red" for production).
     #[serde(default)]
     pub color: Option<String>,
+    /// TLS settings (Postgres family, MySQL family, SQL Server, ClickHouse).
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
     /// Environment label; `production` turns on the safety rails in the UI.
     #[serde(default)]
     pub env: Environment,
     /// Optional SSH tunnel (bastion / jump host).
     #[serde(default)]
     pub ssh: Option<SshConfig>,
+}
+
+/// Same names as libpq's `sslmode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsMode {
+    Disable,
+    #[default]
+    Prefer,
+    Require,
+    /// verify the server certificate against the CA
+    VerifyCa,
+    /// … and that the host name matches
+    VerifyFull,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TlsConfig {
+    #[serde(default)]
+    pub mode: TlsMode,
+    /// PEM file with the CA certificate(s)
+    #[serde(default)]
+    pub ca_cert: Option<String>,
+    /// PEM client certificate (mutual TLS)
+    #[serde(default)]
+    pub client_cert: Option<String>,
+    /// PEM private key for the client certificate
+    #[serde(default)]
+    pub client_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -191,6 +228,13 @@ impl ConnectionConfig {
             mcp_enabled: true,
             color: None,
             env: Environment::None,
+            tls: match kind {
+                DbKind::Neon | DbKind::Supabase => Some(TlsConfig {
+                    mode: TlsMode::Require,
+                    ..Default::default()
+                }),
+                _ => None,
+            },
             ssh: None,
         }
     }

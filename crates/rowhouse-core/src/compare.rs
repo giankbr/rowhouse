@@ -296,3 +296,251 @@ impl Connection {
         })
     }
 }
+
+// ------------------------------------------------------------- data compare ---
+
+/// Rows fetched per side at most.
+pub const MAX_DATA_ROWS: usize = 200_000;
+/// Example rows returned per category for the UI.
+const SAMPLES: usize = 200;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowDiff {
+    pub key: serde_json::Map<String, serde_json::Value>,
+    /// column → (target value, source value); only for changed rows
+    pub changes: BTreeMap<String, (serde_json::Value, serde_json::Value)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataDiff {
+    pub key_columns: Vec<String>,
+    pub compared_columns: Vec<String>,
+    pub source_rows: usize,
+    pub target_rows: usize,
+    pub only_in_source: usize,
+    pub only_in_target: usize,
+    pub changed: usize,
+    pub identical: usize,
+    pub samples_only_in_source: Vec<RowDiff>,
+    pub samples_only_in_target: Vec<RowDiff>,
+    pub samples_changed: Vec<RowDiff>,
+    /// a side hit MAX_DATA_ROWS; results cover only the first rows by key
+    pub truncated: bool,
+    /// statements that make the target match the source (deletes commented out)
+    pub sql: String,
+}
+
+fn canon(v: &serde_json::Value) -> String {
+    use serde_json::Value::*;
+    match v {
+        Null => "\u{0}null".into(),
+        Bool(b) => (if *b { "1" } else { "0" }).into(),
+        Number(n) => n
+            .as_f64()
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| n.to_string()),
+        String(s) => s
+            .trim()
+            .parse::<f64>()
+            .map(|f| f.to_string())
+            .unwrap_or_else(|_| s.clone()),
+        other => other.to_string(),
+    }
+}
+
+async fn fetch_keyed(
+    c: &Connection,
+    schema: &str,
+    table: &str,
+    keys: &[String],
+) -> Result<(Vec<String>, Vec<Vec<serde_json::Value>>, bool)> {
+    let order = keys
+        .iter()
+        .map(|k| c.ident(k))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let t = c.target(schema, table);
+    let sql = if c.driver() == Driver::Mssql {
+        format!(
+            "SELECT TOP {} * FROM {t} ORDER BY {order}",
+            MAX_DATA_ROWS + 1
+        )
+    } else {
+        format!(
+            "SELECT * FROM {t} ORDER BY {order} LIMIT {}",
+            MAX_DATA_ROWS + 1
+        )
+    };
+    let r = c
+        .query(&sql, MAX_DATA_ROWS + 1)
+        .await?
+        .results
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let cols: Vec<String> = if r.columns.is_empty() {
+        c.describe_table(schema, table)
+            .await?
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    } else {
+        r.columns.into_iter().map(|c| c.name).collect()
+    };
+    let mut rows = r.rows;
+    let truncated = rows.len() > MAX_DATA_ROWS;
+    rows.truncate(MAX_DATA_ROWS);
+    Ok((cols, rows, truncated))
+}
+
+impl Connection {
+    /// Compare rows of `source_table` (on `source`) with `target_table` (on `self`), matched by
+    /// the target's primary key.
+    pub async fn compare_data(
+        &self,
+        target_schema: &str,
+        target_table: &str,
+        source: &Connection,
+        source_schema: &str,
+        source_table: &str,
+    ) -> Result<DataDiff> {
+        use crate::changes::{ChangeSet, RowUpdate};
+        use serde_json::{Map, Value};
+
+        let keys: Vec<String> = self
+            .describe_table(target_schema, target_table)
+            .await?
+            .into_iter()
+            .filter(|c| c.primary_key)
+            .map(|c| c.name)
+            .collect();
+        if keys.is_empty() {
+            return Err(crate::Error::Other(format!(
+                "{target_table} has no primary key — rows can't be matched"
+            )));
+        }
+        let (scols, srows, st) = fetch_keyed(source, source_schema, source_table, &keys).await?;
+        let (tcols, trows, tt) = fetch_keyed(self, target_schema, target_table, &keys).await?;
+        if let Some(k) = keys.iter().find(|k| !scols.contains(k)) {
+            return Err(crate::Error::Other(format!(
+                "key column `{k}` is missing in the source table"
+            )));
+        }
+        let common: Vec<String> = scols
+            .iter()
+            .filter(|c| tcols.contains(c))
+            .cloned()
+            .collect();
+        let idx = |cols: &[String], name: &str| cols.iter().position(|c| c == name).unwrap();
+        let key_of = |cols: &[String], row: &[Value]| -> String {
+            keys.iter()
+                .map(|k| canon(&row[idx(cols, k)]))
+                .collect::<Vec<_>>()
+                .join("\u{1}")
+        };
+        let key_map = |cols: &[String], row: &[Value]| -> Map<String, Value> {
+            keys.iter()
+                .map(|k| (k.clone(), row[idx(cols, k)].clone()))
+                .collect()
+        };
+
+        let mut target_by_key = std::collections::HashMap::with_capacity(trows.len());
+        for r in &trows {
+            target_by_key.insert(key_of(&tcols, r), r);
+        }
+        let mut seen = std::collections::HashSet::with_capacity(srows.len());
+        let mut cs = ChangeSet {
+            schema: target_schema.into(),
+            table: target_table.into(),
+            ..Default::default()
+        };
+        let (mut add_s, mut del_s, mut chg_s) = (vec![], vec![], vec![]);
+        let mut identical = 0;
+
+        for s in &srows {
+            let k = key_of(&scols, s);
+            seen.insert(k.clone());
+            match target_by_key.get(&k) {
+                None => {
+                    let row: Map<String, Value> = common
+                        .iter()
+                        .map(|c| (c.clone(), s[idx(&scols, c)].clone()))
+                        .collect();
+                    if add_s.len() < SAMPLES {
+                        add_s.push(RowDiff {
+                            key: key_map(&scols, s),
+                            changes: BTreeMap::new(),
+                        });
+                    }
+                    cs.inserts.push(row);
+                }
+                Some(t) => {
+                    let mut changes = BTreeMap::new();
+                    for c in common.iter().filter(|c| !keys.contains(c)) {
+                        let (sv, tv) = (&s[idx(&scols, c)], &t[idx(&tcols, c)]);
+                        if canon(sv) != canon(tv) {
+                            changes.insert(c.clone(), (tv.clone(), sv.clone()));
+                        }
+                    }
+                    if changes.is_empty() {
+                        identical += 1;
+                    } else {
+                        cs.updates.push(RowUpdate {
+                            key: key_map(&scols, s),
+                            set: changes
+                                .iter()
+                                .map(|(c, (_, sv))| (c.clone(), sv.clone()))
+                                .collect(),
+                        });
+                        if chg_s.len() < SAMPLES {
+                            chg_s.push(RowDiff {
+                                key: key_map(&scols, s),
+                                changes,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        for t in &trows {
+            if !seen.contains(&key_of(&tcols, t)) {
+                if del_s.len() < SAMPLES {
+                    del_s.push(RowDiff {
+                        key: key_map(&tcols, t),
+                        changes: BTreeMap::new(),
+                    });
+                }
+                cs.deletes.push(key_map(&tcols, t));
+            }
+        }
+
+        let mut lines = vec![
+            format!("-- Generated by Rowhouse data compare: make {target_table} match the source."),
+            "-- Deletes are commented out on purpose. Review before running.".to_string(),
+        ];
+        for stmt in self.preview_changes(&cs)? {
+            if stmt.starts_with("DELETE") {
+                lines.push(format!("-- {stmt};"));
+            } else {
+                lines.push(format!("{stmt};"));
+            }
+        }
+        Ok(DataDiff {
+            key_columns: keys,
+            compared_columns: common,
+            source_rows: srows.len(),
+            target_rows: trows.len(),
+            only_in_source: cs.inserts.len(),
+            only_in_target: cs.deletes.len(),
+            changed: cs.updates.len(),
+            identical,
+            samples_only_in_source: add_s,
+            samples_only_in_target: del_s,
+            samples_changed: chg_s,
+            truncated: st || tt,
+            sql: lines.join("\n"),
+        })
+    }
+}

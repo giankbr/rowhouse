@@ -332,3 +332,134 @@ async fn sqlite_vs_sqlite_compare() {
         1
     ); // only the commented drop
 }
+
+#[tokio::test]
+async fn table_page_filters_sort_paginate() {
+    use rowhouse_core::browse::{Filter, FilterOp, PageRequest, Sort};
+    let (_d, c) = setup().await;
+    let mut sql = String::from("INSERT INTO users (name, score) VALUES ");
+    sql.push_str(
+        &(0..95)
+            .map(|i| format!("('user{i:02}', {})", i % 10))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    c.query(&sql, 1).await.unwrap(); // 97 rows total
+    let req = |filters: Vec<Filter>, sort: Option<Sort>, offset| PageRequest {
+        schema: "main".into(),
+        table: "users".into(),
+        filters,
+        sort,
+        limit: 20,
+        offset,
+        count: true,
+    };
+    let f = |column: &str, op, value: &str, numeric| Filter {
+        column: column.into(),
+        op,
+        value: value.into(),
+        numeric,
+    };
+
+    let p = c
+        .table_page(&req(
+            vec![],
+            Some(Sort {
+                column: "id".into(),
+                desc: true,
+            }),
+            20,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(p.total, Some(97));
+    assert_eq!(p.result.rows.len(), 20);
+    assert_eq!(p.result.rows[0][0], 77); // ids 97..1 desc, page 2 starts at 77
+    assert!(
+        p.sql.ends_with("ORDER BY \"id\" DESC LIMIT 20 OFFSET 20"),
+        "{}",
+        p.sql
+    );
+
+    let p = c
+        .table_page(&req(
+            vec![
+                f("score", FilterOp::Ge, "8", true),
+                f("name", FilterOp::Contains, "USER1", false),
+            ],
+            None,
+            0,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(p.total, Some(2)); // user18, user19 (case-insensitive)
+    let p = c
+        .table_page(&req(vec![f("score", FilterOp::IsNull, "", false)], None, 0))
+        .await
+        .unwrap();
+    assert_eq!(p.total, Some(1)); // budi
+    let p = c
+        .table_page(&req(
+            vec![f("name", FilterOp::In, "ana, budi,o'x", false)],
+            None,
+            0,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(p.total, Some(2));
+    let p = c
+        .table_page(&req(
+            vec![
+                f("name", FilterOp::StartsWith, "user0", false),
+                f("score", FilterOp::Ne, "3", true),
+            ],
+            None,
+            0,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(p.total, Some(9));
+}
+
+#[tokio::test]
+async fn data_compare_and_sync() {
+    let (_d1, src) = setup().await;
+    let (_d2, dst) = setup().await;
+    // source: change ana's score, add cici; target: has extra row 9
+    src.query(
+        "UPDATE users SET score = 7 WHERE id = 1; INSERT INTO users (id, name) VALUES (3, 'cici')",
+        10,
+    )
+    .await
+    .unwrap();
+    dst.query("INSERT INTO users (id, name) VALUES (9, 'zed')", 10)
+        .await
+        .unwrap();
+    let d = dst
+        .compare_data("main", "users", &src, "main", "users")
+        .await
+        .unwrap();
+    assert_eq!(d.key_columns, vec!["id"]);
+    assert_eq!(
+        (d.only_in_source, d.only_in_target, d.changed, d.identical),
+        (1, 1, 1, 1)
+    );
+    assert_eq!(
+        d.samples_changed[0].changes["score"],
+        (serde_json::json!(9.5), serde_json::json!(7.0))
+    );
+    assert!(
+        d.sql.contains("-- DELETE FROM \"users\" WHERE \"id\" = 9;"),
+        "{}",
+        d.sql
+    );
+    dst.query(&d.sql, 10).await.unwrap();
+    let again = dst
+        .compare_data("main", "users", &src, "main", "users")
+        .await
+        .unwrap();
+    assert_eq!(
+        (again.only_in_source, again.changed, again.only_in_target),
+        (0, 0, 1)
+    );
+}

@@ -79,7 +79,9 @@ impl Client {
         user: Option<&str>,
         password: Option<&str>,
         database: Option<&str>,
+        tls: Option<&crate::config::TlsConfig>,
     ) -> Result<Self> {
+        use crate::config::TlsMode;
         let mut cfg = Config::new();
         cfg.host(host);
         cfg.port(port);
@@ -90,8 +92,25 @@ impl Client {
             user.unwrap_or("sa"),
             password.unwrap_or_default(),
         ));
-        // Like most DB GUIs: encrypt, but accept self-signed server certs.
-        cfg.trust_cert();
+        // Default like most DB GUIs: encrypt, but accept self-signed server certs.
+        // verify-ca / verify-full validate against the given CA (or the system store).
+        let mode = tls.map(|t| t.mode).unwrap_or(TlsMode::Prefer);
+        cfg.encryption(match mode {
+            TlsMode::Disable => tiberius::EncryptionLevel::NotSupported,
+            TlsMode::Prefer => tiberius::EncryptionLevel::On,
+            _ => tiberius::EncryptionLevel::Required,
+        });
+        match (
+            mode,
+            tls.and_then(|t| t.ca_cert.as_deref())
+                .filter(|s| !s.is_empty()),
+        ) {
+            (TlsMode::VerifyCa | TlsMode::VerifyFull, Some(ca)) => {
+                cfg.trust_cert_ca(crate::tunnel::expand_home(ca))
+            }
+            (TlsMode::VerifyCa | TlsMode::VerifyFull, None) => {}
+            _ => cfg.trust_cert(),
+        }
         let tcp = TcpStream::connect(cfg.get_addr()).await?;
         tcp.set_nodelay(true)?;
         let client = match tiberius::Client::connect(cfg.clone(), tcp.compat_write()).await {

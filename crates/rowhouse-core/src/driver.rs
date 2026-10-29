@@ -22,7 +22,7 @@ use sqlx::{
 
 use crate::{
     backend::{self, Expect},
-    config::{ConnectionConfig, DbKind, Driver},
+    config::{ConnectionConfig, DbKind, Driver, TlsMode},
     guard, ColumnInfo, Error, QueryOutput, QueryResult, Result, ResultColumn, TableInfo,
 };
 
@@ -154,6 +154,7 @@ impl Connection {
         password: Option<&str>,
         ssh_secret: Option<&str>,
     ) -> Result<Self> {
+        crate::init_crypto();
         let timeout = Duration::from_secs(10);
         let mut host = config.host.clone().unwrap_or_else(|| "localhost".into());
         let mut port = config.port.or(config.kind.default_port()).unwrap_or(0);
@@ -189,6 +190,25 @@ impl Connection {
                 if let Some(db) = db {
                     o = o.database(db);
                 }
+                if let Some(t) = &config.tls {
+                    use sqlx::postgres::PgSslMode as M;
+                    o = o.ssl_mode(match t.mode {
+                        TlsMode::Disable => M::Disable,
+                        TlsMode::Prefer => M::Prefer,
+                        TlsMode::Require => M::Require,
+                        TlsMode::VerifyCa => M::VerifyCa,
+                        TlsMode::VerifyFull => M::VerifyFull,
+                    });
+                    if let Some(p) = tls_path(&t.ca_cert) {
+                        o = o.ssl_root_cert(p);
+                    }
+                    if let Some(p) = tls_path(&t.client_cert) {
+                        o = o.ssl_client_cert(p);
+                    }
+                    if let Some(p) = tls_path(&t.client_key) {
+                        o = o.ssl_client_key(p);
+                    }
+                }
                 Pool::Pg(
                     PgPoolOptions::new()
                         .max_connections(4)
@@ -207,6 +227,25 @@ impl Connection {
                 }
                 if let Some(db) = db {
                     o = o.database(db);
+                }
+                if let Some(t) = &config.tls {
+                    use sqlx::mysql::MySqlSslMode as M;
+                    o = o.ssl_mode(match t.mode {
+                        TlsMode::Disable => M::Disabled,
+                        TlsMode::Prefer => M::Preferred,
+                        TlsMode::Require => M::Required,
+                        TlsMode::VerifyCa => M::VerifyCa,
+                        TlsMode::VerifyFull => M::VerifyIdentity,
+                    });
+                    if let Some(p) = tls_path(&t.ca_cert) {
+                        o = o.ssl_ca(p);
+                    }
+                    if let Some(p) = tls_path(&t.client_cert) {
+                        o = o.ssl_client_cert(p);
+                    }
+                    if let Some(p) = tls_path(&t.client_key) {
+                        o = o.ssl_client_key(p);
+                    }
                 }
                 Pool::My(
                     MySqlPoolOptions::new()
@@ -232,11 +271,27 @@ impl Connection {
             Driver::Duckdb => {
                 Pool::Duck(backend::duck::Client::open(&file()?, config.read_only).await?)
             }
-            Driver::Mssql => {
-                Pool::Mssql(backend::mssql::Client::connect(&host, port, user, password, db).await?)
-            }
+            Driver::Mssql => Pool::Mssql(
+                backend::mssql::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.tls.as_ref(),
+                )
+                .await?,
+            ),
             Driver::Clickhouse => Pool::Ch(
-                backend::clickhouse::Client::connect(&host, port, user, password, db).await?,
+                backend::clickhouse::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.tls.as_ref(),
+                )
+                .await?,
             ),
         };
         Ok(Self {
@@ -569,6 +624,14 @@ impl Connection {
             results.remove(0)
         })
     }
+}
+
+/// Non-empty, `~`-expanded certificate path.
+fn tls_path(p: &Option<String>) -> Option<String> {
+    p.as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(crate::tunnel::expand_home)
 }
 
 fn text(v: &Value) -> String {

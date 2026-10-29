@@ -133,6 +133,47 @@ async fn pg_types_and_meta() {
         n.warnings.iter().any(|w| w.contains("full table scan")) || n.children.iter().any(any_warn)
     }
     assert!(any_warn(&a.nodes[0]), "{:#?}", a.nodes);
+    // server-side paging & filters
+    {
+        use rowhouse_core::browse::{Filter, FilterOp, PageRequest, Sort};
+        let p = c
+            .table_page(&PageRequest {
+                schema: "public".into(),
+                table: "rh_child".into(),
+                filters: vec![
+                    Filter {
+                        column: "id".into(),
+                        op: FilterOp::Gt,
+                        value: "19990".into(),
+                        numeric: true,
+                    },
+                    Filter {
+                        column: "id".into(),
+                        op: FilterOp::Contains,
+                        value: "999".into(),
+                        numeric: false,
+                    },
+                ],
+                sort: Some(Sort {
+                    column: "id".into(),
+                    desc: false,
+                }),
+                limit: 3,
+                offset: 1,
+                count: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(p.total, Some(9)); // 19991..19999 contain "999"
+        assert_eq!(
+            p.result
+                .rows
+                .iter()
+                .map(|r| r[0].clone())
+                .collect::<Vec<_>>(),
+            vec![19992, 19993, 19994]
+        );
+    }
     // ANALYZE executes → writes are refused
     assert!(c.explain_plan("DELETE FROM rh_child", true).await.is_err());
     assert_eq!(

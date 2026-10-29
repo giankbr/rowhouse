@@ -48,7 +48,11 @@ fn kind_from(name: &str) -> Option<DbKind> {
         DbKind::Redshift
     } else if has("greenplum") {
         DbKind::Greenplum
-    } else if has("postgres") || n == "pg" || has("supabase") || has("neon") || has("timescale") {
+    } else if has("supabase") {
+        DbKind::Supabase
+    } else if has("neon") {
+        DbKind::Neon
+    } else if has("postgres") || n == "pg" || has("timescale") {
         DbKind::Postgres
     } else if has("mariadb") {
         DbKind::Mariadb

@@ -6,9 +6,11 @@
 
 pub mod ai;
 pub mod backend;
+pub mod browse;
 pub mod changes;
 pub mod compare;
 pub mod config;
+pub mod conn_url;
 pub mod driver;
 pub mod erd;
 pub mod error;
@@ -27,3 +29,12 @@ pub use error::{Error, Result};
 pub use history::{History, HistoryEntry, Snippet};
 pub use io::{ExportFormat, ImportOptions};
 pub use model::*;
+
+/// Pick one rustls crypto provider for the whole process (several crates pull
+/// TLS in; without this, rustls can't decide and panics on the first handshake).
+pub fn init_crypto() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}

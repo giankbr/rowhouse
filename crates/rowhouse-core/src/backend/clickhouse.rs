@@ -33,17 +33,31 @@ impl Client {
         user: Option<&str>,
         password: Option<&str>,
         database: Option<&str>,
+        tls: Option<&crate::config::TlsConfig>,
     ) -> Result<Self> {
-        let scheme = if matches!(port, 443 | 8443) {
-            "https"
-        } else {
-            "http"
-        };
+        use crate::config::TlsMode;
+        let mode = tls.map(|t| t.mode).unwrap_or(TlsMode::Prefer);
+        let https = matches!(
+            mode,
+            TlsMode::Require | TlsMode::VerifyCa | TlsMode::VerifyFull
+        ) || matches!(port, 443 | 8443);
+        let scheme = if https { "https" } else { "http" };
+        let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300));
+        if mode == TlsMode::Require {
+            // encrypted, not verified (self-signed servers)
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        if let Some(ca) = tls
+            .and_then(|t| t.ca_cert.as_deref())
+            .filter(|s| !s.is_empty())
+        {
+            let pem = std::fs::read(crate::tunnel::expand_home(ca))?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .map_err(|e| Error::Other(format!("CA certificate: {e}")))?;
+            builder = builder.add_root_certificate(cert);
+        }
         let c = Self {
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(300))
-                .build()
-                .map_err(|e| Error::Other(e.to_string()))?,
+            http: builder.build().map_err(|e| Error::Other(e.to_string()))?,
             url: format!("{scheme}://{host}:{port}/"),
             user: user.map(str::to_string),
             password: password.map(str::to_string),

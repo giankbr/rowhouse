@@ -129,7 +129,7 @@ fn err(msg: impl std::fmt::Display) -> Error {
 fn dialect_name(kind: DbKind) -> &'static str {
     use DbKind::*;
     match kind {
-        Postgres => "PostgreSQL",
+        Postgres | Neon | Supabase => "PostgreSQL",
         Cockroach => "CockroachDB (PostgreSQL dialect)",
         Redshift => "Amazon Redshift",
         Greenplum => "Greenplum (PostgreSQL dialect)",
@@ -264,6 +264,7 @@ pub fn extract_sql(reply: &str) -> AiAnswer {
 
 impl AiClient {
     pub fn new(settings: AiSettings, api_key: Option<String>) -> Result<Self> {
+        crate::init_crypto();
         if settings.model.trim().is_empty() {
             return Err(err("no model configured — open Settings → AI"));
         }
