@@ -4,6 +4,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
@@ -25,6 +26,8 @@ export default function App() {
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
   const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null }>({ open: false, edit: null });
   const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const setToast = useCallback(
@@ -39,7 +42,11 @@ export default function App() {
 
   useEffect(() => {
     api.listConnections().then(setConnections).catch((e) => setToast(String(e)));
-  }, []);
+    api.ai
+      .getSettings()
+      .then((r) => setAiEnabled(r.settings.enabled && !!r.settings.model))
+      .catch(() => {});
+  }, [setToast]);
 
   useEffect(() => {
     if (!toast) return;
@@ -204,6 +211,7 @@ export default function App() {
         onToggleSidebar={() => setSidebar((s) => !s)}
         onPalette={() => setPalette(true)}
         onMcp={() => setMcpOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -238,6 +246,8 @@ export default function App() {
                   onView={setView}
                   onToast={setToast}
                   onHistory={() => setHistoryOpen((h) => !h)}
+                  aiEnabled={aiEnabled}
+                  onOpenSettings={() => setSettingsOpen(true)}
                 />
               ) : (
                 <Empty>
@@ -291,6 +301,11 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={(s) => setAiEnabled(s.enabled && !!s.model)}
+      />
       <CommandPalette
         open={palette}
         onClose={() => setPalette(false)}
@@ -299,6 +314,7 @@ export default function App() {
         actions={{
           newQuery: () => newQuery(),
           showHistory: () => setHistoryOpen(true),
+          showSettings: () => setSettingsOpen(true),
           newConnection: () => setDialog({ open: true, edit: null }),
           openTable,
           selectConnection,
@@ -332,6 +348,7 @@ function Shortcuts() {
     ["Run query", [mod, "↵"]],
     ["Toggle sidebar", [mod, "B"]],
     ["Query history", [mod, "Y"]],
+    ["Ask AI", [mod, "I"]],
   ];
   return (
     <div className="mt-2 grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 text-2xs text-muted">

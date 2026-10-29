@@ -123,6 +123,18 @@ export interface HistoryEntry {
   at: number;
 }
 
+export interface AiSettings {
+  enabled: boolean;
+  provider: "openai" | "anthropic";
+  baseUrl: string;
+  model: string;
+}
+
+export interface AiAnswer {
+  sql: string;
+  explanation: string;
+}
+
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -167,6 +179,16 @@ export const api = {
     call<HistoryEntry[]>("list_history", { id, search, limit }),
   clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
+  ai: {
+    getSettings: () => call<{ settings: AiSettings; hasKey: boolean }>("ai_get_settings"),
+    saveSettings: (settings: AiSettings, apiKey?: string) => call<void>("ai_save_settings", { settings, apiKey }),
+    listModels: (settings: AiSettings, apiKey?: string) => call<string[]>("ai_list_models", { settings, apiKey }),
+    test: (settings: AiSettings, apiKey?: string) => call<string>("ai_test", { settings, apiKey }),
+    generate: (id: string, prompt: string, currentSql?: string) =>
+      call<AiAnswer>("ai_generate", { id, prompt, currentSql }),
+    fix: (id: string, sql: string, error: string) => call<AiAnswer>("ai_fix", { id, sql, error }),
+    explain: (id: string, sql: string) => call<AiAnswer>("ai_explain", { id, sql }),
+  },
 };
 
 export type ExportFormat = "csv" | "json" | "sql";
@@ -258,6 +280,11 @@ const mockCols: ColumnInfo[] = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const mockAi: { settings: AiSettings; hasKey: boolean } = {
+  settings: { enabled: true, provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-mock" },
+  hasKey: true,
+};
+
 async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
   await sleep(cmd === "run_query" ? 180 : 60);
   switch (cmd) {
@@ -339,6 +366,35 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
     }
     case "clear_history":
       return null;
+    case "ai_get_settings":
+      return mockAi;
+    case "ai_save_settings":
+      mockAi.settings = a.settings as AiSettings;
+      if (a.apiKey !== undefined) mockAi.hasKey = !!a.apiKey;
+      return null;
+    case "ai_list_models":
+      return ["gpt-mock", "gpt-mock-mini", "local-llama"];
+    case "ai_test":
+      return "OK";
+    case "ai_generate":
+      await sleep(600);
+      return {
+        sql: "SELECT u.id, u.full_name, SUM(o.total) AS revenue\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid'\nGROUP BY u.id, u.full_name\nORDER BY revenue DESC\nLIMIT 10;",
+        explanation: "Top 10 customers by paid order revenue.",
+      } satisfies AiAnswer;
+    case "ai_fix":
+      await sleep(500);
+      return {
+        sql: String(a.sql).replace(/full_nam\b/g, "full_name").replace(/^err\w*/i, "SELECT"),
+        explanation: "The column is called full_name.",
+      } satisfies AiAnswer;
+    case "ai_explain":
+      await sleep(400);
+      return {
+        sql: "",
+        explanation:
+          "Lists active users with their email, newest signups first. It scans users once; an index on (active, created_at) would avoid a sort on large tables.",
+      } satisfies AiAnswer;
     case "mcp_info":
       return {
         command: "/Applications/Rowhouse.app/Contents/MacOS/rowhouse-mcp",

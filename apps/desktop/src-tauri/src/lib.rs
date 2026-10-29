@@ -262,6 +262,87 @@ async fn import_csv(
         .await
 }
 
+// ---- AI (bring your own model) ------------------------------------------------
+
+use rowhouse_core::ai::{AiAnswer, AiClient, AiSettings};
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSettingsView {
+    settings: AiSettings,
+    has_key: bool,
+}
+
+#[tauri::command]
+fn ai_get_settings() -> CmdResult<AiSettingsView> {
+    Ok(AiSettingsView {
+        settings: AiSettings::load()?,
+        has_key: AiSettings::api_key().ok().flatten().is_some(),
+    })
+}
+
+/// `api_key`: `None` keeps the stored key, `Some("")` removes it.
+#[tauri::command]
+fn ai_save_settings(settings: AiSettings, api_key: Option<String>) -> CmdResult<()> {
+    if let Some(k) = api_key.as_deref() {
+        AiSettings::set_api_key(Some(k))?;
+    }
+    settings.save()
+}
+
+fn client_for(settings: AiSettings, api_key: Option<String>) -> CmdResult<AiClient> {
+    let key = api_key
+        .filter(|k| !k.is_empty())
+        .or_else(|| AiSettings::api_key().ok().flatten());
+    AiClient::new(settings, key)
+}
+
+#[tauri::command]
+async fn ai_list_models(settings: AiSettings, api_key: Option<String>) -> CmdResult<Vec<String>> {
+    let mut s = settings;
+    if s.model.is_empty() {
+        s.model = "-".into(); // listing models doesn't need one
+    }
+    client_for(s, api_key)?.list_models().await
+}
+
+#[tauri::command]
+async fn ai_test(settings: AiSettings, api_key: Option<String>) -> CmdResult<String> {
+    client_for(settings, api_key)?
+        .complete("You are a connectivity check.", "Reply with exactly: OK")
+        .await
+}
+
+#[tauri::command]
+async fn ai_generate(
+    state: State<'_, AppState>,
+    id: String,
+    prompt: String,
+    current_sql: Option<String>,
+) -> CmdResult<AiAnswer> {
+    let c = state.conn(&id).await?;
+    AiClient::from_saved()?
+        .generate(&c, &prompt, current_sql.as_deref())
+        .await
+}
+
+#[tauri::command]
+async fn ai_fix(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    error: String,
+) -> CmdResult<AiAnswer> {
+    let c = state.conn(&id).await?;
+    AiClient::from_saved()?.fix(&c, &sql, &error).await
+}
+
+#[tauri::command]
+async fn ai_explain(state: State<'_, AppState>, id: String, sql: String) -> CmdResult<AiAnswer> {
+    let c = state.conn(&id).await?;
+    AiClient::from_saved()?.explain(&c, &sql).await
+}
+
 /// Info for the "Connect an AI assistant" panel.
 #[tauri::command]
 fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
@@ -318,6 +399,13 @@ pub fn run() {
             table_sql_all,
             import_csv,
             mcp_info,
+            ai_get_settings,
+            ai_save_settings,
+            ai_list_models,
+            ai_test,
+            ai_generate,
+            ai_fix,
+            ai_explain,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rowhouse");

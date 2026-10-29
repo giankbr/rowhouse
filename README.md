@@ -17,6 +17,7 @@ assistants can explore your databases safely.
 - Inline editing for tables with a primary key: edit / NULL / add / delete rows, review the generated SQL, commit atomically (`⌘/Ctrl+S`); every UPDATE/DELETE must hit exactly one row or the transaction rolls back
 - SSH tunnels: private key (incl. encrypted), SSH agent (incl. 1Password / Pageant / Windows OpenSSH), or password; host key checked against `~/.ssh/known_hosts`, otherwise pinned on first connect
 - Export query/table results to CSV, JSON or SQL INSERTs (streamed, no row limit); import CSV into a table in one transaction
+- AI, bring your own model (opt-in): **Ask AI** (`⌘/Ctrl+I`) turns a sentence into SQL, **Fix with AI** on errors, **Explain** — proposals are shown as a diff and only applied when you accept. Works with OpenAI-compatible APIs (OpenAI, OpenRouter, Ollama, LM Studio, …) and Anthropic. Only the schema (names/types) and your SQL are sent — never rows
 - Query history (`⌘/Ctrl+Y`) shared with the MCP server — every query an AI assistant runs shows up, tagged “AI”
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
 - `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
@@ -70,7 +71,7 @@ docs: add SSH tunnel guide
 ```
 
 Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
-Suggested scopes: `core`, `mcp`, `desktop`, `ui`, `grid`, `editor`, `drivers`, `deps`, `ci`, `docs`.
+Suggested scopes: `core`, `mcp`, `ai`, `desktop`, `ui`, `grid`, `editor`, `drivers`, `deps`, `ci`, `docs`.
 The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI runs tests on Linux and builds on macOS + Windows.
 
 ## Database support
@@ -132,7 +133,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [ ] Saved queries / snippets
 - [x] SQL Server, DuckDB, ClickHouse, CockroachDB (+ beta: Redshift, Greenplum, TiDB, SingleStore)
 - [ ] MongoDB, Redis, LibSQL/Turso, D1, Cassandra drivers
-- [ ] AI: natural-language → SQL and “fix this query” with your own model (OpenAI-compatible)
+- [x] AI: natural-language → SQL, fix, explain with your own model
+- [ ] AI: streaming responses, inline completions in the editor
 - [ ] Split panes, ERD, query plan viewer, schema/data compare
 - [ ] ERD view, table structure editor
 - [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval

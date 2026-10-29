@@ -6,7 +6,7 @@ export default {
     "scope-enum": [
       1,
       "always",
-      ["core", "mcp", "desktop", "ui", "grid", "editor", "drivers", "deps", "ci", "docs", "release"],
+      ["core", "mcp", "ai", "desktop", "ui", "grid", "editor", "drivers", "deps", "ci", "docs", "release"],
     ],
     "body-max-line-length": [0],
   },

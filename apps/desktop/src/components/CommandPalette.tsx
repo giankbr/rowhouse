@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Bot, Database, Eye, History, Moon, Plus, SquareTerminal, Table2 } from "lucide-react";
+import { Bot, Database, Eye, History, Moon, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -17,6 +17,7 @@ export function CommandPalette({
   actions: {
     newQuery: () => void;
     showHistory: () => void;
+    showSettings: () => void;
     newConnection: () => void;
     openTable: (t: TableInfo) => void;
     selectConnection: (id: string) => void;
@@ -82,6 +83,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.showMcp)} className={item}>
               <Bot size={13} className="text-subtle" /> Connect an AI assistant (MCP)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.showSettings)} className={item}>
+              <Settings size={13} className="text-subtle" /> Settings · AI model
             </Command.Item>
             <Command.Item onSelect={run(actions.toggleTheme)} className={item}>
               <Moon size={13} className="text-subtle" /> Toggle light / dark

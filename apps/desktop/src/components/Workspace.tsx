@@ -1,11 +1,12 @@
-import { AlertCircle, Check, Download, History, KeyRound, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, BookOpen, Check, Download, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
+import { AiPanel, type AiState } from "./AiPanel";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
-import { Button, Kbd, Menu, Modal, Segmented, cx } from "./ui";
+import { Button, Menu, Modal, Segmented, cx } from "./ui";
 
 export function Workspace({
   tab,
@@ -16,6 +17,8 @@ export function Workspace({
   onView,
   onToast,
   onHistory,
+  aiEnabled,
+  onOpenSettings,
 }: {
   tab: Tab;
   conn: ConnectionConfig | undefined;
@@ -25,6 +28,8 @@ export function Workspace({
   onView: (v: "data" | "structure") => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onHistory: () => void;
+  aiEnabled: boolean;
+  onOpenSettings: () => void;
 }) {
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -76,6 +81,52 @@ export function Workspace({
       setReview({ ...review, busy: false, error: String(e) });
     }
   };
+
+  // ---- AI ----------------------------------------------------------------
+  const [ai, setAi] = useState<AiState | null>(null);
+  const needAi = () => {
+    if (!aiEnabled) {
+      onOpenSettings();
+      return false;
+    }
+    return true;
+  };
+  const askAi = () => needAi() && setAi({ mode: "ask", prompt: "" });
+  const runAi = async (state: AiState) => {
+    setAi({ ...state, loading: true, error: undefined, answer: undefined });
+    try {
+      const answer =
+        state.mode === "ask"
+          ? await api.ai.generate(tab.connId, state.prompt, tab.sql)
+          : state.mode === "fix"
+            ? await api.ai.fix(tab.connId, tab.sql, tab.error ?? "")
+            : await api.ai.explain(tab.connId, tab.sql);
+      setAi((cur) => cur && { ...cur, loading: false, answer });
+    } catch (e) {
+      setAi((cur) => cur && { ...cur, loading: false, error: String(e) });
+    }
+  };
+  const fixWithAi = () => needAi() && runAi({ mode: "fix" });
+  const explainWithAi = () => needAi() && runAi({ mode: "explain" });
+  const acceptAi = (run: boolean) => {
+    const sql = ai?.answer?.sql;
+    if (!sql) return;
+    onChange({ sql });
+    setAi(null);
+    if (run) onRun(sql);
+  };
+
+  useEffect(() => {
+    if (tab.kind !== "query") return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        askAi();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   // ---- import / export ----------------------------------------------------
   const exportAs = async (format: ExportFormat) => {
@@ -141,15 +192,26 @@ export function Workspace({
           <div onMouseDown={startDrag} className="group relative h-px shrink-0 cursor-row-resize bg-line">
             <div className="absolute inset-x-0 -top-1 -bottom-1 group-hover:bg-accent/30" />
           </div>
+          {ai && (
+            <AiPanel
+              state={ai}
+              currentSql={tab.sql}
+              onChange={setAi}
+              onSubmit={() => runAi(ai)}
+              onAccept={acceptAi}
+              onClose={() => setAi(null)}
+            />
+          )}
           <Toolbar>
-            <Button variant="primary" size="xs" onClick={() => onRun()} disabled={tab.running}>
+            <Button variant="primary" size="xs" onClick={() => onRun()} disabled={tab.running} title={`Run selection or all (${mod}+Enter)`}>
               <Play size={11} fill="currentColor" /> Run
             </Button>
-            <span className="flex items-center gap-0.5 text-2xs text-subtle">
-              <Kbd>{mod}</Kbd>
-              <Kbd>↵</Kbd>
-              <span className="ml-1">selection or all</span>
-            </span>
+            <Button variant="ghost" size="xs" onClick={askAi} title={`Ask AI (${mod}+I)`}>
+              <Sparkles size={11} className="text-accent" /> Ask AI
+            </Button>
+            <Button variant="ghost" size="xs" onClick={explainWithAi} disabled={!tab.sql.trim()} title="Explain this query">
+              <BookOpen size={11} /> Explain
+            </Button>
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
             <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
             <Button variant="ghost" size="xs" onClick={onHistory} title={`Query history (${mod}+Y)`}>
@@ -208,7 +270,12 @@ export function Workspace({
         ) : tab.error ? (
           <div className="selectable m-3 flex gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-xs text-danger">
             <AlertCircle size={14} className="mt-px shrink-0" />
-            <pre className="whitespace-pre-wrap">{tab.error}</pre>
+            <pre className="flex-1 whitespace-pre-wrap">{tab.error}</pre>
+            {tab.kind === "query" && (
+              <Button size="xs" className="shrink-0 font-sans" onClick={fixWithAi}>
+                <Wand2 size={11} className="text-accent" /> Fix with AI
+              </Button>
+            )}
           </div>
         ) : result ? (
           <ResultsGrid

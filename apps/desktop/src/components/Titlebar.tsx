@@ -1,4 +1,4 @@
-import { Bot, Command, Moon, PanelLeft, Sun } from "lucide-react";
+import { Bot, Command, Moon, PanelLeft, Settings, Sun } from "lucide-react";
 import { kindInfo, type ConnectionConfig } from "../lib/api";
 import { isMac, mod } from "../lib/types";
 import { Button, Dot, Kbd, cx } from "./ui";
@@ -10,6 +10,7 @@ export function Titlebar({
   onToggleSidebar,
   onPalette,
   onMcp,
+  onSettings,
 }: {
   conn: ConnectionConfig | null;
   dark: boolean;
@@ -17,6 +18,7 @@ export function Titlebar({
   onToggleSidebar: () => void;
   onPalette: () => void;
   onMcp: () => void;
+  onSettings: () => void;
 }) {
   return (
     <header
@@ -55,6 +57,9 @@ export function Titlebar({
       </button>
       <Button variant="ghost" size="icon" onClick={onMcp} title="Connect an AI assistant (MCP)">
         <Bot size={14} />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onSettings} title="Settings (AI)">
+        <Settings size={14} />
       </Button>
       <Button variant="ghost" size="icon" onClick={onToggleTheme} title="Toggle theme">
         {dark ? <Sun size={14} /> : <Moon size={14} />}
