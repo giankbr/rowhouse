@@ -22,6 +22,9 @@ assistants can explore your databases safely.
 - ER diagram (`Diagram` in the sidebar): built from foreign keys, pan / zoom / drag, click to focus a table's relations, double-click to open it, export SVG
 - Split panes (`⌘/Ctrl+\\`) and drag-and-drop tabs between them
 - Import connections from DBeaver, TablePlus and Navicat (auto-detects their files; passwords are re-entered once)
+- Paste a connection URL (`postgresql://…`, `mysql://…`); Neon and Supabase are recognised and use TLS by default
+- TLS options: disable / prefer / require / verify-ca / verify-full, custom CA and client certificates (mutual TLS)
+- Table browsing pushed down to SQL: filters, server-side sort and pagination with row counts
 - Query plan viewer (**Plan**): EXPLAIN as a tree with cost/time bars and hints (full scans, bad estimates, disk sorts); `ANALYZE` on PostgreSQL runs read-only
 - Saved queries: **Save** in a query tab, find them under *Saved* in the history drawer (per connection or global)
 - Schema compare between any two connections/schemas, with a migration script for the target (drops commented out)
@@ -85,9 +88,9 @@ The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI r
 
 | Status | Databases | How |
 | --- | --- | --- |
-| ✅ integration-tested | PostgreSQL, MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
+| ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
 | 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8 | `tiberius`, Postgres protocol |
-| 🟡 beta (wire-compatible, not yet run against a live server) | Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
+| 🟡 beta (wire-compatible, not yet run against a live server) | Neon, Supabase (Postgres + TLS), Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
 | ⏳ planned | LibSQL/Turso, Cloudflare D1, MongoDB, Redis, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
 
 Notes: ClickHouse has no transactions, so grid editing is disabled there (CSV import still works).
@@ -131,10 +134,10 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 ## Roadmap
 
 - [x] Inline cell editing with pending-changes buffer → SQL preview → commit in a transaction
-- [ ] Filters / sort pushed down to SQL, pagination for large tables
+- [x] Filters / sort pushed down to SQL, pagination for large tables
 - [x] SSH tunnel (russh): key / password auth, host-key pinning
 - [x] SSH agent auth
-- [ ] TLS options (CA / client certs)
+- [x] TLS options (CA / client certs), Neon & Supabase
 - [x] Query history (app + MCP)
 - [x] Export (CSV, JSON, SQL INSERTs) and CSV import
 - [ ] Saved queries / snippets
@@ -144,7 +147,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [ ] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import
 - [x] Query plan viewer, schema compare, saved queries
-- [ ] Data compare, scheduled queries, MongoDB / Redis drivers
+- [x] Data compare (PK-matched rows + sync script)
+- [ ] Scheduled queries, MongoDB / Redis drivers
 - [ ] ERD view, table structure editor
 - [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [ ] Auto-update, code signing (macOS notarization, Windows signing)
