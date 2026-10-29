@@ -1,0 +1,169 @@
+//! Conservative read-only classifier.
+//!
+//! This is the *first* line of defence. [`crate::Connection::query_read_only`]
+//! additionally runs the statement inside a read-only transaction / `query_only`
+//! session, so a statement that slips past this check is still refused by the DB.
+
+/// Statement keywords that never modify data.
+const READ_KEYWORDS: &[&str] = &[
+    "select", "with", "show", "explain", "describe", "desc", "values", "table",
+];
+
+/// Keywords that turn an otherwise read-looking statement into a write
+/// (`WITH x AS (DELETE ...)`, `SELECT ... INTO new_table`, etc).
+const WRITE_KEYWORDS: &[&str] = &[
+    "insert", "update", "delete", "merge", "upsert", "into", "create", "alter", "drop", "truncate",
+    "grant", "revoke", "copy", "call", "lock", "vacuum", "attach", "detach", "reindex",
+];
+
+/// Split a script into statements, with comments and string literals blanked out.
+/// Returns the *normalised* (lowercased, literal-free) text of each statement.
+pub fn normalised_statements(sql: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match c {
+            '-' if next == Some('-') => {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                cur.push(' ');
+                continue;
+            }
+            '#' => {
+                // MySQL line comment
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                cur.push(' ');
+                continue;
+            }
+            '/' if next == Some('*') => {
+                i += 2;
+                while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                    i += 1;
+                }
+                i += 2;
+                cur.push(' ');
+                continue;
+            }
+            '\'' | '"' | '`' => {
+                let q = c;
+                i += 1;
+                while i < chars.len() {
+                    if chars[i] == q {
+                        if chars.get(i + 1) == Some(&q) {
+                            i += 2; // escaped quote
+                            continue;
+                        }
+                        break;
+                    }
+                    if chars[i] == '\\' && q == '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                i += 1;
+                // quoted identifiers / literals become a neutral token
+                cur.push_str(" _ ");
+                continue;
+            }
+            '$' => {
+                // Postgres dollar-quoting: $tag$ ... $tag$
+                let start = i;
+                let mut j = i + 1;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == '$' {
+                    let tag: String = chars[start..=j].iter().collect();
+                    let rest: String = chars[j + 1..].iter().collect();
+                    if let Some(end) = rest.find(&tag) {
+                        i = j + 1 + rest[..end].chars().count() + tag.chars().count();
+                        cur.push_str(" _ ");
+                        continue;
+                    }
+                }
+                cur.push(c);
+            }
+            ';' => {
+                if !cur.trim().is_empty() {
+                    out.push(cur.trim().to_lowercase());
+                }
+                cur.clear();
+            }
+            _ => cur.push(c),
+        }
+        i += 1;
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_lowercase());
+    }
+    out
+}
+
+fn words(stmt: &str) -> impl Iterator<Item = &str> {
+    stmt.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+}
+
+/// Returns `Ok(())` when every statement in `sql` is read-only, otherwise an
+/// explanation of the first offending statement.
+pub fn check_read_only(sql: &str) -> Result<(), String> {
+    let stmts = normalised_statements(sql);
+    if stmts.is_empty() {
+        return Err("empty query".into());
+    }
+    for stmt in &stmts {
+        let first = words(stmt).next().unwrap_or_default();
+        if !READ_KEYWORDS.contains(&first) {
+            return Err(format!(
+                "`{first}` statements are not allowed in read-only mode"
+            ));
+        }
+        // EXPLAIN ANALYZE actually executes the statement.
+        if first == "explain" && words(stmt).nth(1) == Some("analyze") {
+            if let Some(w) = words(stmt).skip(2).find(|w| WRITE_KEYWORDS.contains(w)) {
+                return Err(format!(
+                    "EXPLAIN ANALYZE of a `{w}` statement is not allowed"
+                ));
+            }
+            continue;
+        }
+        if let Some(w) = words(stmt).skip(1).find(|w| WRITE_KEYWORDS.contains(w)) {
+            return Err(format!("`{w}` is not allowed in read-only mode"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allows_reads() {
+        assert!(check_read_only("select * from users").is_ok());
+        assert!(check_read_only("  -- hi\nSELECT 1; select 'delete from x'").is_ok());
+        assert!(check_read_only("with a as (select 1) select * from a").is_ok());
+        assert!(check_read_only("explain select 1").is_ok());
+        assert!(check_read_only("show tables").is_ok());
+        assert!(check_read_only("select replace(name, 'a', 'b') from t").is_ok());
+        assert!(check_read_only("select $$drop table x$$").is_ok());
+    }
+
+    #[test]
+    fn blocks_writes() {
+        assert!(check_read_only("delete from users").is_err());
+        assert!(check_read_only("select 1; drop table users").is_err());
+        assert!(check_read_only("with d as (delete from t returning *) select * from d").is_err());
+        assert!(check_read_only("select * into t2 from t").is_err());
+        assert!(check_read_only("explain analyze delete from t").is_err());
+        assert!(check_read_only("/* select */ update t set a=1").is_err());
+        assert!(check_read_only("").is_err());
+    }
+}

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/rowhouse-core", "crates/rowhouse-mcp", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/giankbr/rowhouse"
+
+[workspace.dependencies]
+rowhouse-core = { path = "crates/rowhouse-core" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
