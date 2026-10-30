@@ -81,6 +81,19 @@ jobs:
             fi
           done
 
+      # Pro license verification: release builds embed the public key (when the
+      # secret is set) and their build time; without it the build is a community
+      # build with everything unlocked. See RELEASING.md → Licenses.
+      - name: Configure license key
+        shell: bash
+        env:
+          ROWHOUSE_LICENSE_PUBKEY: ${{ secrets.ROWHOUSE_LICENSE_PUBKEY }}
+        run: |
+          echo "ROWHOUSE_BUILD_TIME=$(date +%s)" >> "$GITHUB_ENV"
+          if [ -n "$ROWHOUSE_LICENSE_PUBKEY" ]; then
+            echo "ROWHOUSE_LICENSE_PUBKEY=$ROWHOUSE_LICENSE_PUBKEY" >> "$GITHUB_ENV"
+          fi
+
       # Windows: import a code-signing certificate (PFX, base64) when provided;
       # tauri signs with it via bundle.windows.certificateThumbprint.
       - name: Import Windows signing certificate

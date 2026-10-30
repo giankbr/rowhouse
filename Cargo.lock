@@ -5135,6 +5135,7 @@ dependencies = [
  "plist",
  "redis",
  "reqwest",
+ "ring",
  "roxmltree",
  "rusqlite",
  "russh",

@@ -2,6 +2,7 @@ import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type AiSettings } from "../lib/api";
 import { Button, Field, Input, Modal, Segmented, Switch, cx } from "./ui";
+import type { LicenseStatus } from "../lib/api";
 import { saveAppearance, useAppearance, type Appearance, type Density, type MonoFont, type UiFont } from "../lib/appearance";
 
 const PRESETS: { id: string; label: string; provider: AiSettings["provider"]; baseUrl: string; needsKey: boolean }[] = [
@@ -95,6 +96,8 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
     >
       <div className="flex flex-col gap-3">
         <AppearanceSection />
+        <div className="h-px bg-line" />
+        <LicenseSection />
         <div className="h-px bg-line" />
         <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">AI</h3>
         <Switch checked={s.enabled} onChange={(v) => set({ enabled: v })} label="Enable AI features (Ask AI, Fix with AI, Explain)" />
@@ -247,6 +250,63 @@ function AppearanceSection() {
           ]}
         />
       </div>
+    </div>
+  );
+}
+
+function LicenseSection() {
+  const [st, setSt] = useState<LicenseStatus | null>(null);
+  const [key, setKey] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    api.license.status().then(setSt).catch(() => {});
+  }, []);
+  if (!st) return null;
+  const date = (t: number) => new Date(t * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">License</h3>
+      {st.communityBuild ? (
+        <p className="text-xs text-muted">Community build — every feature is unlocked. Official releases ask for a Pro license for scheduled queries and AI write requests.</p>
+      ) : st.license ? (
+        <div className="flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+          <span className="rounded bg-accent px-1.5 py-px text-[10px] font-semibold text-accent-fg uppercase">{st.license.plan}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {st.license.email}
+            <span className="text-muted">
+              {" "}
+              · updates until {date(st.license.updatesUntil)}
+              {st.updatesExpired && " (expired — this build still works)"}
+            </span>
+          </span>
+          <Button size="xs" variant="ghost" onClick={() => api.license.deactivate().then(setSt)}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <form
+          className="flex flex-col gap-1.5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setErr(null);
+            try {
+              setSt(await api.license.activate(key));
+              setKey("");
+            } catch (x) {
+              setErr(String(x));
+            }
+          }}
+        >
+          <p className="text-xs text-muted">Pro unlocks scheduled queries and AI write requests over MCP. Paste the key from your purchase email.</p>
+          <div className="flex gap-2">
+            <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="RH1-…" className="font-mono" />
+            <Button type="submit" variant="primary" disabled={!key.trim()}>
+              Activate
+            </Button>
+          </div>
+          {(err || st.error) && <span className="text-2xs text-danger">{err ?? st.error}</span>}
+        </form>
+      )}
     </div>
   );
 }

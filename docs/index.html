@@ -198,6 +198,12 @@
 
   /* ---------- section heads (split) ---------- */
   .band { padding-block: clamp(52px, 8vw, 88px); }
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+  @media (max-width: 900px) { .gallery { grid-template-columns: 1fr; } }
+  .gallery figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .gallery .shot { border-radius: 10px; box-shadow: 0 18px 36px -26px rgba(30,27,75,.35); }
+  .gallery figcaption { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+  .gallery figcaption b { color: var(--fg, inherit); font-weight: 600; }
   .sec-head { display: grid; grid-template-columns: 1fr 1fr; gap: 20px clamp(28px, 5vw, 64px); align-items: end; margin-bottom: clamp(34px, 5vw, 52px); }
   @media (max-width: 760px) { .sec-head { grid-template-columns: 1fr; gap: 14px; align-items: start; } }
   .sec-tag { font-family: var(--f-mono); font-size: 12px; color: var(--accent-ink); letter-spacing: .02em; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
@@ -363,7 +369,7 @@
     <section class="hero">
       <div class="pad">
         <div class="stagger">
-            <span class="eyebrow"><span class="dot"></span> Open source · Tauri 2 <span class="pill">v0.1</span></span>
+            <span class="eyebrow"><span class="dot"></span> Open source · Tauri 2 <span class="pill">v0.4</span></span>
             <h1>The database client with an <span class="hl">AI copilot</span> built in.</h1>
             <p class="lede">A fast, compact SQL client for Postgres, MySQL and SQLite — bundled with a read-only MCP server so Claude and other assistants can explore your data safely, through the same connections you already use.</p>
             <div class="cta-row">
@@ -383,6 +389,35 @@
             <img class="shot-img shot-light" src="app-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Rowhouse showing the users table of a read-only Production MySQL connection — schema tree, query toolbar and a grid with typed NULL, boolean and JSON cells.">
             <img class="shot-img shot-dark" src="app-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- GALLERY ---------- -->
+    <section class="band" id="tour" style="padding-bottom:0">
+      <div class="pad">
+        <div class="gallery">
+          <figure class="reveal">
+            <a class="shot" href="shot-builder-light.jpg" target="_blank" rel="noopener">
+              <img class="shot-img shot-light" src="shot-builder-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Rowhouse visual query builder joining users, orders and order_items with a SUM aggregate and a filter, with the generated SQL beside it.">
+              <img class="shot-img shot-dark" src="shot-builder-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
+            </a>
+            <figcaption><b>Visual query builder</b> — drop tables on a canvas — foreign keys join themselves, the SQL writes itself.</figcaption>
+          </figure>
+          <figure class="reveal">
+            <a class="shot" href="shot-ai-light.jpg" target="_blank" rel="noopener">
+              <img class="shot-img shot-light" src="shot-ai-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Inline AI edit box proposing ORDER BY and LIMIT for a selected query.">
+              <img class="shot-img shot-dark" src="shot-ai-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
+            </a>
+            <figcaption><b>AI inline edit</b> — select SQL, press ⌘I, say what to change, review the diff, accept.</figcaption>
+          </figure>
+          <figure class="reveal">
+            <a class="shot" href="shot-activity-light.jpg" target="_blank" rel="noopener">
+              <img class="shot-img shot-light" src="shot-activity-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Server activity table with active and idle-in-transaction sessions and cancel / terminate buttons.">
+              <img class="shot-img shot-dark" src="shot-activity-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
+            </a>
+            <figcaption><b>Server activity</b> — see what's running, cancel a runaway query or kill a stuck session.</figcaption>
+          </figure>
         </div>
       </div>
     </section>
@@ -496,9 +531,9 @@
         <div class="sec-head reveal">
           <div>
             <div class="sec-tag">Drivers</div>
-            <h2>Four databases today. Many more on the way.</h2>
+            <h2>20+ databases, one compact client.</h2>
           </div>
-          <p class="desc">Postgres, MySQL/MariaDB and SQLite work end-to-end. Any engine speaking the Postgres or MySQL wire protocol drops in with almost no work.</p>
+          <p class="desc">SQL, key-value, document and wide-column stores — browse, edit, back up and query them the same way. Beta drivers are marked until they have run against live servers in CI.</p>
         </div>
         <div class="support stagger">
           <div class="scard">
@@ -506,16 +541,16 @@
             <ul><li class="hot">PostgreSQL</li><li class="hot">MySQL</li><li class="hot">MariaDB</li><li class="hot">SQLite</li></ul>
           </div>
           <div class="scard">
-            <span class="st soon">Wire-compatible</span>
-            <ul><li>CockroachDB</li><li>Redshift</li><li>Greenplum</li><li>SingleStore</li><li>TiDB</li></ul>
+            <span class="st live"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 5 5L20 7"/></svg>Shipping</span>
+            <ul><li class="hot">DuckDB</li><li class="hot">ClickHouse</li><li class="hot">Redis &amp; Upstash</li><li class="hot">Neon</li><li class="hot">Supabase</li><li class="hot">Turso / libSQL</li><li class="hot">Cloudflare D1</li></ul>
           </div>
           <div class="scard">
-            <span class="st soon">Planned</span>
-            <ul><li>SQL Server</li><li>ClickHouse</li><li>DuckDB</li><li>LibSQL / Turso</li><li>MongoDB</li><li>Redis</li></ul>
+            <span class="st soon">Beta</span>
+            <ul><li>SQL Server</li><li>MongoDB</li><li>Cassandra</li><li>ScyllaDB</li><li>CockroachDB</li><li>Redshift</li><li>TiDB</li><li>SingleStore</li></ul>
           </div>
           <div class="scard">
             <span class="st soon">Roadmap</span>
-            <ul><li>Inline editing</li><li>SSH tunnels</li><li>CSV / JSON export</li><li>Query history</li><li>ERD view</li></ul>
+            <ul><li>Oracle</li><li>Snowflake</li><li>BigQuery</li><li>Elasticsearch</li></ul>
           </div>
         </div>
       </div>
@@ -578,7 +613,7 @@
             <a class="btn" href="https://github.com/giankbr/rowhouse/discussions">Talk to us</a>
           </div>
         </div>
-        <p class="plan-note">Prices in USD. Pro and Team are in early access — features marked here are on the roadmap, not shipped yet.</p>
+        <p class="plan-note">Prices in USD. Scheduled queries and MCP write approvals ship today; sync, team workspaces and policies are in early access and on the roadmap.</p>
         <div class="faq reveal">
           <div><h4>Is Rowhouse still open source?</h4><p>Yes. The client — every feature in Free — stays MIT-licensed on GitHub. You can build it yourself and use it commercially.</p></div>
           <div><h4>Why pay, then?</h4><p>Pro and Team pay for the parts that run on our servers (sync, team workspaces, policies) and for signed builds with auto-update. They also keep the free client maintained.</p></div>

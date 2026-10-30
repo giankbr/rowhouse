@@ -21,6 +21,7 @@ pub mod guard;
 pub mod history;
 pub mod import;
 pub mod io;
+pub mod license;
 pub mod model;
 pub mod plan;
 pub mod schedules;

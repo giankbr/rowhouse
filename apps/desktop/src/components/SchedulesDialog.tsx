@@ -68,6 +68,10 @@ export function SchedulesDialog({
   const [, tick] = useState(0);
 
   const reload = useCallback(() => api.schedules.list().then(setList), []);
+  const [pro, setPro] = useState(true);
+  useEffect(() => {
+    if (open) api.license.status().then((s) => setPro(s.pro)).catch(() => {});
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -365,6 +369,11 @@ export function SchedulesDialog({
                 </div>
               </div>
 
+              {!pro && (
+                <div className="rounded-md bg-accent-soft px-3 py-2 text-xs">
+                  Scheduled queries are part of <b>Rowhouse Pro</b>. You can set them up now; they run once a license is added in Settings → License.
+                </div>
+              )}
               {error && <div className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{error}</div>}
 
               {sel.runs.length > 0 && (

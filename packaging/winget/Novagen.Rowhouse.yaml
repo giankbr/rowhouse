@@ -1,0 +1,18 @@
+# winget manifest (singleton format). Filled in by `node scripts/packaging.mjs <version>`,
+# then submitted with `wingetcreate submit` or a PR to microsoft/winget-pkgs
+# (manifests/n/Novagen/Rowhouse/<version>/).
+PackageIdentifier: Novagen.Rowhouse
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: Novagen
+PackageName: Rowhouse
+License: MIT
+ShortDescription: Compact, open-source database client with an MCP server
+PackageUrl: https://giankbr.github.io/rowhouse/
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: https://github.com/giankbr/rowhouse/releases/download/v__VERSION__/Rowhouse___VERSION___x64-setup.exe
+    InstallerSha256: __SHA256_EXE__
+ManifestType: singleton
+ManifestVersion: 1.6.0

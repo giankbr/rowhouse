@@ -62,3 +62,27 @@ Without it, SmartScreen shows "Windows protected your PC" until the app builds r
 | `WINDOWS_CERTIFICATE_PASSWORD` | the .pfx password |
 
 The workflow imports it and sets `certificateThumbprint` for the Windows build only.
+
+## Licenses (Pro)
+
+Pro features (scheduled queries, AI write requests over MCP) check for a license
+**only in builds that embed a public key**. Anyone building from source gets a
+community build with everything unlocked — that's intended (open core).
+
+1. Once: `node scripts/license.mjs keygen` → creates `~/.rowhouse-license/private.pem`
+   (back it up; never commit it) and prints the public key.
+2. Add it as the repository secret `ROWHOUSE_LICENSE_PUBKEY`. The release workflow
+   bakes it in, plus the build time (used for "updates until").
+3. For each sale: `node scripts/license.mjs issue --email buyer@example.com --plan pro --years 1`
+   and send the `RH1-…` key. Customers paste it in Settings → License. Keys are
+   verified offline; after `updatesUntil` the license keeps working on the builds
+   released before that date.
+4. `node scripts/license.mjs verify RH1-…` checks a key.
+
+## Homebrew & winget
+
+After a release is published: `node scripts/packaging.mjs 0.4.0` downloads the
+macOS `.dmg` and Windows `-setup.exe`, computes their SHA-256 and writes
+`packaging/out/rowhouse.rb` (copy to your tap repo `giankbr/homebrew-tap/Casks/`)
+and `packaging/out/Novagen.Rowhouse.yaml` (submit to `microsoft/winget-pkgs`, e.g.
+with `wingetcreate submit`). Templates live in `packaging/`.

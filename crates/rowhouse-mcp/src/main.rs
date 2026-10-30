@@ -244,6 +244,9 @@ impl Rowhouse {
                 cfg.name
             ));
         }
+        if let Err(e) = rowhouse_core::license::require_pro("AI write requests (execute_sql)") {
+            return Err(e.to_string());
+        }
         if !cfg.mcp_writes {
             return Err(format!(
                 "AI writes are turned off for `{}`. The user can enable “Allow AI to request writes” in its connection settings.",

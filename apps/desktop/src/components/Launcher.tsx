@@ -1,6 +1,6 @@
 import { ArrowRight, Bot, FileInput, FolderOpen, Link2, Lock, Pencil, Plus, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ENVIRONMENTS, isTauri, kindInfo, type ConnectionConfig, type DbKind, type DetectedImport, type Environment } from "../lib/api";
+import { api, ENVIRONMENTS, isTauri, kindInfo, type ConnectionConfig, type DbKind, type DetectedImport, type Environment, type LicenseStatus } from "../lib/api";
 import { mod } from "../lib/types";
 import { KindBadge } from "./KindBadge";
 import { Kbd, cx } from "./ui";
@@ -87,8 +87,10 @@ export function Launcher({
   const [sel, setSel] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [detected, setDetected] = useState<DetectedImport[]>([]);
+  const [lic, setLic] = useState<LicenseStatus | null>(null);
   useEffect(() => {
     api.importDetect().then(setDetected).catch(() => setDetected([]));
+    api.license.status().then(setLic).catch(() => {});
   }, []);
   const APP_LABEL = { tableplus: "TablePlus", dbeaver: "DBeaver", navicat: "Navicat" } as const;
 
@@ -133,7 +135,13 @@ export function Launcher({
           </div>
           <h1 className="pointer-events-none mt-2.5 text-[24px] font-semibold tracking-tight">Rowhouse</h1>
           <span className="mt-0.5 text-xs text-muted">Version {version}</span>
-          <span className="mt-3 rounded-full bg-success/12 px-2.5 py-0.5 text-[11px] font-medium text-success">Free &amp; open source</span>
+          {lic?.license ? (
+            <span className="mt-3 rounded-full bg-accent/12 px-2.5 py-0.5 text-[11px] font-medium text-accent" title={lic.license.email}>
+              {lic.license.plan === "team" ? "Team" : "Pro"} · {lic.license.email}
+            </span>
+          ) : (
+            <span className="mt-3 rounded-full bg-success/12 px-2.5 py-0.5 text-[11px] font-medium text-success">Free &amp; open source</span>
+          )}
           <div className="mt-auto flex w-full flex-col gap-1.5">
             <button className={action} onClick={() => onNew()}>
               <Plus size={16} className="text-accent" /> Create connection

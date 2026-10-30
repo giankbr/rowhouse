@@ -266,6 +266,22 @@ export type ColumnOp =
   | { op: "addForeignKey"; name: string; columns: string[]; refSchema: string; refTable: string; refColumns: string[]; onDelete?: string | null }
   | { op: "dropForeignKey"; name: string };
 
+export interface LicenseInfo {
+  email: string;
+  plan: "pro" | "team";
+  seats: number;
+  issued: number;
+  updatesUntil: number;
+  id: string;
+}
+export interface LicenseStatus {
+  communityBuild: boolean;
+  pro: boolean;
+  license: LicenseInfo | null;
+  updatesExpired: boolean;
+  error: string | null;
+}
+
 export interface IndexInfo {
   name: string;
   columns: string[];
@@ -442,6 +458,11 @@ export const api = {
     call<QueryOutput>("run_query", { id, sql, limit, runId, timeoutMs }),
   cancelQuery: (id: string, runId: string) => call<void>("cancel_query", { id, runId }),
   listDatabases: (id: string) => call<string[]>("list_databases", { id }),
+  license: {
+    status: () => call<LicenseStatus>("license_status"),
+    activate: (key: string) => call<LicenseStatus>("license_activate", { key }),
+    deactivate: () => call<LicenseStatus>("license_deactivate"),
+  },
   listIndexes: (id: string, schema: string, table: string) => call<IndexInfo[]>("list_indexes", { id, schema, table }),
   tableForeignKeys: (id: string, schema: string, table: string) => call<ForeignKey[]>("table_foreign_keys", { id, schema, table }),
   backupDatabase: (id: string, path: string, options: DumpOptions) => call<DumpReport>("backup_database", { id, path, options }),
@@ -571,6 +592,10 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
 // ---------------------------------------------------------------------------
 
 const mockCancelled = new Set<string>();
+let mockLicense: LicenseStatus =
+  typeof location !== "undefined" && location.search.includes("unlicensed")
+    ? { communityBuild: false, pro: false, license: null, updatesExpired: false, error: null }
+    : { communityBuild: true, pro: true, license: null, updatesExpired: false, error: null };
 const mockScheduleListeners = new Set<(e: { schedule: Schedule; run: ScheduleRun }) => void>();
 const nowS = () => Math.floor(Date.now() / 1000);
 let mockSchedules: Schedule[] = [
@@ -718,6 +743,15 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       ] satisfies ServerSession[];
     case "kill_session":
       return null;
+    case "license_status":
+      return mockLicense;
+    case "license_activate":
+      if (!String(a.key).startsWith("RH1-")) throw "not a Rowhouse license key";
+      mockLicense = { communityBuild: false, pro: true, updatesExpired: false, error: null, license: { email: "you@example.com", plan: "pro", seats: 1, issued: 1793300000, updatesUntil: 1824836000, id: "demo" } };
+      return mockLicense;
+    case "license_deactivate":
+      mockLicense = { communityBuild: false, pro: false, license: null, updatesExpired: false, error: null };
+      return mockLicense;
     case "list_databases":
       await sleep(150);
       return ["app_dev", "app_test", "analytics", "billing", "postgres"];

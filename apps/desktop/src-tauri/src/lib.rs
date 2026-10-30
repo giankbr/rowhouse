@@ -686,7 +686,26 @@ fn schedules_list() -> CmdResult<Vec<Schedule>> {
 }
 
 #[tauri::command]
+fn license_status() -> rowhouse_core::license::LicenseStatus {
+    rowhouse_core::license::status()
+}
+
+#[tauri::command]
+fn license_activate(key: String) -> CmdResult<rowhouse_core::license::LicenseStatus> {
+    rowhouse_core::license::activate(&key)
+}
+
+#[tauri::command]
+fn license_deactivate() -> CmdResult<rowhouse_core::license::LicenseStatus> {
+    rowhouse_core::license::deactivate()?;
+    Ok(rowhouse_core::license::status())
+}
+
+#[tauri::command]
 fn schedule_save(schedule: Schedule) -> CmdResult<Schedule> {
+    if schedule.enabled {
+        rowhouse_core::license::require_pro("Scheduled queries")?;
+    }
     ScheduleStore::open_default().save(schedule)
 }
 
@@ -697,6 +716,7 @@ fn schedule_delete(schedule_id: String) -> CmdResult<()> {
 
 #[tauri::command]
 async fn schedule_run_now(app: tauri::AppHandle, schedule_id: String) -> CmdResult<Run> {
+    rowhouse_core::license::require_pro("Scheduled queries")?;
     let s = ScheduleStore::open_default()
         .list()?
         .into_iter()
@@ -954,6 +974,9 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                     let now = schedules::now();
+                    if !rowhouse_core::license::status().pro {
+                        continue;
+                    }
                     let Ok(due) = ScheduleStore::open_default().list() else {
                         continue;
                     };
@@ -1032,6 +1055,9 @@ pub fn run() {
             ai_explain,
             ai_complete_inline,
             schedules_list,
+            license_status,
+            license_activate,
+            license_deactivate,
             schedule_save,
             schedule_delete,
             schedule_run_now,
