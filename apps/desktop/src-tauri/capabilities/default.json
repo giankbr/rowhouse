@@ -13,6 +13,8 @@
     "dialog:allow-open",
     "core:window:allow-set-focus",
     "core:window:allow-request-user-attention",
-    "core:window:allow-unminimize"
+    "core:window:allow-unminimize",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

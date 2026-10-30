@@ -22,6 +22,8 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,9 +58,43 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Windows: import a code-signing certificate (PFX, base64) when provided;
+      # tauri signs with it via bundle.windows.certificateThumbprint.
+      - name: Import Windows signing certificate
+        if: matrix.platform == 'windows-latest' && env.HAS_WINDOWS_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          [IO.File]::WriteAllBytes("cert.pfx", $bytes)
+          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath cert.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item cert.pfx
+          $conf = "apps/desktop/src-tauri/tauri.conf.json"
+          $json = Get-Content $conf -Raw | ConvertFrom-Json
+          if (-not $json.bundle.windows) { $json.bundle | Add-Member -NotePropertyName windows -NotePropertyValue (@{}) }
+          $json.bundle.windows | Add-Member -Force -NotePropertyName certificateThumbprint -NotePropertyValue $cert.Thumbprint
+          $json.bundle.windows | Add-Member -Force -NotePropertyName digestAlgorithm -NotePropertyValue "sha256"
+          $json.bundle.windows | Add-Member -Force -NotePropertyName timestampUrl -NotePropertyValue "http://timestamp.digicert.com"
+          $json | ConvertTo-Json -Depth 32 | Set-Content $conf
+
+      # Code signing is optional: every secret below may be absent, and the
+      # matching step is then skipped (unsigned build). See RELEASING.md.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # auto-update signatures (scripts/setup-updater.mjs)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS: Developer ID certificate + notarization
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
