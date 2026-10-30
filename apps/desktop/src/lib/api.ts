@@ -20,9 +20,11 @@ export type DbKind =
   | "clickhouse"
   | "redis"
   | "upstash"
-  | "mongodb";
+  | "mongodb"
+  | "cassandra"
+  | "scylla";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql";
 
 export interface KindInfo {
   kind: DbKind;
@@ -57,6 +59,8 @@ export const KINDS: KindInfo[] = [
   { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
   { kind: "upstash", label: "Upstash", abbr: "Up", color: "#00c98d", dialect: "redis", port: 6379, user: "default", tls: true },
   { kind: "mongodb", label: "MongoDB", abbr: "Mo", color: "#00684a", dialect: "mongodb", port: 27017, user: null, beta: true },
+  { kind: "cassandra", label: "Cassandra", abbr: "Ca", color: "#1287b1", dialect: "cql", port: 9042, user: null, beta: true },
+  { kind: "scylla", label: "ScyllaDB", abbr: "Sc", color: "#6c2bd9", dialect: "cql", port: 9042, user: null, beta: true },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
   { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },

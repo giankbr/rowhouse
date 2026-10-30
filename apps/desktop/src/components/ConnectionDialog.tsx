@@ -203,10 +203,10 @@ export function ConnectionDialog({
         ) : (
           <>
             <div className="grid grid-cols-[1fr_88px] gap-2">
-              <Field label={c.kind === "mongodb" ? "Host or mongodb:// URI" : "Host"}>
+              <Field label={c.kind === "mongodb" ? "Host or mongodb:// URI" : kindInfo(c.kind).dialect === "cql" ? "Contact points" : "Host"}>
                 <Input
                   value={c.host ?? ""}
-                  placeholder={c.kind === "mongodb" ? "localhost or mongodb+srv://…" : undefined}
+                  placeholder={c.kind === "mongodb" ? "localhost or mongodb+srv://…" : kindInfo(c.kind).dialect === "cql" ? "node1, node2:9042" : undefined}
                   onChange={(e) => set({ host: e.target.value })}
                 />
               </Field>
@@ -231,7 +231,7 @@ export function ConnectionDialog({
                 />
               </Field>
             </div>
-            <Field label={kindInfo(c.kind).dialect === "redis" ? "Database number" : "Database"}>
+            <Field label={kindInfo(c.kind).dialect === "redis" ? "Database number" : kindInfo(c.kind).dialect === "cql" ? "Keyspace" : "Database"}>
               <Input value={c.database ?? ""} placeholder={kindInfo(c.kind).dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
             </Field>
           </>

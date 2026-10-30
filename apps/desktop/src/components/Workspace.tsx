@@ -147,6 +147,7 @@ export function Workspace({
   // ---- query plan -----------------------------------------------------------
   const [analyze, setAnalyze] = useState(false);
   const isRedis = !!conn && kindInfo(conn.kind).dialect === "redis";
+  const isCql = !!conn && kindInfo(conn.kind).dialect === "cql";
   const canAnalyze = conn?.kind === "postgres" || conn?.kind === "greenplum";
   const explainPlan = async (withAnalyze = analyze) => {
     onChange({ showPlan: true, planLoading: true, planError: undefined });
@@ -273,7 +274,7 @@ export function Workspace({
               variant="ghost"
               size="xs"
               onClick={() => (tab.showPlan ? onChange({ showPlan: false }) : explainPlan())}
-              disabled={!tab.sql.trim() || isRedis || conn?.kind === "mongodb"}
+              disabled={!tab.sql.trim() || isRedis || isCql || conn?.kind === "mongodb"}
               title="Show the query plan (EXPLAIN)"
               className={cx(tab.showPlan && "bg-selected text-fg")}
             >
@@ -372,7 +373,7 @@ export function Workspace({
 
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
-          conn && !conn.readOnly && !isRedis && conn.kind !== "mongodb" && tab.columns && tab.schema && tab.table ? (
+          conn && !conn.readOnly && !isRedis && !isCql && conn.kind !== "mongodb" && tab.columns && tab.schema && tab.table ? (
             <StructureEditor
               conn={conn}
               schema={tab.schema}

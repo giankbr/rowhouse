@@ -41,6 +41,8 @@ pub enum DbKind {
     Redis,
     Upstash,
     Mongodb,
+    Cassandra,
+    Scylla,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -54,10 +56,11 @@ pub enum Driver {
     Clickhouse,
     Redis,
     Mongo,
+    Cassandra,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 19] = [
+    pub const ALL: [DbKind; 21] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -77,6 +80,8 @@ impl DbKind {
         DbKind::Redis,
         DbKind::Upstash,
         DbKind::Mongodb,
+        DbKind::Cassandra,
+        DbKind::Scylla,
     ];
 
     pub fn driver(self) -> Driver {
@@ -91,6 +96,7 @@ impl DbKind {
             Clickhouse => Driver::Clickhouse,
             Redis | Upstash => Driver::Redis,
             Mongodb => Driver::Mongo,
+            Cassandra | Scylla => Driver::Cassandra,
         }
     }
 
@@ -116,6 +122,7 @@ impl DbKind {
             Clickhouse => Some(8123),
             Redis | Upstash => Some(6379),
             Mongodb => Some(27017),
+            Cassandra | Scylla => Some(9042),
             Sqlite | Duckdb | Turso | D1 => None,
         }
     }

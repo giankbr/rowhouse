@@ -122,6 +122,7 @@ enum Pool {
     Mongo(backend::mongo::Client),
     Libsql(backend::libsql::Client),
     D1(backend::d1::Client),
+    Cql(backend::cassandra::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -310,6 +311,17 @@ impl Connection {
                 )
                 .await?,
             ),
+            Driver::Cassandra => Pool::Cql(
+                backend::cassandra::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.tls.as_ref(),
+                )
+                .await?,
+            ),
             Driver::Mongo => Pool::Mongo(
                 backend::mongo::Client::connect(
                     &host,
@@ -396,6 +408,7 @@ impl Connection {
             Pool::Mongo(c) => c.run(sql, limit, false).await?,
             Pool::Libsql(c) => c.run(sql, limit, false).await?,
             Pool::D1(c) => c.run(sql, limit, false).await?,
+            Pool::Cql(c) => c.run(sql, limit, false).await?,
         })
     }
 
@@ -405,6 +418,14 @@ impl Connection {
         let started = Instant::now();
         if let Pool::Redis(c) = &self.pool {
             // Redis commands, not SQL: the backend checks them against its read allowlist
+            let results = c.run(sql, limit, true).await?;
+            return Ok(QueryOutput {
+                results,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+        if let Pool::Cql(c) = &self.pool {
+            // CQL: its own read allowlist (there are no read-only transactions)
             let results = c.run(sql, limit, true).await?;
             return Ok(QueryOutput {
                 results,
@@ -462,7 +483,7 @@ impl Connection {
             Pool::Ch(c) => c.run(sql, limit, true).await?,
             Pool::Libsql(c) => c.run(sql, limit, true).await?,
             Pool::D1(c) => c.run(sql, limit, true).await?,
-            Pool::Redis(_) | Pool::Mongo(_) => unreachable!("handled above"),
+            Pool::Redis(_) | Pool::Mongo(_) | Pool::Cql(_) => unreachable!("handled above"),
         };
         Ok(QueryOutput {
             results,
@@ -502,6 +523,7 @@ impl Connection {
             Pool::Mssql(c) => c.exec_tx(stmts).await,
             Pool::Libsql(c) => c.exec_tx(stmts).await,
             Pool::D1(c) => c.exec_tx(stmts).await,
+            Pool::Cql(c) => c.exec_tx(stmts).await,
             Pool::Redis(_) => Err(Error::Other(
                 "editing isn't supported for Redis — use commands in a query tab".into(),
             )),
@@ -539,6 +561,13 @@ impl Connection {
         }
     }
 
+    pub(crate) fn cql(&self) -> Option<&backend::cassandra::Client> {
+        match &self.pool {
+            Pool::Cql(c) => Some(c),
+            _ => None,
+        }
+    }
+
     pub(crate) fn redis(&self) -> Option<&backend::redis::Client> {
         match &self.pool {
             Pool::Redis(c) => Some(c),
@@ -553,8 +582,11 @@ impl Connection {
         if let Pool::Mongo(c) = &self.pool {
             return c.collections().await;
         }
+        if let Pool::Cql(c) = &self.pool {
+            return c.tables().await;
+        }
         let sql = match self.driver() {
-            Driver::Redis | Driver::Mongo => unreachable!("handled above"),
+            Driver::Redis | Driver::Mongo | Driver::Cassandra => unreachable!("handled above"),
             Driver::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
                  WHERE table_schema NOT IN ('pg_catalog','information_schema','crdb_internal','pg_extension','pg_internal','gp_toolkit') \
                  AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2",
@@ -594,6 +626,9 @@ impl Connection {
             let _ = schema;
             return c.describe(table).await;
         }
+        if let Pool::Cql(c) = &self.pool {
+            return c.describe(schema, table).await;
+        }
         if let Pool::Redis(c) = &self.pool {
             // a key has no schema; report the value's type as a single pseudo column
             let ty = c.raw(&["TYPE".into(), table.into()]).await?;
@@ -626,7 +661,7 @@ impl Connection {
             )
         };
         let rows = match self.driver() {
-            Driver::Redis | Driver::Mongo => unreachable!("handled above"),
+            Driver::Redis | Driver::Mongo | Driver::Cassandra => unreachable!("handled above"),
             // Redshift's catalog is too old for this query; it uses information_schema below.
             Driver::Postgres if self.kind() != DbKind::Redshift => {
                 // pg_catalog gives full types (varchar(64), numeric(12,2), text[]) and real defaults

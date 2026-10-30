@@ -265,6 +265,7 @@ impl Connection {
                             }
                         }
                         Driver::Redis | Driver::Mongo => out.push("-- no column schema to alter".into()),
+                        Driver::Cassandra => out.push(format!("-- CQL can't change {col} in place ({}); add a new column and copy the data", aspects.join(", "))),
                         Driver::Sqlite => out.push(format!(
                             "-- SQLite can't alter {col} in place ({}); recreate {tb} with the new definition",
                             aspects.join(", ")

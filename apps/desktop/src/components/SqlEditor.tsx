@@ -94,7 +94,7 @@ export function SqlEditor({
           ? SQLite
           : d === "mssql"
             ? MSSQL
-            : d === "duckdb"
+            : d === "duckdb" || d === "cql"
               ? StandardSQL
               : PostgreSQL;
     return [

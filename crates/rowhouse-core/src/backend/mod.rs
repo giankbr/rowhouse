@@ -1,6 +1,7 @@
 //! Drivers that are not sqlx-based. Each exposes the same small surface:
 //! `run` (script → result sets), `exec_tx` (statements in one transaction).
 
+pub mod cassandra;
 pub mod clickhouse;
 pub mod d1;
 pub mod duck;

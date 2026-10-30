@@ -377,6 +377,7 @@ impl Connection {
                 })
             }
             Driver::Redis => Err(Error::Other("Redis has no query plans".into())),
+            Driver::Cassandra => Err(Error::Other("query plans aren't available for CQL — use TRACING ON in cqlsh".into())),
             Driver::Mongo => Err(Error::Other("query plans aren't available for MongoDB yet — run db.runCommand({ explain: { find: \"coll\", filter: {…} } })".into())),
             Driver::Mssql => Err(Error::Other(
                 "query plans for SQL Server are not supported yet".into(),

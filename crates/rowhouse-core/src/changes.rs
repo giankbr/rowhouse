@@ -49,6 +49,10 @@ impl Connection {
 
     /// JSON value → SQL literal.
     pub(crate) fn sql_value(&self, v: &Value) -> String {
+        if self.driver() == Driver::Cassandra {
+            // let Cassandra convert to the column type (uuid, timestamp, collections…)
+            return crate::backend::cassandra::from_json_literal(v);
+        }
         match v {
             Value::Null => "NULL".into(),
             Value::Bool(b) => match self.driver() {
