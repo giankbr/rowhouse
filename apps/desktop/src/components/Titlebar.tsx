@@ -11,6 +11,7 @@ export function Titlebar({
   onPalette,
   onMcp,
   onSettings,
+  onHome,
 }: {
   conn: ConnectionConfig | null;
   dark: boolean;
@@ -19,18 +20,23 @@ export function Titlebar({
   onPalette: () => void;
   onMcp: () => void;
   onSettings: () => void;
+  onHome: () => void;
 }) {
   return (
     <header
       data-tauri-drag-region
       className={cx("flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel pr-2", isMac ? "pl-[78px]" : "pl-2")}
     >
-      <Button variant="ghost" size="icon" onClick={onToggleSidebar} title="Toggle sidebar">
-        <PanelLeft size={14} />
-      </Button>
+      {conn && (
+        <Button variant="ghost" size="icon" onClick={onToggleSidebar} title="Toggle sidebar">
+          <PanelLeft size={14} />
+        </Button>
+      )}
 
       <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2 text-xs">
-        <span data-tauri-drag-region className="font-semibold tracking-tight">Rowhouse</span>
+        <button onClick={onHome} title="All connections" className="rounded px-1 font-semibold tracking-tight hover:bg-hover">
+          Rowhouse
+        </button>
         {conn && (
           <>
             <span className="text-subtle">/</span>

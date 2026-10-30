@@ -1,11 +1,12 @@
-import { Database, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDestructive } from "./components/ConfirmDestructive";
+import { ApprovalCenter } from "./components/ApprovalDialog";
 import { CompareView } from "./components/CompareView";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { ErdView } from "./components/ErdView";
 import { ImportDialog } from "./components/ImportDialog";
+import { Launcher, touchRecent } from "./components/Launcher";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -15,7 +16,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, ENVIRONMENTS, type ConnectionConfig, type Destructive, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type Destructive, type Snippet, type TableInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 
 export default function App() {
@@ -43,6 +44,10 @@ export default function App() {
     (msg: string | null, kind: "ok" | "err" = "err") => setToastState(msg ? { msg, kind } : null),
     [],
   );
+  const [version, setVersion] = useState("0.1.0");
+  useEffect(() => {
+    if (isTauri) import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setVersion).catch(() => {});
+  }, []);
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
 
   useEffect(() => {
@@ -200,6 +205,7 @@ export default function App() {
 
   const selectConnection = useCallback(
     (id: string) => {
+      touchRecent(id);
       setActiveConn(id);
       if (!tables[id]?.length) loadTables(id);
     },
@@ -207,12 +213,16 @@ export default function App() {
   );
 
   const newQuery = useCallback(
-    (sql = "SELECT 1;") => {
+    (sql?: string) => {
       if (!activeConn) return;
+      if (sql === undefined) {
+        const k = connections.find((c) => c.id === activeConn)?.kind;
+        sql = k === "redis" ? "PING" : "SELECT 1;";
+      }
       const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
       addTab({ id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql });
     },
-    [activeConn, tabs, addTab],
+    [activeConn, tabs, addTab, connections],
   );
 
   const openErd = useCallback(() => {
@@ -235,6 +245,22 @@ export default function App() {
     },
     [tab, patchTab, newQuery, activeConn, tabs, selectTab, addTab],
   );
+
+  const openDatabaseFile = useCallback(async () => {
+    const path = await dialogs.openAny("Database file", ["db", "sqlite", "sqlite3", "duckdb", "ddb"]);
+    if (!path) return;
+    const kind = /\.(duckdb|ddb)$/i.test(path) ? "duckdb" : "sqlite";
+    const name = path.split(/[\\/]/).pop() ?? "database";
+    const existing = connections.find((c) => c.file === path);
+    if (existing) return selectConnection(existing.id);
+    try {
+      const saved = await api.saveConnection({ ...newConnection(kind), name, file: path });
+      setConnections((cs) => [...cs, saved]);
+      selectConnection(saved.id);
+    } catch (e) {
+      setToast(String(e));
+    }
+  }, [connections, selectConnection, setToast]);
 
   const openCompare = useCallback(() => {
     if (!activeConn) return;
@@ -427,10 +453,12 @@ export default function App() {
         onPalette={() => setPalette(true)}
         onMcp={() => setMcpOpen(true)}
         onSettings={() => setSettingsOpen(true)}
+        onHome={() => setActiveConn(null)}
       />
 
       <div className="flex min-h-0 flex-1">
-        <div className={cx("shrink-0 overflow-hidden border-r border-line transition-[width] duration-150", sidebar ? "w-60" : "w-0 border-r-0")}>
+        {conn && (
+        <div className={cx("shrink-0 overflow-hidden border-r border-line transition-[width] duration-150", sidebar && conn ? "w-60" : "w-0 border-r-0")}>
           <div className="h-full w-60">
             <Sidebar
               connections={connections}
@@ -448,6 +476,7 @@ export default function App() {
             />
           </div>
         </div>
+        )}
 
         <main className="relative flex min-w-0 flex-1">
           {conn ? (
@@ -469,22 +498,17 @@ export default function App() {
               )}
             </>
           ) : (
-            <Empty>
-              <div className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                <Database size={18} />
-              </div>
-              <div className="text-center">
-                <h1 className="text-sm font-semibold">Welcome to Rowhouse</h1>
-                <p className="mt-1 text-xs text-muted">Select a connection or create a new one.</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="primary" onClick={() => setDialog({ open: true, edit: null })}>
-                  <Plus size={13} /> New connection
-                </Button>
-                <Button onClick={() => setImportOpen(true)}>Import from DBeaver / TablePlus / Navicat</Button>
-              </div>
-              <Shortcuts />
-            </Empty>
+            <Launcher
+              connections={connections}
+              version={version}
+              onOpen={selectConnection}
+              onEdit={(c) => setDialog({ open: true, edit: c })}
+              onNew={() => setDialog({ open: true, edit: null })}
+              onImport={() => setImportOpen(true)}
+              onOpenFile={openDatabaseFile}
+              onMcp={() => setMcpOpen(true)}
+              onSettings={() => setSettingsOpen(true)}
+            />
           )}
         </main>
         <HistoryPanel connId={activeConn} open={historyOpen && !!conn} onClose={() => setHistoryOpen(false)} onPick={pickHistory} />
@@ -511,6 +535,7 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <ApprovalCenter connections={connections} />
       <ImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
