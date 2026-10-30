@@ -158,6 +158,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] Cassandra / ScyllaDB (beta)
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [x] AI: streaming responses, inline completions in the editor
+- [x] AI inline edit (Mod+I in the editor: rewrite the selection or generate at the cursor)
+- [x] Grid range selection + bulk ops (set value / NULL, duplicate, delete, paste from spreadsheets, copy as CSV/JSON/Markdown/INSERT)
 - [x] Production safety rails, ERD, split panes, connection import
 - [x] Visual query builder (tables on a canvas, FK auto-joins, drag-to-join, filters, aggregates, live SQL)
 - [x] Query plan viewer, schema compare, saved queries
