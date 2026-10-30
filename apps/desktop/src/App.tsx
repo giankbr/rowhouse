@@ -18,7 +18,8 @@ import { QueryBuilder } from "./components/QueryBuilder";
 import { ActivityDialog } from "./components/ActivityDialog";
 import { BackupDialog } from "./components/BackupDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, type TableMenuAction } from "./components/Sidebar";
+import { DdlDialog, NewTableDialog, TableActionDialog, type TableActionKind } from "./components/TableActions";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
@@ -27,6 +28,8 @@ import { Workspace } from "./components/Workspace";
 import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
+import { findVars, type VarRef } from "./lib/vars";
+import { VariablesDialog } from "./components/VariablesDialog";
 
 export default function App() {
   const [connections, setConnections] = useState<ConnectionConfig[]>([]);
@@ -86,6 +89,19 @@ export default function App() {
       .getSettings()
       .then((r) => (setAiEnabled(r.settings.enabled && !!r.settings.model), setInlineAi(r.settings.enabled && !!r.settings.inlineCompletions)))
       .catch(() => {});
+  }, [setToast]);
+
+  // folder sync brought in changes from another device
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    api.sync
+      .onPulled((r) => {
+        api.listConnections().then(setConnections).catch(() => {});
+        const n = r.pulledConnections + r.pulledSnippets;
+        setToast(`Synced ${n} change${n === 1 ? "" : "s"}${r.remoteDevice ? ` from ${r.remoteDevice}` : ""}`, "ok");
+      })
+      .then((f) => (off = f));
+    return () => off?.();
   }, [setToast]);
 
   useEffect(() => {
@@ -243,9 +259,18 @@ export default function App() {
   );
 
   /** Run, but stop for a typed confirmation on DROP / TRUNCATE / unfiltered DELETE & UPDATE. */
+  const [varReq, setVarReq] = useState<{ tab: Tab; sql: string; vars: VarRef[]; initial: Record<string, string> } | null>(null);
   const runTab = useCallback(
-    async (t: Tab, sqlOverride?: string) => {
+    async (t: Tab, sqlOverride?: string, varsDone = false) => {
       const sql = sqlOverride ?? t.sql;
+      if (t.kind === "query" && !varsDone) {
+        const dialect = kindInfo(connections.find((c) => c.id === t.connId)?.kind ?? "postgres").dialect;
+        const vars = findVars(sql, dialect);
+        if (vars.length) {
+          (document.activeElement as HTMLElement | null)?.blur();
+          return setVarReq({ tab: t, sql, vars, initial: t.vars ?? {} });
+        }
+      }
       if (t.kind === "query") {
         const items = await api.checkDestructive(sql).catch(() => [] as Destructive[]);
         if (items.length) {
@@ -256,7 +281,7 @@ export default function App() {
       }
       execTab(t, sqlOverride);
     },
-    [execTab],
+    [execTab, connections],
   );
 
   const selectConnection = useCallback(
@@ -358,12 +383,15 @@ export default function App() {
   );
 
   const openTable = useCallback(
-    async (info: TableInfo) => {
+    async (info: TableInfo, view: "data" | "structure" = "data") => {
       if (!activeConn) return;
       const existing = tabs.find(
         (t) => t.kind === "table" && t.connId === activeConn && t.schema === info.schema && t.table === info.name,
       );
-      if (existing) return selectTab(existing.id);
+      if (existing) {
+        if (view === "structure") patchTab(existing.id, { view });
+        return selectTab(existing.id);
+      }
       const sql = await api.tableSql(activeConn, info.schema, info.name);
       const t: Tab = {
         id: uid(),
@@ -373,7 +401,7 @@ export default function App() {
         sql,
         schema: info.schema,
         table: info.name,
-        view: "data",
+        view,
       };
       addTab(t);
       runTab(t);
@@ -404,6 +432,69 @@ export default function App() {
     // the pane falls back to its last remaining tab; an empty right pane closes the split
     setTabs((ts) => ts.filter((t) => t.id !== id));
   }, []);
+
+  const [tableDlg, setTableDlg] = useState<{ t: TableInfo; kind: TableActionKind } | null>(null);
+  const [ddlTable, setDdlTable] = useState<TableInfo | null>(null);
+  const [newTableOpen, setNewTableOpen] = useState(false);
+
+  const onTableMenu = useCallback(
+    async (t: TableInfo, action: TableMenuAction) => {
+      if (!activeConn) return;
+      switch (action) {
+        case "open":
+          return openTable(t);
+        case "structure":
+          return openTable(t, "structure");
+        case "ddl":
+          return setDdlTable(t);
+        case "query": {
+          const sql = await api.tableSql(activeConn, t.schema, t.name).catch(() => "");
+          return openQuery(activeConn, sql, false);
+        }
+        case "copy-name":
+          await navigator.clipboard.writeText(t.name);
+          return setToast("Name copied", "ok");
+        case "copy-select": {
+          const sql = await api.tableSql(activeConn, t.schema, t.name);
+          await navigator.clipboard.writeText(sql);
+          return setToast("SELECT copied", "ok");
+        }
+        case "export": {
+          const path = await dialogs.save(`${t.name}.csv`, "csv");
+          if (!path) return;
+          const ext = path.split(".").pop()?.toLowerCase();
+          const format = ext === "json" || ext === "sql" ? ext : "csv";
+          try {
+            const sql = await api.tableSqlAll(activeConn, t.schema, t.name);
+            const n = await api.exportQuery(activeConn, sql, format, path, t.schema, t.name);
+            setToast(`Exported ${n.toLocaleString()} rows → ${path.split(/[\\/]/).pop()}`, "ok");
+          } catch (e) {
+            setToast(String(e));
+          }
+          return;
+        }
+        default:
+          return setTableDlg({ t, kind: action });
+      }
+    },
+    [activeConn, openTable, openQuery, setToast],
+  );
+
+  /** After rename / drop: close or retitle tabs showing the old table, reload the list. */
+  const afterTableAction = useCallback(
+    (msg: string, renamedTo?: string) => {
+      const d = tableDlg;
+      setTableDlg(null);
+      setToast(msg, "ok");
+      if (!activeConn || !d) return;
+      loadTables(activeConn);
+      const match = (x: Tab) => x.kind === "table" && x.connId === activeConn && x.schema === d.t.schema && x.table === d.t.name;
+      if (d.kind === "drop") tabs.filter(match).forEach((x) => closeTab(x.id));
+      else if (d.kind === "rename" && renamedTo) tabs.filter(match).forEach((x) => closeTab(x.id));
+      else if (d.kind === "truncate") tabs.filter(match).forEach((x) => execTab(x));
+    },
+    [tableDlg, activeConn, loadTables, tabs, setToast, closeTab, execTab],
+  );
 
   const splitRight = useCallback(() => {
     const left = paneTabs(0);
@@ -594,6 +685,9 @@ export default function App() {
               onImport={() => setImportOpen(true)}
               onErd={openErd}
               onCompare={openCompare}
+              onTableMenu={onTableMenu}
+              onNewTable={() => setNewTableOpen(true)}
+              canEdit={!!conn && kindInfo(conn.kind).dialect !== "redis"}
             />
           </div>
         </div>
@@ -657,6 +751,37 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <VariablesDialog
+        request={varReq}
+        dialect={kindInfo(connections.find((c) => c.id === varReq?.tab.connId)?.kind ?? "postgres").dialect}
+        onClose={() => setVarReq(null)}
+        onRun={(values, sql) => {
+          const r = varReq!;
+          setVarReq(null);
+          patchTab(r.tab.id, { vars: { ...(r.tab.vars ?? {}), ...values } });
+          runTab(r.tab, sql, true);
+        }}
+      />
+      {conn && (
+        <>
+          <TableActionDialog conn={conn} table={tableDlg?.t ?? null} kind={tableDlg?.kind ?? null} onClose={() => setTableDlg(null)} onDone={afterTableAction} onToast={setToast} />
+          <DdlDialog conn={conn} table={ddlTable} onClose={() => setDdlTable(null)} onOpenInQuery={(sql) => openQuery(conn.id, sql, false)} />
+          <NewTableDialog
+            conn={conn}
+            open={newTableOpen}
+            schemas={[...new Set(connTables.map((t) => t.schema))]}
+            defaultSchema={connTables[0]?.schema ?? (kindInfo(conn.kind).dialect === "sqlite" ? "main" : kindInfo(conn.kind).dialect === "postgres" ? "public" : conn.database ?? "main")}
+            onClose={() => setNewTableOpen(false)}
+            onCreated={(t) => {
+              setNewTableOpen(false);
+              setToast(`Created ${t.name}`, "ok");
+              loadTables(conn.id);
+              openTable(t, "structure");
+            }}
+            onToast={setToast}
+          />
+        </>
+      )}
       <ActivityDialog conn={conn} open={activityOpen} onClose={() => setActivityOpen(false)} onToast={setToast} />
       <BackupDialog mode={backup} conn={conn} tables={connTables} onClose={() => setBackup(null)} onRestored={() => activeConn && loadTables(activeConn)} />
       <SchedulesDialog open={!!schedules} draft={schedules?.draft} onClose={() => setSchedules(null)} connections={connections} />

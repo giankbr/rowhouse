@@ -845,6 +845,138 @@ async fn apply_structure(
         .await
 }
 
+#[tauri::command]
+async fn table_ddl(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<String> {
+    state.conn(&id).await?.table_ddl(&schema, &table).await
+}
+
+#[tauri::command]
+async fn table_action(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    is_view: bool,
+    action: rowhouse_core::table_ops::TableAction,
+    preview: bool,
+) -> CmdResult<Vec<String>> {
+    let c = state.conn(&id).await?;
+    if preview {
+        c.table_action_sql(&schema, &table, is_view, &action).await
+    } else {
+        c.table_action(&schema, &table, is_view, &action).await
+    }
+}
+
+#[tauri::command]
+async fn create_table(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    columns: Vec<rowhouse_core::ColumnInfo>,
+    preview: bool,
+) -> CmdResult<String> {
+    let c = state.conn(&id).await?;
+    if preview {
+        c.create_table_sql(&schema, &table, &columns)
+    } else {
+        c.create_table(&schema, &table, &columns).await
+    }
+}
+
+// ---- folder sync (Pro) -----------------------------------------------------
+
+use rowhouse_core::sync::{self as fsync, SyncReport, SyncStatus, Syncer};
+
+#[tauri::command]
+fn sync_status() -> SyncStatus {
+    fsync::status()
+}
+
+async fn do_sync(
+    state: &AppState,
+    folder: &str,
+    pass: &str,
+    include_secrets: bool,
+) -> CmdResult<SyncReport> {
+    let history = state
+        .history
+        .as_ref()
+        .ok_or_else(|| Error::Other("history database unavailable".into()))?;
+    Syncer {
+        store: &state.store,
+        history,
+        state_path: fsync::SyncState::path(),
+        keychain: true,
+    }
+    .sync(std::path::Path::new(folder), pass, include_secrets)
+    .await
+}
+
+/// Turn sync on (or change folder / passphrase) and sync once.
+#[tauri::command]
+async fn sync_setup(
+    state: State<'_, AppState>,
+    folder: String,
+    passphrase: String,
+    include_secrets: bool,
+) -> CmdResult<SyncReport> {
+    rowhouse_core::license::require_pro("Sync")?;
+    let history = state
+        .history
+        .as_ref()
+        .ok_or_else(|| Error::Other("history database unavailable".into()))?;
+    let path = fsync::SyncState::path();
+    // a different folder starts a fresh three-way base
+    let mut st = fsync::SyncState::load_from(&path);
+    if st.folder.as_deref() != Some(folder.as_str()) {
+        st.conns.clear();
+        st.snippets.clear();
+        st.save_to(&path)?;
+    }
+    Syncer {
+        store: &state.store,
+        history,
+        state_path: path,
+        keychain: true,
+    }
+    .check(std::path::Path::new(&folder), &passphrase)?;
+    fsync::save_passphrase(Some(&passphrase))?;
+    let r = do_sync(&state, &folder, &passphrase, include_secrets).await;
+    if let Err(e) = &r {
+        fsync::record_error(&e.to_string());
+    }
+    r
+}
+
+#[tauri::command]
+async fn sync_now(state: State<'_, AppState>) -> CmdResult<SyncReport> {
+    rowhouse_core::license::require_pro("Sync")?;
+    let st = fsync::status();
+    let folder = st
+        .state
+        .folder
+        .ok_or_else(|| Error::Other("sync is off".into()))?;
+    let pass = fsync::saved_passphrase()
+        .ok_or_else(|| Error::Other("enter the sync passphrase again in Settings → Sync".into()))?;
+    let r = do_sync(&state, &folder, &pass, st.state.include_secrets).await;
+    if let Err(e) = &r {
+        fsync::record_error(&e.to_string());
+    }
+    r
+}
+
+#[tauri::command]
+fn sync_disable() -> CmdResult<()> {
+    fsync::disable()
+}
+
 // ---- MCP write approvals ----------------------------------------------------
 
 use rowhouse_core::approvals::{ApprovalAnswer, ApprovalRequest, Approvals};
@@ -863,6 +995,14 @@ fn approvals_answer(id: String, approved: bool, reason: Option<String>) -> CmdRe
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> CmdResult<()> {
     std::fs::write(path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn write_base64_file(path: String, data: String) -> CmdResult<()> {
+    let bytes = rowhouse_core::backend::libsql::base64_decode(&data)
+        .ok_or_else(|| Error::Other("invalid file data".into()))?;
+    std::fs::write(path, bytes)?;
     Ok(())
 }
 
@@ -988,6 +1128,30 @@ pub fn run() {
                     }
                 }
             });
+            // Folder sync: every 60 s while the app is open.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    if !rowhouse_core::license::status().pro {
+                        continue;
+                    }
+                    let st = fsync::status();
+                    let (Some(folder), Some(pass)) =
+                        (st.state.folder.clone(), fsync::saved_passphrase())
+                    else {
+                        continue;
+                    };
+                    let state = handle.state::<AppState>();
+                    match do_sync(&state, &folder, &pass, st.state.include_secrets).await {
+                        Ok(r) if r.pulled_connections + r.pulled_snippets > 0 => {
+                            let _ = handle.emit("sync-pulled", r);
+                        }
+                        Ok(_) => {}
+                        Err(e) => fsync::record_error(&e.to_string()),
+                    }
+                }
+            });
             app.manage(AppState {
                 store: ConnectionStore::open_default(),
                 history,
@@ -1016,6 +1180,9 @@ pub fn run() {
             server_activity,
             kill_session,
             list_indexes,
+            table_ddl,
+            table_action,
+            create_table,
             table_foreign_keys,
             switch_database,
             cancel_query,
@@ -1028,6 +1195,11 @@ pub fn run() {
             import_csv,
             mcp_info,
             write_text_file,
+            write_base64_file,
+            sync_status,
+            sync_setup,
+            sync_now,
+            sync_disable,
             approvals_pending,
             structure_preview,
             apply_structure,

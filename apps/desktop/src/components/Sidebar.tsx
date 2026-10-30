@@ -1,9 +1,23 @@
 import { ChevronRight, Database, Eye, FileInput, GitCompareArrows, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { KindBadge } from "./KindBadge";
+import { ContextMenu, type MenuItem } from "./TableActions";
 import { Button, Dot, cx } from "./ui";
 
+
+export type TableMenuAction =
+  | "open"
+  | "structure"
+  | "ddl"
+  | "query"
+  | "copy-name"
+  | "copy-select"
+  | "export"
+  | "rename"
+  | "duplicate"
+  | "truncate"
+  | "drop";
 
 export function Sidebar({
   connections,
@@ -18,6 +32,9 @@ export function Sidebar({
   onImport,
   onErd,
   onCompare,
+  onTableMenu,
+  onNewTable,
+  canEdit = true,
 }: {
   connections: ConnectionConfig[];
   activeId: string | null;
@@ -31,8 +48,34 @@ export function Sidebar({
   onImport: () => void;
   onErd: () => void;
   onCompare: () => void;
+  onTableMenu?: (t: TableInfo, action: TableMenuAction) => void;
+  onNewTable?: () => void;
+  /** SQL database with DDL (not Redis) */
+  canEdit?: boolean;
 }) {
   const [filter, setFilter] = useState("");
+  const [menu, setMenu] = useState<{ x: number; y: number; t: TableInfo } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const menuItems = (t: TableInfo): MenuItem[] => {
+    const go = (a: TableMenuAction) => () => onTableMenu?.(t, a);
+    const view = t.kind === "view";
+    return [
+      { label: "Open", hint: "↵", onSelect: go("open") },
+      { label: "Structure", onSelect: go("structure") },
+      { label: "Show DDL", onSelect: go("ddl") },
+      { label: "New query", onSelect: go("query") },
+      "separator",
+      { label: "Copy name", onSelect: go("copy-name") },
+      { label: "Copy SELECT", onSelect: go("copy-select") },
+      { label: "Export…", onSelect: go("export") },
+      "separator",
+      { label: "Rename…", disabled: !canEdit, onSelect: go("rename") },
+      { label: "Duplicate…", disabled: !canEdit || view, onSelect: go("duplicate") },
+      { label: "Truncate…", danger: true, disabled: !canEdit || view, onSelect: go("truncate") },
+      { label: view ? "Drop view…" : "Drop table…", danger: true, disabled: !canEdit, onSelect: go("drop") },
+    ];
+  };
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const grouped = useMemo(() => {
@@ -110,6 +153,11 @@ export function Sidebar({
                 className="h-6 w-full rounded-md bg-transparent pr-2 pl-6.5 text-xs outline-none placeholder:text-subtle hover:bg-hover focus:bg-elevated focus:ring-1 focus:ring-line-strong"
               />
             </div>
+            {onNewTable && canEdit && (
+              <Button variant="ghost" size="icon" onClick={onNewTable} title="New table">
+                <Plus size={13} />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" onClick={onCompare} title="Compare schemas">
               <GitCompareArrows size={12} />
             </Button>
@@ -147,7 +195,15 @@ export function Sidebar({
                     <button
                       key={t.schema + "." + t.name}
                       onClick={() => onOpenTable(t)}
-                      className="flex h-6 w-full items-center gap-2 rounded-md pr-2 pl-5 text-xs text-fg/85 hover:bg-hover"
+                      onContextMenu={(e) => {
+                        if (!onTableMenu) return;
+                        e.preventDefault();
+                        setMenu({ x: e.clientX, y: e.clientY, t });
+                      }}
+                      className={cx(
+                        "flex h-6 w-full items-center gap-2 rounded-md pr-2 pl-5 text-xs text-fg/85 hover:bg-hover",
+                        menu?.t === t && "bg-hover",
+                      )}
                     >
                       {t.kind === "view" ? (
                         <Eye size={12} className="shrink-0 text-subtle" />
@@ -162,6 +218,7 @@ export function Sidebar({
           </div>
         </>
       )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.t)} onClose={closeMenu} />}
     </aside>
   );
 }

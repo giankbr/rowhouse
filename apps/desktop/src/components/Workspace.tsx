@@ -1,4 +1,4 @@
-import { AlertCircle, AlignLeft, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { AlertCircle, AlignLeft, BarChart3, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { canFormat, formatSql } from "../lib/format";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
@@ -9,6 +9,7 @@ import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
 import { StructureEditor } from "./StructureEditor";
 import { ResultsGrid } from "./ResultsGrid";
+import { ResultsChart } from "./ResultsChart";
 import { SqlEditor } from "./SqlEditor";
 import { Button, Field, Input, Kbd, Menu, Modal, Segmented, Switch, cx } from "./ui";
 
@@ -312,6 +313,16 @@ export function Workspace({
             <Button
               variant="ghost"
               size="xs"
+              onClick={() => onChange({ showChart: !tab.showChart, showPlan: false })}
+              disabled={!result || result.columns.length === 0}
+              title="Chart the results"
+              className={cx(tab.showChart && !tab.showPlan && "bg-selected text-fg")}
+            >
+              <BarChart3 size={11} /> Chart
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => setSaveDlg({ name: tab.snippetId ? tab.title : "", global: false })}
               disabled={!tab.sql.trim()}
               title="Save this query"
@@ -439,6 +450,8 @@ export function Workspace({
               </Button>
             )}
           </div>
+        ) : result && tab.showChart && result.columns.length > 0 ? (
+          <ResultsChart result={result} spec={tab.chart} onSpec={(chart) => onChange({ chart })} title={tab.title} onToast={onToast} />
         ) : result ? (
           <ResultsGrid
             result={result}

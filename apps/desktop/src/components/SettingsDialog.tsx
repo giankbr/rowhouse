@@ -1,6 +1,6 @@
-import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, FolderSync, Loader2, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, type AiSettings } from "../lib/api";
+import { api, dialogs, type AiSettings, type SyncStatus } from "../lib/api";
 import { Button, Field, Input, Modal, Segmented, Switch, cx } from "./ui";
 import type { LicenseStatus } from "../lib/api";
 import { saveAppearance, useAppearance, type Appearance, type Density, type MonoFont, type UiFont } from "../lib/appearance";
@@ -98,6 +98,8 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
         <AppearanceSection />
         <div className="h-px bg-line" />
         <LicenseSection />
+        <div className="h-px bg-line" />
+        <SyncSection />
         <div className="h-px bg-line" />
         <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">AI</h3>
         <Switch checked={s.enabled} onChange={(v) => set({ enabled: v })} label="Enable AI features (Ask AI, Fix with AI, Explain)" />
@@ -267,7 +269,7 @@ function LicenseSection() {
     <div className="flex flex-col gap-2">
       <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">License</h3>
       {st.communityBuild ? (
-        <p className="text-xs text-muted">Community build — every feature is unlocked. Official releases ask for a Pro license for scheduled queries and AI write requests.</p>
+        <p className="text-xs text-muted">Community build — every feature is unlocked. Official releases ask for a Pro license for scheduled queries, folder sync and AI write requests.</p>
       ) : st.license ? (
         <div className="flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <span className="rounded bg-accent px-1.5 py-px text-[10px] font-semibold text-accent-fg uppercase">{st.license.plan}</span>
@@ -297,7 +299,7 @@ function LicenseSection() {
             }
           }}
         >
-          <p className="text-xs text-muted">Pro unlocks scheduled queries and AI write requests over MCP. Paste the key from your purchase email.</p>
+          <p className="text-xs text-muted">Pro unlocks scheduled queries, encrypted folder sync and AI write requests over MCP. Paste the key from your purchase email.</p>
           <div className="flex gap-2">
             <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="RH1-…" className="font-mono" />
             <Button type="submit" variant="primary" disabled={!key.trim()}>
@@ -307,6 +309,110 @@ function LicenseSection() {
           {(err || st.error) && <span className="text-2xs text-danger">{err ?? st.error}</span>}
         </form>
       )}
+    </div>
+  );
+}
+
+function ago(t: number) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - t);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(t * 1000).toLocaleDateString();
+}
+
+function SyncSection() {
+  const [st, setSt] = useState<SyncStatus | null>(null);
+  const [pro, setPro] = useState(true);
+  const [folder, setFolder] = useState("");
+  const [pass, setPass] = useState("");
+  const [secrets, setSecrets] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = () => api.sync.status().then((s) => (setSt(s), setSecrets(s.state.includeSecrets)));
+  useEffect(() => {
+    load().catch(() => {});
+    api.license.status().then((l) => setPro(l.pro)).catch(() => {});
+  }, []);
+  if (!st) return null;
+  const on = !!st.state.folder && st.hasPassphrase;
+  const report = (r: { pulledConnections: number; pulledSnippets: number; pushed: boolean }) => {
+    const parts = [];
+    if (r.pulledConnections) parts.push(`${r.pulledConnections} connection${r.pulledConnections === 1 ? "" : "s"}`);
+    if (r.pulledSnippets) parts.push(`${r.pulledSnippets} saved quer${r.pulledSnippets === 1 ? "y" : "ies"}`);
+    return parts.length ? `Got ${parts.join(" and ")}${r.pushed ? ", sent this device's changes" : ""}` : r.pushed ? "Sent this device's changes" : "Already up to date";
+  };
+  const run = async (fn: () => Promise<{ pulledConnections: number; pulledSnippets: number; pushed: boolean }>) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fn();
+      setMsg({ ok: true, text: report(r) });
+      setPass("");
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(false);
+      load();
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="flex items-center gap-1.5 text-2xs font-medium tracking-wide text-subtle uppercase">
+        Sync <span className="rounded bg-accent-soft px-1 py-px text-[9.5px] text-accent normal-case">Pro</span>
+      </h3>
+      {on ? (
+        <>
+          <div className="flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+            <FolderSync size={14} className="shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-mono text-[11.5px]" title={st.state.folder!}>
+                {st.state.folder}
+              </span>
+              <span className="text-2xs text-muted">
+                {st.state.lastSync ? `Synced ${ago(st.state.lastSync)}` : "Not synced yet"}
+                {st.state.remoteDevice && st.state.remoteAt ? ` · last change from ${st.state.remoteDevice}` : ""}
+                {st.state.includeSecrets ? " · passwords included" : ""}
+              </span>
+            </span>
+            <Button size="xs" variant="ghost" disabled={busy} onClick={() => run(api.sync.now)}>
+              <RefreshCw size={11} className={cx(busy && "animate-spin")} /> Sync now
+            </Button>
+            <Button size="xs" variant="ghost" onClick={() => api.sync.disable().then(load)}>
+              Turn off
+            </Button>
+          </div>
+          {st.state.lastError && !msg && <span className="text-2xs text-danger">Last sync failed: {st.state.lastError}</span>}
+        </>
+      ) : (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(() => api.sync.setup(folder, pass, secrets));
+          }}
+        >
+          <p className="text-xs text-muted">
+            Keep connections and saved queries in step across your machines through a folder you already sync — iCloud Drive, Dropbox, OneDrive, Syncthing. It's one
+            file, encrypted with your passphrase; there's no Rowhouse server.
+          </p>
+          <div className="flex gap-2">
+            <Input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Choose a synced folder…" className="font-mono" />
+            <Button type="button" onClick={() => dialogs.folder().then((f) => f && setFolder(f))}>
+              Browse…
+            </Button>
+          </div>
+          <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Passphrase (same on every device, 8+ characters)" autoComplete="new-password" />
+          <Switch checked={secrets} onChange={setSecrets} label={<span className="text-xs">Include passwords (encrypted with the passphrase)</span>} />
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-2xs text-subtle">{pro ? "The passphrase can't be recovered — keep it in your password manager." : "Needs a Pro license (Settings → License)."}</span>
+            <Button type="submit" variant="primary" disabled={!folder.trim() || pass.length < 8 || busy || !pro}>
+              {busy ? "Syncing…" : "Turn on sync"}
+            </Button>
+          </div>
+        </form>
+      )}
+      {msg && <span className={cx("text-2xs", msg.ok ? "text-success" : "text-danger")}>{msg.text}</span>}
     </div>
   );
 }

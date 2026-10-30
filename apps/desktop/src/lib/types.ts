@@ -31,6 +31,11 @@ export interface Tab {
   total?: number | null;
   /** results area shows the query plan instead of rows */
   showPlan?: boolean;
+  /** results area shows a chart instead of the grid */
+  showChart?: boolean;
+  /** last values for `:name` / `{{name}}` query variables */
+  vars?: Record<string, string>;
+  chart?: import("../components/ResultsChart").ChartSpec;
   plan?: import("./api").Plan;
   planError?: string;
   planLoading?: boolean;
