@@ -90,12 +90,15 @@ The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI r
 
 | Status | Databases | How |
 | --- | --- | --- |
-| ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), Redis, MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
+| ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), Redis (incl. TLS), MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
+| ✅ tested against a protocol-level fake backed by real SQLite | Turso / libSQL (Hrana HTTP), Cloudflare D1 (REST API) | `reqwest` |
 | 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8, MongoDB (beta) | `tiberius`, Postgres protocol, official `mongodb` driver |
 | 🟡 beta (wire-compatible, not yet run against a live server) | Neon, Supabase (Postgres + TLS), Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
-| ⏳ planned | LibSQL/Turso, Cloudflare D1, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
+| ⏳ planned | Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
 
 MongoDB: collections are tables; the editor takes mongosh-style statements (`db.orders.find({ status: 'paid' }).sort({ total: -1 }).limit(10)`, `aggregate([...])`, `insertOne`, `updateMany`, `show collections`, …). Grid edits are keyed by `_id` and keep each field's BSON type; they're checked up front but not transactional (MongoDB needs a replica set for that). Paste a `mongodb://` / `mongodb+srv://` URI to connect to Atlas.
+
+Turso and D1 use the SQLite dialect over HTTPS. Grid edits run as one batch with a row-count guard after each keyed statement, so a stale row rolls the whole batch back (D1 runs a multi-statement request as one transaction). D1 needs a Cloudflare API token with D1 permissions; there is no read-only transaction over its API, so read-only D1 connections rely on the keyword guard.
 
 Notes: ClickHouse has no transactions, so grid editing is disabled there (CSV import still works).
 SQL Server connections encrypt and accept self-signed certificates, like most DB GUIs.
@@ -149,7 +152,8 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] SQL Server, DuckDB, ClickHouse, CockroachDB (+ beta: Redshift, Greenplum, TiDB, SingleStore)
 - [x] Redis
 - [x] MongoDB (beta)
-- [ ] LibSQL/Turso, D1, Cassandra drivers
+- [x] LibSQL/Turso, Cloudflare D1, Redis TLS / Upstash
+- [ ] Cassandra driver
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [x] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import

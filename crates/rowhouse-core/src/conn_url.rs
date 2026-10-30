@@ -23,6 +23,19 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
     if input.starts_with("mongodb://") || input.starts_with("mongodb+srv://") {
         return Ok(mongo_url(input));
     }
+    if let Some(rest) = input.strip_prefix("libsql://") {
+        // libsql://db-org.turso.io?authToken=…
+        let (host, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let token = url::form_urlencoded::parse(query.as_bytes())
+            .find(|(k, _)| k == "authToken")
+            .map(|(_, v)| v.into_owned());
+        let mut c = ConnectionConfig::new("", DbKind::Turso);
+        c.host = Some(format!("libsql://{}", host.trim_end_matches('/')));
+        c.port = None;
+        c.user = None;
+        c.name = format!("Turso · {}", host.split('.').next().unwrap_or("db"));
+        return Ok((c, token));
+    }
     let url = Url::parse(input).map_err(|e| Error::Other(format!("not a connection URL: {e}")))?;
     let host = url.host_str().unwrap_or_default().to_string();
     let kind = match url.scheme() {
@@ -293,5 +306,15 @@ mod tests {
             (DbKind::Redis, Some(6380), Some("2"))
         );
         assert!(c.tls.is_none());
+    }
+
+    #[test]
+    fn turso_url() {
+        let (c, tok) =
+            parse_connection_url("libsql://shop-gian.turso.io?authToken=eyJ.abc").unwrap();
+        assert_eq!(c.kind, DbKind::Turso);
+        assert_eq!(c.host.as_deref(), Some("libsql://shop-gian.turso.io"));
+        assert_eq!(tok.as_deref(), Some("eyJ.abc"));
+        assert_eq!(c.name, "Turso · shop-gian");
     }
 }

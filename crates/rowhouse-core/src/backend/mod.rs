@@ -2,7 +2,9 @@
 //! `run` (script → result sets), `exec_tx` (statements in one transaction).
 
 pub mod clickhouse;
+pub mod d1;
 pub mod duck;
+pub mod libsql;
 pub mod mongo;
 pub mod mongo_shell;
 pub mod mssql;

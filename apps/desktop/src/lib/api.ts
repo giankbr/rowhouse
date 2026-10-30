@@ -13,6 +13,8 @@ export type DbKind =
   | "tidb"
   | "singlestore"
   | "sqlite"
+  | "turso"
+  | "d1"
   | "duckdb"
   | "mssql"
   | "clickhouse"
@@ -34,6 +36,8 @@ export interface KindInfo {
   file?: boolean;
   /** shown with a "beta" tag until tested against a real server in CI */
   beta?: boolean;
+  /** hosted HTTP API: no host/port, TLS or SSH settings */
+  api?: boolean;
   /** TLS required by default (hosted services) */
   tls?: boolean;
 }
@@ -45,6 +49,8 @@ export const KINDS: KindInfo[] = [
   { kind: "mysql", label: "MySQL", abbr: "My", color: "#e48e00", dialect: "mysql", port: 3306, user: "root" },
   { kind: "mariadb", label: "MariaDB", abbr: "Ma", color: "#4b8b9b", dialect: "mysql", port: 3306, user: "root" },
   { kind: "sqlite", label: "SQLite", abbr: "Sl", color: "#7c3aed", dialect: "sqlite", port: null, user: null, file: true },
+  { kind: "turso", label: "Turso", abbr: "Tu", color: "#13a88a", dialect: "sqlite", port: null, user: null, api: true },
+  { kind: "d1", label: "Cloudflare D1", abbr: "D1", color: "#f38020", dialect: "sqlite", port: null, user: null, api: true },
   { kind: "mssql", label: "SQL Server", abbr: "Ss", color: "#a91d22", dialect: "mssql", port: 1433, user: "sa", beta: true },
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
@@ -413,7 +419,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
     id: crypto.randomUUID(),
     name: "",
     kind,
-    host: k.file ? null : "localhost",
+    host: k.file || k.api ? null : "localhost",
     port: k.port,
     user: k.user,
     database: null,

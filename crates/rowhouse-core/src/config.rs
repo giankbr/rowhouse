@@ -33,6 +33,8 @@ pub enum DbKind {
     Tidb,
     Singlestore,
     Sqlite,
+    Turso,
+    D1,
     Duckdb,
     Mssql,
     Clickhouse,
@@ -55,7 +57,7 @@ pub enum Driver {
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 17] = [
+    pub const ALL: [DbKind; 19] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -67,6 +69,8 @@ impl DbKind {
         DbKind::Tidb,
         DbKind::Singlestore,
         DbKind::Sqlite,
+        DbKind::Turso,
+        DbKind::D1,
         DbKind::Duckdb,
         DbKind::Mssql,
         DbKind::Clickhouse,
@@ -80,7 +84,8 @@ impl DbKind {
         match self {
             Postgres | Neon | Supabase | Cockroach | Redshift | Greenplum => Driver::Postgres,
             Mysql | Mariadb | Tidb | Singlestore => Driver::Mysql,
-            Sqlite => Driver::Sqlite,
+            // remote SQLite: same dialect, different transport (see Connection::connect)
+            Sqlite | Turso | D1 => Driver::Sqlite,
             Duckdb => Driver::Duckdb,
             Mssql => Driver::Mssql,
             Clickhouse => Driver::Clickhouse,
@@ -91,7 +96,12 @@ impl DbKind {
 
     /// Embedded databases open a local file instead of a host/port.
     pub fn is_file(self) -> bool {
-        matches!(self.driver(), Driver::Sqlite | Driver::Duckdb)
+        matches!(self, DbKind::Sqlite | DbKind::Duckdb)
+    }
+
+    /// Talks HTTP to a hosted API (no host/port, no SSH tunnel).
+    pub fn is_http_api(self) -> bool {
+        matches!(self, DbKind::Turso | DbKind::D1)
     }
 
     pub fn default_port(self) -> Option<u16> {
@@ -106,7 +116,7 @@ impl DbKind {
             Clickhouse => Some(8123),
             Redis | Upstash => Some(6379),
             Mongodb => Some(27017),
-            Sqlite | Duckdb => None,
+            Sqlite | Duckdb | Turso | D1 => None,
         }
     }
 }

@@ -120,6 +120,8 @@ enum Pool {
     Ch(backend::clickhouse::Client),
     Redis(backend::redis::Client),
     Mongo(backend::mongo::Client),
+    Libsql(backend::libsql::Client),
+    D1(backend::d1::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -161,7 +163,7 @@ impl Connection {
         let mut host = config.host.clone().unwrap_or_else(|| "localhost".into());
         let mut port = config.port.or(config.kind.default_port()).unwrap_or(0);
         let tunnel = match &config.ssh {
-            Some(ssh) if !config.kind.is_file() => {
+            Some(ssh) if !config.kind.is_file() && !config.kind.is_http_api() => {
                 let t = crate::tunnel::Tunnel::open(ssh, ssh_secret, &host, port).await?;
                 host = "127.0.0.1".into();
                 port = t.local_port;
@@ -178,6 +180,19 @@ impl Connection {
                 .ok_or_else(|| Error::Other("profile has no database file path".into()))
         };
         let pool = match config.kind.driver() {
+            _ if config.kind == DbKind::Turso => Pool::Libsql(
+                backend::libsql::Client::connect(config.host.as_deref().unwrap_or(""), password)
+                    .await?,
+            ),
+            _ if config.kind == DbKind::D1 => Pool::D1(
+                backend::d1::Client::connect(
+                    config.host.as_deref(),
+                    user.unwrap_or(""),
+                    db.unwrap_or(""),
+                    password.unwrap_or(""),
+                )
+                .await?,
+            ),
             Driver::Postgres => {
                 let mut o = PgConnectOptions::new()
                     .host(&host)
@@ -379,6 +394,8 @@ impl Connection {
             Pool::Ch(c) => c.run(sql, limit, false).await?,
             Pool::Redis(c) => c.run(sql, limit, false).await?,
             Pool::Mongo(c) => c.run(sql, limit, false).await?,
+            Pool::Libsql(c) => c.run(sql, limit, false).await?,
+            Pool::D1(c) => c.run(sql, limit, false).await?,
         })
     }
 
@@ -443,6 +460,8 @@ impl Connection {
             Pool::Duck(c) => c.run(sql, limit, true).await?,
             Pool::Mssql(c) => c.run(sql, limit, true).await?,
             Pool::Ch(c) => c.run(sql, limit, true).await?,
+            Pool::Libsql(c) => c.run(sql, limit, true).await?,
+            Pool::D1(c) => c.run(sql, limit, true).await?,
             Pool::Redis(_) | Pool::Mongo(_) => unreachable!("handled above"),
         };
         Ok(QueryOutput {
@@ -481,6 +500,8 @@ impl Connection {
             Pool::Lite(p) => sqlx_tx!(p),
             Pool::Duck(c) => c.exec_tx(stmts).await,
             Pool::Mssql(c) => c.exec_tx(stmts).await,
+            Pool::Libsql(c) => c.exec_tx(stmts).await,
+            Pool::D1(c) => c.exec_tx(stmts).await,
             Pool::Redis(_) => Err(Error::Other(
                 "editing isn't supported for Redis — use commands in a query tab".into(),
             )),
@@ -542,7 +563,7 @@ impl Connection {
                    ('mysql','information_schema','performance_schema','sys','metrics_schema','memsql','cluster')) \
                  OR table_schema = DATABASE() ORDER BY 1, 2",
             Driver::Sqlite => "SELECT 'main', name, type FROM sqlite_master \
-                 WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY 2",
+                 WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 4) <> '_cf_' AND substr(name, 1, 7) <> 'libsql_' ORDER BY 2",
             Driver::Duckdb => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
                  WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY 1, 2",
             Driver::Mssql => "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES \

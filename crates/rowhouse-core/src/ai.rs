@@ -142,6 +142,8 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Tidb => "TiDB (MySQL dialect)",
         Singlestore => "SingleStore (MySQL dialect)",
         Sqlite => "SQLite",
+        Turso => "libSQL / Turso (SQLite dialect)",
+        D1 => "Cloudflare D1 (SQLite dialect)",
         Duckdb => "DuckDB",
         Mssql => "Microsoft SQL Server (T-SQL)",
         Clickhouse => "ClickHouse",

@@ -37,7 +37,7 @@ export function ConnectionDialog({
   const set = (patch: Partial<ConnectionConfig>) => setC((x) => ({ ...x, ...patch }));
   const setKind = (kind: DbKind) => {
     const d = newConnection(kind);
-    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null, tls: d.tls ?? c.tls ?? null });
+    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null, tls: kindInfo(kind).api ? null : (d.tls ?? c.tls ?? null) });
   };
   const info = kindInfo(c.kind);
   const [url, setUrl] = useState("");
@@ -137,7 +137,7 @@ export function ConnectionDialog({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-2xs text-subtle">
-            {info.beta ? "Beta — not yet verified against a live server" : `${info.label} · default port ${info.port ?? "—"}`}
+            {info.beta ? "Beta — not yet verified against a live server" : info.api ? `${info.label} · over HTTPS` : `${info.label} · default port ${info.port ?? "—"}`}
           </span>
           <div className="flex items-center gap-1">
             {Object.entries(TAG_COLORS).map(([name, hex]) => (
@@ -177,6 +177,29 @@ export function ConnectionDialog({
               onChange={(e) => set({ file: e.target.value })}
             />
           </Field>
+        ) : c.kind === "turso" ? (
+          <>
+            <Field label="Database URL" hint="From `turso db show --url`; a local sqld works too (http://127.0.0.1:8080)">
+              <Input value={c.host ?? ""} placeholder="libsql://my-db-me.turso.io" onChange={(e) => set({ host: e.target.value })} />
+            </Field>
+            <Field label="Auth token" hint="`turso db tokens create <db>`; stored in your OS keychain">
+              <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          </>
+        ) : c.kind === "d1" ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Account ID">
+                <Input value={c.user ?? ""} placeholder="Cloudflare account ID" onChange={(e) => set({ user: e.target.value })} />
+              </Field>
+              <Field label="Database ID">
+                <Input value={c.database ?? ""} placeholder="D1 database UUID" onChange={(e) => set({ database: e.target.value || null })} />
+              </Field>
+            </div>
+            <Field label="API token" hint="A Cloudflare API token with D1 Edit (or Read) permission; stored in your OS keychain">
+              <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          </>
         ) : (
           <>
             <div className="grid grid-cols-[1fr_88px] gap-2">
@@ -214,7 +237,7 @@ export function ConnectionDialog({
           </>
         )}
 
-        {!info.file && (
+        {!info.file && !info.api && (
           <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
             <div className="flex items-center gap-2">
               <span className="text-xs">TLS / SSL</span>
@@ -249,7 +272,7 @@ export function ConnectionDialog({
           </div>
         )}
 
-        {!info.file && (
+        {!info.file && !info.api && (
           <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
             <Switch
               checked={!!ssh}
@@ -345,6 +368,8 @@ export function ConnectionDialog({
 
 function defaultName(c: ConnectionConfig) {
   if (kindInfo(c.kind).file) return c.file?.split(/[\\/]/).pop() || kindInfo(c.kind).label;
+  if (c.kind === "turso") return c.host?.replace(/^\w+:\/\//, "").split(".")[0] || "Turso";
+  if (c.kind === "d1") return `D1 · ${c.database?.slice(0, 8) || "database"}`;
   return `${c.database || kindInfo(c.kind).label}@${c.host || "localhost"}`;
 }
 
