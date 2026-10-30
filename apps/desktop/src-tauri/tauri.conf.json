@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Rowhouse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "id.morfotech.rowhouse",
   "build": {
     "beforeDevCommand": "node ../../scripts/sidecar.mjs debug && pnpm dev",
