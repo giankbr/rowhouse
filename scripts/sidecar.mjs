@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Build rowhouse-mcp and place it where Tauri's `externalBin` expects it:
 //   apps/desktop/src-tauri/binaries/rowhouse-mcp-<target-triple>[.exe]
-// The `universal-apple-darwin` meta-target is not a real rustc target, so for it
-// we build both macOS arches and lipo them into one universal binary.
+// The `universal-apple-darwin` meta-target is not a real rustc target. Tauri builds
+// each macOS arch slice separately and expects a per-arch sidecar for each, then
+// combines them itself, so for it we emit both per-arch binaries (no manual lipo).
 // Usage: node scripts/sidecar.mjs [debug|release]   (default: release)
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -31,11 +32,11 @@ function build(target, forceTarget = false) {
 }
 
 if (triple === "universal-apple-darwin") {
-  const arm = build("aarch64-apple-darwin", true);
-  const intel = build("x86_64-apple-darwin", true);
-  const dest = join(dir, "rowhouse-mcp-universal-apple-darwin");
-  execFileSync("lipo", ["-create", arm, intel, "-output", dest], { stdio: "inherit" });
-  console.log(`sidecar ready: binaries/rowhouse-mcp-universal-apple-darwin (${profile}, universal)`);
+  for (const t of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+    const src = build(t, true);
+    copyFileSync(src, join(dir, `rowhouse-mcp-${t}`));
+    console.log(`sidecar ready: binaries/rowhouse-mcp-${t} (${profile})`);
+  }
 } else {
   const ext = triple.includes("windows") ? ".exe" : "";
   const src = build(triple);
