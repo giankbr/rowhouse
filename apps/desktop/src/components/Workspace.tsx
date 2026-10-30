@@ -1,6 +1,6 @@
-import { AlertCircle, Bookmark, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, dialogs, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
+import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { AiPanel, type AiState } from "./AiPanel";
@@ -20,6 +20,7 @@ export function Workspace({
   onView,
   onToast,
   onHistory,
+  onSchedule,
   aiEnabled,
   inlineAi = false,
   onOpenSettings,
@@ -34,6 +35,7 @@ export function Workspace({
   onView: (v: "data" | "structure") => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onHistory: () => void;
+  onSchedule?: (sql: string) => void;
   aiEnabled: boolean;
   /** ghost-text suggestions in the editor (AI settings) */
   inlineAi?: boolean;
@@ -144,6 +146,8 @@ export function Workspace({
 
   // ---- query plan -----------------------------------------------------------
   const [analyze, setAnalyze] = useState(false);
+  const isRedis = !!conn && kindInfo(conn.kind).dialect === "redis";
+  const isCql = !!conn && kindInfo(conn.kind).dialect === "cql";
   const canAnalyze = conn?.kind === "postgres" || conn?.kind === "greenplum";
   const explainPlan = async (withAnalyze = analyze) => {
     onChange({ showPlan: true, planLoading: true, planError: undefined });
@@ -270,7 +274,7 @@ export function Workspace({
               variant="ghost"
               size="xs"
               onClick={() => (tab.showPlan ? onChange({ showPlan: false }) : explainPlan())}
-              disabled={!tab.sql.trim() || conn?.kind === "redis" || conn?.kind === "mongodb"}
+              disabled={!tab.sql.trim() || isRedis || isCql || conn?.kind === "mongodb"}
               title="Show the query plan (EXPLAIN)"
               className={cx(tab.showPlan && "bg-selected text-fg")}
             >
@@ -285,6 +289,11 @@ export function Workspace({
             >
               <Bookmark size={11} className={cx(tab.snippetId && "fill-current text-accent")} /> Save
             </Button>
+            {onSchedule && (
+              <Button variant="ghost" size="xs" onClick={() => onSchedule(tab.sql)} disabled={!tab.sql.trim()} title="Run this query on a schedule">
+                <CalendarClock size={11} /> Schedule
+              </Button>
+            )}
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
             <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
             <Button variant="ghost" size="xs" onClick={onHistory} title={`Query history (${mod}+Y)`}>
@@ -306,7 +315,7 @@ export function Workspace({
             variant="ghost"
             size="xs"
             onClick={() => setShowFilters((f) => !f)}
-            disabled={tab.view === "structure" || conn?.kind === "redis"}
+            disabled={tab.view === "structure" || isRedis}
             className={cx((showFilters || (tab.filters?.length ?? 0) > 0) && "bg-selected text-fg")}
           >
             <FilterIcon size={11} /> Filter
@@ -364,7 +373,7 @@ export function Workspace({
 
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
-          conn && !conn.readOnly && conn.kind !== "redis" && conn.kind !== "mongodb" && tab.columns && tab.schema && tab.table ? (
+          conn && !conn.readOnly && !isRedis && !isCql && conn.kind !== "mongodb" && tab.columns && tab.schema && tab.table ? (
             <StructureEditor
               conn={conn}
               schema={tab.schema}

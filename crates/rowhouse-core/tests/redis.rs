@@ -80,3 +80,55 @@ async fn redis_commands_keys_and_pages() {
     );
     c.query("FLUSHDB", 1).await.unwrap();
 }
+
+/// ROWHOUSE_TEST_REDIS_TLS=host:port:/path/to/ca.crt (server cert must be valid for host)
+#[tokio::test]
+async fn redis_over_tls() {
+    let Ok(spec) = std::env::var("ROWHOUSE_TEST_REDIS_TLS") else {
+        return;
+    };
+    let mut p = spec.splitn(3, ':');
+    let (host, port, ca) = (p.next().unwrap(), p.next().unwrap(), p.next().unwrap());
+    let mut cfg = ConnectionConfig::new("r", DbKind::Redis);
+    cfg.host = Some(host.into());
+    cfg.port = port.parse().ok();
+    // verified against the CA
+    cfg.tls = Some(rowhouse_core::config::TlsConfig {
+        mode: rowhouse_core::config::TlsMode::VerifyFull,
+        ca_cert: Some(ca.into()),
+        ..Default::default()
+    });
+    let c = Connection::connect_with(&cfg, None).await.unwrap();
+    c.ping().await.unwrap();
+    // without the CA, verification fails…
+    cfg.tls = Some(rowhouse_core::config::TlsConfig {
+        mode: rowhouse_core::config::TlsMode::VerifyFull,
+        ..Default::default()
+    });
+    assert!(Connection::connect_with(&cfg, None).await.is_err());
+    // …but "require" (encrypt, don't verify) connects
+    cfg.tls = Some(rowhouse_core::config::TlsConfig {
+        mode: rowhouse_core::config::TlsMode::Require,
+        ..Default::default()
+    });
+    Connection::connect_with(&cfg, None)
+        .await
+        .unwrap()
+        .ping()
+        .await
+        .unwrap();
+    // and a pasted rediss:// URL in the host field with insecure fragment
+    let mut cfg = ConnectionConfig::new("r", DbKind::Upstash);
+    cfg.host = Some(format!("rediss://{host}:{port}/0#insecure"));
+    Connection::connect_with(&cfg, None)
+        .await
+        .unwrap()
+        .ping()
+        .await
+        .unwrap();
+    // plain redis to a TLS port fails
+    let mut cfg = ConnectionConfig::new("r", DbKind::Redis);
+    cfg.host = Some(host.into());
+    cfg.port = port.parse().ok();
+    assert!(Connection::connect_with(&cfg, None).await.is_err());
+}

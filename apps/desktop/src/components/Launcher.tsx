@@ -48,6 +48,8 @@ export function RowhouseMark({ size = 96 }: { size?: number }) {
 function subtitle(c: ConnectionConfig) {
   const k = kindInfo(c.kind);
   if (k.file) return c.file?.split(/[\\/]/).pop() ?? "no file";
+  if (c.kind === "turso") return c.host?.replace(/^\w+:\/\//, "") ?? "Turso";
+  if (c.kind === "d1") return `Cloudflare D1 · ${c.database ?? "?"}`;
   const parts: string[] = [];
   if (c.ssh) parts.push(`SSH · ${c.ssh.host || "?"}`);
   else parts.push(c.host ?? "localhost");

@@ -142,10 +142,14 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Tidb => "TiDB (MySQL dialect)",
         Singlestore => "SingleStore (MySQL dialect)",
         Sqlite => "SQLite",
+        Turso => "libSQL / Turso (SQLite dialect)",
+        D1 => "Cloudflare D1 (SQLite dialect)",
         Duckdb => "DuckDB",
         Mssql => "Microsoft SQL Server (T-SQL)",
         Clickhouse => "ClickHouse",
-        Redis => "Redis (reply with Redis commands, one per line, instead of SQL)",
+        Redis | Upstash => "Redis (reply with Redis commands, one per line, instead of SQL)",
+        Cassandra => "Apache Cassandra (CQL; filter on partition/clustering keys, no JOINs)",
+        Scylla => "ScyllaDB (CQL, Cassandra-compatible; filter on partition/clustering keys, no JOINs)",
         Mongodb => "MongoDB (reply with mongosh statements such as db.orders.find({ status: \"paid\" }).sort({ total: -1 }).limit(10) or db.orders.aggregate([...]) instead of SQL; the schema lists collections and sampled fields)",
     }
 }

@@ -186,6 +186,16 @@ impl Connection {
 
     pub async fn table_page(&self, r: &PageRequest) -> Result<Page> {
         let started = std::time::Instant::now();
+        if let Some(c) = self.cql() {
+            let target = self.target(&r.schema, &r.table);
+            let (result, total, sql) = c.page(r, &target, |x| self.ident(x)).await?;
+            return Ok(Page {
+                result,
+                total,
+                sql,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
         if let Some(m) = self.mongo() {
             let (result, total, sql) = m.page(r).await?;
             return Ok(Page {

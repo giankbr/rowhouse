@@ -23,6 +23,19 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
     if input.starts_with("mongodb://") || input.starts_with("mongodb+srv://") {
         return Ok(mongo_url(input));
     }
+    if let Some(rest) = input.strip_prefix("libsql://") {
+        // libsql://db-org.turso.io?authToken=…
+        let (host, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let token = url::form_urlencoded::parse(query.as_bytes())
+            .find(|(k, _)| k == "authToken")
+            .map(|(_, v)| v.into_owned());
+        let mut c = ConnectionConfig::new("", DbKind::Turso);
+        c.host = Some(format!("libsql://{}", host.trim_end_matches('/')));
+        c.port = None;
+        c.user = None;
+        c.name = format!("Turso · {}", host.split('.').next().unwrap_or("db"));
+        return Ok((c, token));
+    }
     let url = Url::parse(input).map_err(|e| Error::Other(format!("not a connection URL: {e}")))?;
     let host = url.host_str().unwrap_or_default().to_string();
     let kind = match url.scheme() {
@@ -49,6 +62,13 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
         "clickhouse" | "ch" => DbKind::Clickhouse,
         "sqlite" | "file" => DbKind::Sqlite,
         "duckdb" => DbKind::Duckdb,
+        "redis" | "rediss" => {
+            if host.ends_with(".upstash.io") {
+                DbKind::Upstash
+            } else {
+                DbKind::Redis
+            }
+        }
         other => return Err(Error::Other(format!("unsupported scheme `{other}://`"))),
     };
 
@@ -83,6 +103,10 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
 
     let mut tls = c.tls.clone().unwrap_or_default();
     let mut tls_set = c.tls.is_some();
+    if url.scheme() == "rediss" {
+        tls_set = true;
+        tls.mode = TlsMode::VerifyFull;
+    }
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
             "sslmode" | "ssl-mode" | "ssl_mode" => {
@@ -114,6 +138,7 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
     c.name = match kind {
         DbKind::Neon => format!("Neon · {}", c.database.as_deref().unwrap_or("neondb")),
         DbKind::Supabase => format!("Supabase · {}", host.split('.').next().unwrap_or("project")),
+        DbKind::Upstash => format!("Upstash · {}", host.split('.').next().unwrap_or("redis")),
         _ => format!(
             "{}@{host}",
             c.database.as_deref().unwrap_or(kind_label(kind))
@@ -165,6 +190,7 @@ fn mongo_url(input: &str) -> (ConnectionConfig, Option<String>) {
 fn kind_label(k: DbKind) -> &'static str {
     match k {
         DbKind::Mssql => "sqlserver",
+        DbKind::Redis | DbKind::Upstash => "redis",
         DbKind::Clickhouse => "clickhouse",
         DbKind::Mysql | DbKind::Mariadb | DbKind::Tidb | DbKind::Singlestore => "mysql",
         _ => "postgres",
@@ -260,5 +286,35 @@ mod tests {
             Some("mongodb://h1:27017,h2:27018/?replicaSet=rs0")
         );
         assert!(pw.is_none() && c.database.is_none());
+    }
+
+    #[test]
+    fn redis_urls() {
+        let (c, pw) =
+            parse_connection_url("rediss://default:AbC@eu1-cool-fox-12345.upstash.io:6379")
+                .unwrap();
+        assert_eq!(c.kind, DbKind::Upstash);
+        assert_eq!(c.tls.as_ref().map(|t| t.mode), Some(TlsMode::VerifyFull));
+        assert_eq!(
+            (c.user.as_deref(), pw.as_deref()),
+            (Some("default"), Some("AbC"))
+        );
+        assert_eq!(c.name, "Upstash · eu1-cool-fox-12345");
+        let (c, _) = parse_connection_url("redis://localhost:6380/2").unwrap();
+        assert_eq!(
+            (c.kind, c.port, c.database.as_deref()),
+            (DbKind::Redis, Some(6380), Some("2"))
+        );
+        assert!(c.tls.is_none());
+    }
+
+    #[test]
+    fn turso_url() {
+        let (c, tok) =
+            parse_connection_url("libsql://shop-gian.turso.io?authToken=eyJ.abc").unwrap();
+        assert_eq!(c.kind, DbKind::Turso);
+        assert_eq!(c.host.as_deref(), Some("libsql://shop-gian.turso.io"));
+        assert_eq!(tok.as_deref(), Some("eyJ.abc"));
+        assert_eq!(c.name, "Turso · shop-gian");
     }
 }

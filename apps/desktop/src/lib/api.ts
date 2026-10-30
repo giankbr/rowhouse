@@ -13,13 +13,18 @@ export type DbKind =
   | "tidb"
   | "singlestore"
   | "sqlite"
+  | "turso"
+  | "d1"
   | "duckdb"
   | "mssql"
   | "clickhouse"
   | "redis"
-  | "mongodb";
+  | "upstash"
+  | "mongodb"
+  | "cassandra"
+  | "scylla";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql";
 
 export interface KindInfo {
   kind: DbKind;
@@ -33,6 +38,8 @@ export interface KindInfo {
   file?: boolean;
   /** shown with a "beta" tag until tested against a real server in CI */
   beta?: boolean;
+  /** hosted HTTP API: no host/port, TLS or SSH settings */
+  api?: boolean;
   /** TLS required by default (hosted services) */
   tls?: boolean;
 }
@@ -44,11 +51,16 @@ export const KINDS: KindInfo[] = [
   { kind: "mysql", label: "MySQL", abbr: "My", color: "#e48e00", dialect: "mysql", port: 3306, user: "root" },
   { kind: "mariadb", label: "MariaDB", abbr: "Ma", color: "#4b8b9b", dialect: "mysql", port: 3306, user: "root" },
   { kind: "sqlite", label: "SQLite", abbr: "Sl", color: "#7c3aed", dialect: "sqlite", port: null, user: null, file: true },
+  { kind: "turso", label: "Turso", abbr: "Tu", color: "#13a88a", dialect: "sqlite", port: null, user: null, api: true },
+  { kind: "d1", label: "Cloudflare D1", abbr: "D1", color: "#f38020", dialect: "sqlite", port: null, user: null, api: true },
   { kind: "mssql", label: "SQL Server", abbr: "Ss", color: "#a91d22", dialect: "mssql", port: 1433, user: "sa", beta: true },
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
   { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
+  { kind: "upstash", label: "Upstash", abbr: "Up", color: "#00c98d", dialect: "redis", port: 6379, user: "default", tls: true },
   { kind: "mongodb", label: "MongoDB", abbr: "Mo", color: "#00684a", dialect: "mongodb", port: 27017, user: null, beta: true },
+  { kind: "cassandra", label: "Cassandra", abbr: "Ca", color: "#1287b1", dialect: "cql", port: 9042, user: null, beta: true },
+  { kind: "scylla", label: "ScyllaDB", abbr: "Sc", color: "#6c2bd9", dialect: "cql", port: 9042, user: null, beta: true },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
   { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },
@@ -258,6 +270,60 @@ export interface Snippet {
   updatedAt: number;
 }
 
+export type Every =
+  | { kind: "minutes"; n: number }
+  | { kind: "daily"; at: string }
+  | { kind: "weekly"; weekday: number; at: string };
+export type Notify = "never" | "on-failure" | "on-change" | "always";
+
+export interface ScheduleRun {
+  at: number;
+  ok: boolean;
+  rows: number;
+  elapsedMs: number;
+  error?: string | null;
+  changed: boolean;
+  file?: string | null;
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  connectionId: string;
+  sql: string;
+  every: Every;
+  enabled: boolean;
+  export: { dir: string; format: ExportFormat } | null;
+  notify: Notify;
+  createdAt: number;
+  runs: ScheduleRun[];
+}
+
+/** Mirrors `Schedule::next_run` in rowhouse-core (unix seconds). */
+export function nextRun(s: Schedule): number | null {
+  if (!s.enabled) return null;
+  const since = Math.max(s.runs[0]?.at ?? 0, s.createdAt);
+  const e = s.every;
+  if (e.kind === "minutes") return since + Math.max(1, e.n) * 60;
+  const [h, m] = e.at.split(":").map(Number);
+  const base = new Date(since * 1000);
+  const c = new Date(base);
+  c.setHours(h, m, 0, 0);
+  if (e.kind === "weekly") {
+    const today = (base.getDay() + 6) % 7;
+    c.setDate(c.getDate() + ((e.weekday - today + 7) % 7));
+    if (c <= base) c.setDate(c.getDate() + 7);
+  } else if (c <= base) c.setDate(c.getDate() + 1);
+  return Math.floor(c.getTime() / 1000);
+}
+
+export function describeEvery(e: Every): string {
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  if (e.kind === "minutes") return e.n === 1 ? "every minute" : e.n % 60 === 0 ? `every ${e.n / 60} h` : `every ${e.n} min`;
+  if (e.kind === "daily") return `daily at ${e.at}`;
+  return `${days[e.weekday]} at ${e.at}`;
+}
+
 export interface PlanNode {
   label: string;
   detail: string | null;
@@ -350,6 +416,21 @@ export const api = {
     call<DataDiff>("compare_data", { sourceId, sourceSchema, sourceTable, targetId, targetSchema, targetTable }),
   listSnippets: (id?: string, search?: string) => call<Snippet[]>("list_snippets", { id, search }),
   saveSnippet: (snippet: Snippet) => call<Snippet>("save_snippet", { snippet }),
+  schedules: {
+    list: () => call<Schedule[]>("schedules_list"),
+    save: (schedule: Schedule) => call<Schedule>("schedule_save", { schedule }),
+    remove: (scheduleId: string) => call<void>("schedule_delete", { scheduleId }),
+    runNow: (scheduleId: string) => call<ScheduleRun>("schedule_run_now", { scheduleId }),
+    /** Fires after every run (scheduled or manual). */
+    async onRun(fn: (e: { schedule: Schedule; run: ScheduleRun }) => void): Promise<() => void> {
+      if (!isTauri) {
+        mockScheduleListeners.add(fn);
+        return () => mockScheduleListeners.delete(fn);
+      }
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<{ schedule: Schedule; run: ScheduleRun }>("schedule-run", (ev) => fn(ev.payload));
+    },
+  },
   deleteSnippet: (snippetId: number) => call<void>("delete_snippet", { snippetId }),
   explainPlan: (id: string, sql: string, analyze: boolean) => call<Plan>("explain_plan", { id, sql, analyze }),
   compareSchema: (sourceId: string, sourceSchema: string, targetId: string, targetSchema: string) =>
@@ -397,6 +478,12 @@ export const dialogs = {
     const r = await open({ multiple: false, directory: false, filters: [{ name, extensions }] });
     return typeof r === "string" ? r : null;
   },
+  async folder(): Promise<string | null> {
+    if (!isTauri) return "/Users/you/Reports";
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const r = await open({ multiple: false, directory: true });
+    return typeof r === "string" ? r : null;
+  },
   async openCsv(): Promise<string | null> {
     if (!isTauri) return "/mock/import.csv";
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -411,7 +498,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
     id: crypto.randomUUID(),
     name: "",
     kind,
-    host: k.file ? null : "localhost",
+    host: k.file || k.api ? null : "localhost",
     port: k.port,
     user: k.user,
     database: null,
@@ -428,6 +515,41 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
 // ---------------------------------------------------------------------------
 // Browser mock
 // ---------------------------------------------------------------------------
+
+const mockScheduleListeners = new Set<(e: { schedule: Schedule; run: ScheduleRun }) => void>();
+const nowS = () => Math.floor(Date.now() / 1000);
+let mockSchedules: Schedule[] = [
+  {
+    id: "s1",
+    name: "Daily revenue",
+    connectionId: "local-pg",
+    sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue\nFROM orders WHERE created_at > now() - interval '7 days'\nGROUP BY 1 ORDER BY 1;",
+    every: { kind: "daily", at: "08:30" },
+    enabled: true,
+    export: { dir: "/Users/you/Reports", format: "csv" },
+    notify: "on-change",
+    createdAt: nowS() - 86400 * 3,
+    runs: [
+      { at: nowS() - 3600 * 5, ok: true, rows: 7, elapsedMs: 42, changed: true, file: "/Users/you/Reports/Daily-revenue-20261030-083000.csv" },
+      { at: nowS() - 3600 * 29, ok: true, rows: 7, elapsedMs: 38, changed: false, file: "/Users/you/Reports/Daily-revenue-20261029-083000.csv" },
+    ],
+  },
+  {
+    id: "s2",
+    name: "Failed payments watch",
+    connectionId: "prod-my",
+    sql: "SELECT id, user_id, amount FROM payments WHERE status = 'failed' AND created_at > NOW() - INTERVAL 15 MINUTE;",
+    every: { kind: "minutes", n: 15 },
+    enabled: true,
+    export: null,
+    notify: "on-change",
+    createdAt: nowS() - 86400,
+    runs: [
+      { at: nowS() - 600, ok: false, rows: 0, elapsedMs: 3010, changed: false, error: "connection timed out" },
+      { at: nowS() - 1500, ok: true, rows: 2, elapsedMs: 21, changed: false },
+    ],
+  },
+];
 
 const mockConns: ConnectionConfig[] = [
   { ...newConnection("postgres"), id: "local-pg", name: "Local Postgres", database: "app_dev", color: "green" },
@@ -690,6 +812,30 @@ INSERT INTO "public"."users" ("id", "full_name", "email") VALUES (1237, 'Rina P.
 -- DELETE FROM "public"."users" WHERE "id" = 88;
 -- DELETE FROM "public"."users" WHERE "id" = 412;`,
       } satisfies DataDiff;
+    }
+    case "schedules_list":
+      return structuredClone(mockSchedules);
+    case "schedule_save": {
+      const sc = { ...(a.schedule as Schedule) };
+      if (!sc.name.trim()) throw "give the schedule a name";
+      if (/^\s*(drop|truncate)\b|^\s*delete\s+from\s+\S+\s*;?\s*$/i.test(sc.sql)) throw "scheduled queries can't run destructive statements";
+      const cur = mockSchedules.find((x) => x.id === sc.id);
+      if (!sc.id) sc.id = crypto.randomUUID();
+      sc.runs = cur?.runs ?? [];
+      sc.createdAt = cur && JSON.stringify(cur.every) === JSON.stringify(sc.every) ? cur.createdAt : nowS();
+      mockSchedules = cur ? mockSchedules.map((x) => (x.id === sc.id ? sc : x)) : [...mockSchedules, sc];
+      return sc;
+    }
+    case "schedule_delete":
+      mockSchedules = mockSchedules.filter((x) => x.id !== a.scheduleId);
+      return null;
+    case "schedule_run_now": {
+      await sleep(400);
+      const sc = mockSchedules.find((x) => x.id === a.scheduleId)!;
+      const run: ScheduleRun = { at: nowS(), ok: true, rows: 7, elapsedMs: 35, changed: false, file: sc.export ? `${sc.export.dir}/${sc.name.replace(/\W+/g, "-")}-now.${sc.export.format}` : null };
+      sc.runs = [run, ...sc.runs].slice(0, 20);
+      mockScheduleListeners.forEach((f) => f({ schedule: structuredClone(sc), run }));
+      return run;
     }
     case "list_snippets": {
       const q = String(a.search ?? "").toLowerCase();

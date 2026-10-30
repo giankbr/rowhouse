@@ -33,11 +33,16 @@ pub enum DbKind {
     Tidb,
     Singlestore,
     Sqlite,
+    Turso,
+    D1,
     Duckdb,
     Mssql,
     Clickhouse,
     Redis,
+    Upstash,
     Mongodb,
+    Cassandra,
+    Scylla,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -51,10 +56,11 @@ pub enum Driver {
     Clickhouse,
     Redis,
     Mongo,
+    Cassandra,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 16] = [
+    pub const ALL: [DbKind; 21] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -66,11 +72,16 @@ impl DbKind {
         DbKind::Tidb,
         DbKind::Singlestore,
         DbKind::Sqlite,
+        DbKind::Turso,
+        DbKind::D1,
         DbKind::Duckdb,
         DbKind::Mssql,
         DbKind::Clickhouse,
         DbKind::Redis,
+        DbKind::Upstash,
         DbKind::Mongodb,
+        DbKind::Cassandra,
+        DbKind::Scylla,
     ];
 
     pub fn driver(self) -> Driver {
@@ -78,18 +89,25 @@ impl DbKind {
         match self {
             Postgres | Neon | Supabase | Cockroach | Redshift | Greenplum => Driver::Postgres,
             Mysql | Mariadb | Tidb | Singlestore => Driver::Mysql,
-            Sqlite => Driver::Sqlite,
+            // remote SQLite: same dialect, different transport (see Connection::connect)
+            Sqlite | Turso | D1 => Driver::Sqlite,
             Duckdb => Driver::Duckdb,
             Mssql => Driver::Mssql,
             Clickhouse => Driver::Clickhouse,
-            Redis => Driver::Redis,
+            Redis | Upstash => Driver::Redis,
             Mongodb => Driver::Mongo,
+            Cassandra | Scylla => Driver::Cassandra,
         }
     }
 
     /// Embedded databases open a local file instead of a host/port.
     pub fn is_file(self) -> bool {
-        matches!(self.driver(), Driver::Sqlite | Driver::Duckdb)
+        matches!(self, DbKind::Sqlite | DbKind::Duckdb)
+    }
+
+    /// Talks HTTP to a hosted API (no host/port, no SSH tunnel).
+    pub fn is_http_api(self) -> bool {
+        matches!(self, DbKind::Turso | DbKind::D1)
     }
 
     pub fn default_port(self) -> Option<u16> {
@@ -102,9 +120,10 @@ impl DbKind {
             Tidb => Some(4000),
             Mssql => Some(1433),
             Clickhouse => Some(8123),
-            Redis => Some(6379),
+            Redis | Upstash => Some(6379),
             Mongodb => Some(27017),
-            Sqlite | Duckdb => None,
+            Cassandra | Scylla => Some(9042),
+            Sqlite | Duckdb | Turso | D1 => None,
         }
     }
 }
