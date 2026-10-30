@@ -256,18 +256,18 @@ export function Launcher({
                   onMouseEnter={() => setSel(i)}
                   onClick={() => onOpen(c.id)}
                   className={cx(
-                    "group flex cursor-default items-center gap-3 rounded-lg px-2.5 py-2",
+                    "group flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5",
                     i === sel ? "bg-selected" : "hover:bg-hover",
                   )}
                 >
-                  <KindBadge kind={c.kind} size={32} />
+                  <KindBadge kind={c.kind} size={26} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[13.5px] font-medium">{c.name || "Untitled"}</span>
+                      <span className="truncate text-[13px] font-medium">{c.name || "Untitled"}</span>
                       {env && <span className={cx("shrink-0 rounded-md px-1.5 py-px text-[11.5px] font-medium", ENV_STYLE[c.env!])}>{env.label.toLowerCase()}</span>}
                       {c.readOnly && <Lock size={12} className="shrink-0 text-subtle" />}
                     </div>
-                    <div className="truncate text-[11.5px] text-muted">{subtitle(c)}</div>
+                    <div className="truncate text-[11px] text-muted">{subtitle(c)}</div>
                   </div>
                   <button
                     onClick={(e) => (e.stopPropagation(), onEdit(c))}

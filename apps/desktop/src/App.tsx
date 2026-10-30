@@ -24,6 +24,8 @@ import { FakeDataDialog } from "./components/FakeDataDialog";
 import { BackupDialog } from "./components/BackupDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar, type TableMenuAction } from "./components/Sidebar";
+import { SidebarRail } from "./components/SidebarRail";
+import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
 import { DdlDialog, NewTableDialog, TableActionDialog, type TableActionKind } from "./components/TableActions";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
@@ -56,7 +58,39 @@ export default function App() {
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ tab: Tab; sql: string; items: Destructive[] } | null>(null);
   const [importOpen, setImportOpen] = useState<boolean | string>(false);
-  const [sidebar, setSidebar] = useState(true);
+  const [sidebar, setSidebar] = useState(() => {
+    try {
+      return localStorage.getItem("rh-sidebar") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const [sideW, setSideW] = useState(() => {
+    try {
+      return Math.min(420, Math.max(190, Number(localStorage.getItem("rh-sidebar-w")) || 248));
+    } catch {
+      return 248;
+    }
+  });
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem("rh-sidebar", sidebar ? "1" : "0");
+      localStorage.setItem("rh-sidebar-w", String(sideW));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [sidebar, sideW]);
+  const startSideDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const w0 = sideW;
+    const move = (ev: MouseEvent) => setSideW(Math.min(420, Math.max(190, w0 + ev.clientX - x0)));
+    const up = () => (window.removeEventListener("mousemove", move), window.removeEventListener("mouseup", up), (document.body.style.cursor = ""));
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -104,7 +138,7 @@ export default function App() {
       .catch((e) => setToast(String(e)));
     api.ai
       .getSettings()
-      .then((r) => (setAiEnabled(r.settings.enabled && !!r.settings.model), setInlineAi(r.settings.enabled && !!r.settings.inlineCompletions)))
+      .then((r) => (setAiEnabled(r.settings.enabled && (!!r.settings.model || (r.settings.provider === "local" && !!r.settings.agent))), setInlineAi(r.settings.enabled && !!r.settings.inlineCompletions)))
       .catch(() => {});
   }, [setToast]);
 
@@ -577,6 +611,7 @@ export default function App() {
       else if (k === "t") (e.preventDefault(), newQuery());
       else if (k === "w" && activeTab) (e.preventDefault(), closeTab(activeTab));
       else if (k === "b") (e.preventDefault(), setSidebar((s) => !s));
+      else if (k === "o") (e.preventDefault(), setSwitcherOpen((o) => !o));
       else if (k === "y") (e.preventDefault(), setHistoryOpen((h) => !h));
       else if (k === "\\") (e.preventDefault(), splitRight());
     };
@@ -709,6 +744,7 @@ export default function App() {
         dark={dark}
         onToggleTheme={() => setDark((d) => !d)}
         onToggleSidebar={() => setSidebar((s) => !s)}
+        onSwitch={() => setSwitcherOpen((o) => !o)}
         onPalette={() => setPalette(true)}
         onMcp={() => setMcpOpen(true)}
         onSettings={() => setSettingsOpen(true)}
@@ -739,9 +775,38 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1">
         {conn && (
-        <div className={cx("shrink-0 overflow-hidden border-r border-line transition-[width] duration-150", sidebar && conn ? "w-60" : "w-0 border-r-0")}>
-          <div className="h-full w-60">
+        <div className="relative flex shrink-0 border-r border-line" style={{ width: sidebar ? sideW : 44 }}>
+          {!sidebar ? (
+            <SidebarRail
+              conn={conn}
+              onExpand={() => setSidebar(true)}
+              onSwitch={() => setSwitcherOpen((o) => !o)}
+              onNewQuery={() => newQuery()}
+              onErd={openErd}
+              onHistory={() => setHistoryOpen((h) => !h)}
+              onPalette={() => setPalette(true)}
+            />
+          ) : null}
+          {!sidebar && (
+            <ConnectionSwitcher
+              anchor="rail"
+              anchorRect={{ x: 50, y: 48 }}
+              connections={connections}
+              activeId={activeConn}
+              connected={connected}
+              open={switcherOpen}
+              onOpenChange={setSwitcherOpen}
+              onSelect={selectConnection}
+              onEdit={(c) => setDialog({ open: true, edit: c })}
+              onNew={() => setDialog({ open: true, edit: null })}
+              onImport={() => setImportOpen(true)}
+            />
+          )}
+          <div className={cx("h-full min-w-0 flex-1", !sidebar && "hidden")}>
             <Sidebar
+              connected={connected}
+              switcherOpen={switcherOpen && sidebar}
+              onSwitcherOpen={setSwitcherOpen}
               connections={connections}
               activeId={activeConn}
               tables={connTables}
@@ -771,6 +836,7 @@ export default function App() {
               canEdit={!!conn && kindInfo(conn.kind).dialect !== "redis"}
             />
           </div>
+          {sidebar && <div onMouseDown={startSideDrag} onDoubleClick={() => setSideW(248)} className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-accent/30" title="Drag to resize · double-click to reset" />}
         </div>
         )}
 
@@ -920,7 +986,7 @@ export default function App() {
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSaved={(s) => (setAiEnabled(s.enabled && !!s.model), setInlineAi(s.enabled && !!s.inlineCompletions))}
+        onSaved={(s) => (setAiEnabled(s.enabled && (!!s.model || (s.provider === "local" && !!s.agent))), setInlineAi(s.enabled && !!s.inlineCompletions))}
       />
       <CommandPalette
         open={palette}

@@ -1,6 +1,6 @@
 import { CheckCircle2, FolderSync, Loader2, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, dialogs, type AiSettings, type SyncStatus } from "../lib/api";
+import { api, dialogs, type AiSettings, type LocalAi, type SyncStatus } from "../lib/api";
 import { Button, Field, Input, Modal, Segmented, Switch, cx } from "./ui";
 import type { LicenseStatus } from "../lib/api";
 import { saveAppearance, useAppearance, type Appearance, type Density, type MonoFont, type UiFont } from "../lib/appearance";
@@ -20,6 +20,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
   const [removeKey, setRemoveKey] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<{ state: "idle" | "busy" | "ok" | "err"; msg?: string }>({ state: "idle" });
+  const [tab, setTab] = useState<"general" | "ai" | "sync" | "license">("general");
 
   useEffect(() => {
     if (!open) return;
@@ -64,7 +65,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
     <Modal
       open={open}
       onClose={onClose}
-      width={520}
+      width={560}
       title="Settings"
       footer={
         <>
@@ -85,7 +86,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
             </span>
           )}
           <span className="flex-1" />
-          <Button onClick={test} disabled={!s.model || status.state === "busy"}>
+          <Button onClick={test} disabled={(!s.model && s.provider !== "local") || status.state === "busy"}>
             Test
           </Button>
           <Button variant="primary" onClick={save}>
@@ -94,16 +95,40 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
         </>
       }
     >
-      <div className="flex flex-col gap-3">
-        <AppearanceSection />
-        <div className="h-px bg-line" />
-        <LicenseSection />
-        <div className="h-px bg-line" />
-        <SyncSection />
-        <div className="h-px bg-line" />
-        <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">AI</h3>
+      <div className="-mx-4 -mt-3 mb-3 flex gap-0.5 border-b border-line px-3">
+        {(["general", "ai", "sync", "license"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cx("-mb-px border-b-2 px-2.5 py-1.5 text-xs capitalize", tab === t ? "border-accent font-medium text-fg" : "border-transparent text-muted hover:text-fg")}
+          >
+            {t === "ai" ? "AI" : t === "general" ? "Appearance" : t}
+          </button>
+        ))}
+      </div>
+      <div className="flex min-h-[340px] flex-col gap-3">
+        {tab === "general" && <AppearanceSection />}
+        {tab === "license" && <LicenseSection />}
+        {tab === "sync" && <SyncSection />}
+        {tab === "ai" && (
+        <>
         <Switch checked={s.enabled} onChange={(v) => set({ enabled: v })} label="Enable AI features (Ask AI, Fix with AI, Explain)" />
         <div className={cx("flex flex-col gap-3 transition-opacity", !s.enabled && "pointer-events-none opacity-45")}>
+          <LocalAiPicker
+            current={s}
+            onUse={(d) => {
+              setModels(d.models);
+              if (d.kind === "cli") set({ provider: "local", agent: d.id, model: "", inlineCompletions: false });
+              else set({ provider: "openai", baseUrl: d.location, model: s.provider === "openai" && d.models.includes(s.model) ? s.model : (d.models[0] ?? "") });
+            }}
+          />
+          {s.provider === "local" ? (
+            <Field label="Model" hint="Optional — empty uses the agent's own default. Uses your existing login / subscription; no API key needed.">
+              <Input list="rh-models" value={s.model} placeholder="agent default" onChange={(e) => set({ model: e.target.value })} />
+            </Field>
+          ) : (
+          <>
           <div className="flex flex-wrap gap-1">
             {PRESETS.map((p) => (
               <button
@@ -174,7 +199,9 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
               </Button>
             </div>
           </Field>
-          <Switch
+          </>
+          )}
+          {s.provider !== "local" && <Switch
             checked={!!s.inlineCompletions}
             onChange={(v) => set({ inlineCompletions: v })}
             label={
@@ -182,7 +209,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
                 Inline suggestions while typing <span className="text-subtle">— Tab to accept; one small request per pause</span>
               </span>
             }
-          />
+          />}
           <div className="flex gap-2 rounded-lg bg-panel p-3 text-2xs text-muted">
             <ShieldCheck size={14} className="mt-px shrink-0 text-success" />
             <span>
@@ -191,6 +218,8 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
             </span>
           </div>
         </div>
+        </>
+        )}
       </div>
     </Modal>
   );
@@ -413,6 +442,55 @@ function SyncSection() {
         </form>
       )}
       {msg && <span className={cx("text-2xs", msg.ok ? "text-success" : "text-danger")}>{msg.text}</span>}
+    </div>
+  );
+}
+
+/** CLIs and local model servers found on this machine, one click to use. */
+function LocalAiPicker({ current, onUse }: { current: AiSettings; onUse: (d: LocalAi) => void }) {
+  const [found, setFound] = useState<LocalAi[] | null>(null);
+  const scan = () => {
+    setFound(null);
+    api.aiDetectLocal().then(setFound).catch(() => setFound([]));
+  };
+  useEffect(scan, []);
+  const active = (d: LocalAi) => (d.kind === "cli" ? current.provider === "local" && current.agent === d.id : current.provider === "openai" && current.baseUrl.replace(/\/$/, "") === d.location);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2 text-2xs text-muted">
+        On this computer
+        <button type="button" onClick={scan} className="text-subtle hover:text-fg">
+          {found === null ? "scanning…" : "rescan"}
+        </button>
+      </div>
+      {found && found.length === 0 && (
+        <p className="text-2xs text-subtle">
+          No local agents found. Rowhouse looks for Claude Code, Codex, OpenCode, Gemini CLI, Cursor Agent and Copilot CLI, and for Ollama / LM Studio running on their default ports.
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-1.5">
+        {(found ?? []).map((d) => (
+          <button
+            type="button"
+            key={d.id}
+            onClick={() => onUse(d)}
+            title={d.location}
+            className={cx(
+              "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left",
+              active(d) ? "border-accent bg-accent-soft/60" : "border-line hover:border-line-strong hover:bg-hover",
+            )}
+          >
+            <span className={cx("size-1.5 shrink-0 rounded-full", d.kind === "cli" ? "bg-success" : "bg-accent")} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">{d.label}</span>
+              <span className="block truncate text-[10.5px] text-subtle">
+                {d.kind === "cli" ? (d.version ?? "installed") + " · your login" : `${d.models.length} model${d.models.length === 1 ? "" : "s"} · local server`}
+              </span>
+            </span>
+            {active(d) && <span className="text-[10px] font-medium text-accent">in use</span>}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

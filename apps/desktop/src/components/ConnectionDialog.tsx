@@ -25,13 +25,12 @@ export function ConnectionDialog({
   const [sshSecret, setSshSecret] = useState<string>("");
   const [test, setTest] = useState<{ state: "idle" | "busy" | "ok" | "err"; msg?: string }>({ state: "idle" });
   const isNew = !initial;
-  // the type grid is big; collapse it when the type is already chosen
-  const [pickKind, setPickKind] = useState(true);
 
   useEffect(() => {
     if (open) {
-      setC(initial ?? newConnection(initialKind));
-      setPickKind(!initial && !initialKind);
+      setC(initial ?? { ...newConnection(initialKind), host: null, port: null, user: null });
+      setTabSel("general");
+      setKindFilter("");
       setPassword("");
       setSshSecret("");
       setUrl("");
@@ -41,10 +40,6 @@ export function ConnectionDialog({
   }, [open, initial]);
 
   const set = (patch: Partial<ConnectionConfig>) => setC((x) => ({ ...x, ...patch }));
-  const setKind = (kind: DbKind) => {
-    const d = newConnection(kind);
-    set({ kind, host: d.host, port: d.port, user: d.user, ssh: d.host ? c.ssh : null, tls: kindInfo(kind).api ? null : (d.tls ?? c.tls ?? null) });
-  };
   const info = kindInfo(c.kind);
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -72,7 +67,7 @@ export function ConnectionDialog({
   const runTest = async () => {
     setTest({ state: "busy" });
     try {
-      const fp = await api.testConnection(c, pw, sshPw);
+      const fp = await api.testConnection(withDefaults(c), pw, sshPw);
       if (fp && c.ssh && !c.ssh.hostKey) setSsh({ hostKey: fp }); // pin on save
       setTest({ state: "ok", msg: "Connection successful" });
     } catch (e) {
@@ -81,15 +76,29 @@ export function ConnectionDialog({
   };
 
   const save = async () => {
-    const saved = await api.saveConnection({ ...c, name: c.name.trim() || defaultName(c) }, pw, sshPw);
+    const full = withDefaults(c);
+    const saved = await api.saveConnection({ ...full, name: c.name.trim() || defaultName(full) }, pw, sshPw);
     onSaved(saved);
   };
+
+  const blank = (k: DbKind) => ({ ...newConnection(k), host: null, port: null, user: null });
+  const [tabSel, setTabSel] = useState<"general" | "ssh" | "tls" | "safety">("general");
+  const [kindFilter, setKindFilter] = useState("");
+  const shownKinds = KINDS.filter((k) => !kindFilter || k.label.toLowerCase().includes(kindFilter.toLowerCase()));
+  const hasNet = !info.file && !info.api;
+  const dialect = info.dialect;
+  const hostPh = c.kind === "mongodb" ? "localhost or mongodb+srv://…" : dialect === "cql" ? "node1, node2:9042" : c.kind === "neon" ? "ep-xxx.region.aws.neon.tech" : c.kind === "supabase" ? "db.xxxx.supabase.co" : c.kind === "upstash" ? "xxx.upstash.io" : "localhost";
+  const tabs = [
+    { id: "general" as const, label: "General" },
+    ...(hasNet ? [{ id: "ssh" as const, label: ssh ? "SSH · on" : "SSH" }, { id: "tls" as const, label: "TLS" }] : []),
+    { id: "safety" as const, label: "Safety & AI" },
+  ];
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      width={560}
+      width={isNew ? 780 : 600}
       title={isNew ? "New connection" : `Edit · ${initial?.name}`}
       footer={
         <>
@@ -109,277 +118,291 @@ export function ConnectionDialog({
         </>
       }
     >
-      <form className="flex flex-col gap-3" onSubmit={(e) => (e.preventDefault(), save())}>
+      <div className={cx("-mx-4 -my-3 flex", isNew ? "h-[min(520px,62vh)]" : "max-h-[62vh]")}>
         {isNew && (
-          <div className="flex flex-col gap-1">
-            <div className="relative">
-              <Link2 size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-subtle" />
-              <Input
-                value={url}
-                onChange={(e) => applyUrl(e.target.value)}
-                placeholder="Paste a connection URL — postgresql://user:pass@host/db (Neon, Supabase, …)"
-                className="pl-7 font-mono"
+          <div className="flex w-52 shrink-0 flex-col border-r border-line bg-panel/60">
+            <div className="p-2">
+              <input
+                value={kindFilter}
+                onChange={(e) => setKindFilter(e.target.value)}
+                placeholder="Search databases"
+                spellCheck={false}
+                className="h-7 w-full rounded-md border border-line bg-elevated px-2 text-xs outline-none focus:border-accent"
               />
             </div>
-            {urlError && <span className="text-2xs text-danger">{urlError}</span>}
+            <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+              {KIND_GROUPS.map((g) => {
+                const list = shownKinds.filter((k) => g.kinds.includes(k.kind));
+                if (!list.length) return null;
+                return (
+                  <div key={g.label} className="mb-1.5">
+                    <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold tracking-wide text-subtle uppercase">{g.label}</div>
+                    {list.map((k) => (
+                      <button
+                        type="button"
+                        key={k.kind}
+                        onClick={() => setC((x) => ({ ...blank(k.kind), id: x.id, name: x.name, env: x.env, color: x.color, readOnly: x.readOnly, mcpEnabled: x.mcpEnabled, ssh: k.file || k.api ? null : x.ssh, tls: k.api ? null : (newConnection(k.kind).tls ?? x.tls ?? null) }))}
+                        className={cx(
+                          "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs",
+                          c.kind === k.kind ? "bg-selected text-fg" : "text-fg/80 hover:bg-hover",
+                        )}
+                      >
+                        <KindBadge kind={k.kind} size={16} />
+                        <span className="truncate">{k.label}</span>
+                        {k.beta && <span className="ml-auto rounded bg-warning/15 px-1 text-[9px] font-medium text-warning">beta</span>}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
-        {!pickKind ? (
-          <div className="flex items-center gap-2.5 rounded-lg bg-accent-soft/50 px-2.5 py-2 ring-1 ring-accent/40">
-            <KindBadge kind={c.kind} size={26} />
-            <span className="text-xs font-medium">{info.label}</span>
-            <button type="button" onClick={() => setPickKind(true)} className="ml-auto text-2xs text-accent hover:underline">
-              Change
-            </button>
+
+        <form className="flex min-w-0 flex-1 flex-col" onSubmit={(e) => (e.preventDefault(), save())}>
+          <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
+            <KindBadge kind={c.kind} size={22} />
+            <div className="min-w-0 flex-1">
+              <input
+                autoFocus
+                value={c.name}
+                placeholder={defaultName(withDefaults(c))}
+                onChange={(e) => set({ name: e.target.value })}
+                spellCheck={false}
+                className="w-full bg-transparent text-sm font-semibold outline-none placeholder:font-normal placeholder:text-subtle"
+              />
+              <div className="text-2xs text-subtle">
+                {info.label}
+                {info.beta ? " · beta" : info.api ? " · over HTTPS" : info.port ? ` · port ${info.port}` : ""}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {Object.entries(TAG_COLORS).map(([name, hex]) => (
+                <button
+                  type="button"
+                  key={name}
+                  title={name}
+                  onClick={() => set({ color: c.color === name ? null : name })}
+                  className={cx("size-3 rounded-full transition-transform hover:scale-110", c.color === name && "ring-2 ring-offset-1 ring-offset-elevated")}
+                  style={{ background: hex, ["--tw-ring-color" as string]: hex }}
+                />
+              ))}
+            </div>
           </div>
-        ) : (
-        <div className="grid grid-cols-5 gap-1">
-          {KINDS.map((k) => (
-            <button
-              type="button"
-              key={k.kind}
-              onClick={() => setKind(k.kind)}
-              className={cx(
-                "relative flex flex-col items-center gap-1 rounded-lg px-1 pt-2 pb-1.5 text-[10.5px] leading-tight transition-colors",
-                c.kind === k.kind ? "bg-accent-soft text-fg ring-1 ring-accent" : "text-muted hover:bg-hover hover:text-fg",
-              )}
-            >
-              <KindBadge kind={k.kind} size={26} />
-              <span className="w-full truncate text-center">{k.label}</span>
-              {k.beta && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-warning" title="Beta" />}
-            </button>
-          ))}
-        </div>
-        )}
-        <div className="flex items-center justify-between">
-          <span className="text-2xs text-subtle">
-            {info.beta ? "Beta — not yet verified against a live server" : info.api ? `${info.label} · over HTTPS` : `${info.label} · default port ${info.port ?? "—"}`}
-          </span>
-          <div className="flex items-center gap-1">
-            {Object.entries(TAG_COLORS).map(([name, hex]) => (
+
+          <div className="flex gap-0.5 border-b border-line px-3">
+            {tabs.map((t) => (
               <button
                 type="button"
-                key={name}
-                title={name}
-                onClick={() => set({ color: c.color === name ? null : name })}
-                className={cx("size-3.5 rounded-full transition-transform hover:scale-110", c.color === name && "ring-2 ring-offset-1 ring-offset-elevated")}
-                style={{ background: hex, ["--tw-ring-color" as string]: hex }}
-              />
+                key={t.id}
+                onClick={() => setTabSel(t.id)}
+                className={cx("-mb-px border-b-2 px-2.5 py-1.5 text-xs", tabSel === t.id ? "border-accent font-medium text-fg" : "border-transparent text-muted hover:text-fg")}
+              >
+                {t.label}
+              </button>
             ))}
           </div>
-        </div>
 
-        <Field label="Environment" hint={c.env === "production" ? "Production starts read-only, gets a red window frame, and asks you to type the table name before DROP / TRUNCATE / unfiltered DELETE." : undefined}>
-          <Segmented
-            value={(c.env ?? "none") as Environment}
-            onChange={(env) => {
-              const e = ENVIRONMENTS.find((x) => x.value === env)!;
-              // production defaults to read-only; the user can still opt in to writes below
-              set({ env, color: c.color ?? e.color, ...(env === "production" ? { readOnly: true } : {}) });
-            }}
-            options={ENVIRONMENTS.map((e) => ({ value: e.value, label: e.label }))}
-          />
-        </Field>
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+            {tabSel === "general" && (
+              <>
+                {isNew && (
+                  <div className="flex flex-col gap-1">
+                    <div className="relative">
+                      <Link2 size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-subtle" />
+                      <Input value={url} onChange={(e) => applyUrl(e.target.value)} placeholder="Paste a URL — postgresql://user:pass@host/db" className="pl-7 font-mono" />
+                    </div>
+                    {urlError && <span className="text-2xs text-danger">{urlError}</span>}
+                  </div>
+                )}
+                {info.file ? (
+                  <Field label="Database file" hint={c.kind === "duckdb" ? "Created if missing" : "An existing .db / .sqlite file"}>
+                    <Input value={c.file ?? ""} placeholder={c.kind === "duckdb" ? "~/data/warehouse.duckdb" : "~/data/app.db"} onChange={(e) => set({ file: e.target.value })} />
+                  </Field>
+                ) : c.kind === "turso" ? (
+                  <>
+                    <Field label="Database URL" hint="From `turso db show --url`; a local sqld works too">
+                      <Input value={c.host ?? ""} placeholder="libsql://my-db-me.turso.io" onChange={(e) => set({ host: e.target.value })} />
+                    </Field>
+                    <Field label="Auth token">
+                      <Input type="password" value={password} placeholder={isNew ? "turso db tokens create <db>" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+                    </Field>
+                  </>
+                ) : c.kind === "d1" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="Account ID">
+                        <Input value={c.user ?? ""} placeholder="Cloudflare account ID" onChange={(e) => set({ user: e.target.value })} />
+                      </Field>
+                      <Field label="Database ID">
+                        <Input value={c.database ?? ""} placeholder="D1 database UUID" onChange={(e) => set({ database: e.target.value || null })} />
+                      </Field>
+                    </div>
+                    <Field label="API token" hint="Needs D1 Edit (or Read) permission">
+                      <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-[1fr_96px] gap-2">
+                      <Field label={c.kind === "mongodb" ? "Host or URI" : dialect === "cql" ? "Contact points" : "Host"}>
+                        <Input value={c.host ?? ""} placeholder={hostPh} onChange={(e) => set({ host: e.target.value || null })} />
+                      </Field>
+                      <Field label="Port">
+                        <Input value={c.port ?? ""} placeholder={info.port ? String(info.port) : ""} inputMode="numeric" onChange={(e) => set({ port: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })} />
+                      </Field>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="User">
+                        <Input value={c.user ?? ""} placeholder={info.user ?? (dialect === "redis" ? "default" : "")} onChange={(e) => set({ user: e.target.value || null })} />
+                      </Field>
+                      <Field label="Password">
+                        <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+                      </Field>
+                    </div>
+                    <Field label={dialect === "redis" ? "Database number" : dialect === "cql" ? "Keyspace" : "Database"}>
+                      <Input value={c.database ?? ""} placeholder={dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional — pick later from the titlebar"} onChange={(e) => set({ database: e.target.value || null })} />
+                    </Field>
+                  </>
+                )}
+                <Field label="Environment" hint={c.env === "production" ? "Production starts read-only, gets a red frame, and asks you to type the table name before destructive statements." : undefined}>
+                  <Segmented
+                    value={(c.env ?? "none") as Environment}
+                    onChange={(env) => {
+                      const e = ENVIRONMENTS.find((x) => x.value === env)!;
+                      set({ env, color: c.color ?? e.color, ...(env === "production" ? { readOnly: true } : {}) });
+                    }}
+                    options={ENVIRONMENTS.map((e) => ({ value: e.value, label: e.label }))}
+                  />
+                </Field>
+              </>
+            )}
 
-        <Field label="Name">
-          <Input autoFocus value={c.name} placeholder={defaultName(c)} onChange={(e) => set({ name: e.target.value })} />
-        </Field>
-
-        {info.file ? (
-          <Field label="Database file" hint={c.kind === "duckdb" ? "Path to a .duckdb file (created if missing)" : "Absolute path to an existing .db / .sqlite file"}>
-            <Input
-              value={c.file ?? ""}
-              placeholder={c.kind === "duckdb" ? "/Users/you/data/warehouse.duckdb" : "/Users/you/data/app.db"}
-              onChange={(e) => set({ file: e.target.value })}
-            />
-          </Field>
-        ) : c.kind === "turso" ? (
-          <>
-            <Field label="Database URL" hint="From `turso db show --url`; a local sqld works too (http://127.0.0.1:8080)">
-              <Input value={c.host ?? ""} placeholder="libsql://my-db-me.turso.io" onChange={(e) => set({ host: e.target.value })} />
-            </Field>
-            <Field label="Auth token" hint="`turso db tokens create <db>`; stored in your OS keychain">
-              <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-          </>
-        ) : c.kind === "d1" ? (
-          <>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Account ID">
-                <Input value={c.user ?? ""} placeholder="Cloudflare account ID" onChange={(e) => set({ user: e.target.value })} />
-              </Field>
-              <Field label="Database ID">
-                <Input value={c.database ?? ""} placeholder="D1 database UUID" onChange={(e) => set({ database: e.target.value || null })} />
-              </Field>
-            </div>
-            <Field label="API token" hint="A Cloudflare API token with D1 Edit (or Read) permission; stored in your OS keychain">
-              <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-          </>
-        ) : (
-          <>
-            <div className="grid grid-cols-[1fr_88px] gap-2">
-              <Field label={c.kind === "mongodb" ? "Host or mongodb:// URI" : kindInfo(c.kind).dialect === "cql" ? "Contact points" : "Host"}>
-                <Input
-                  value={c.host ?? ""}
-                  placeholder={c.kind === "mongodb" ? "localhost or mongodb+srv://…" : kindInfo(c.kind).dialect === "cql" ? "node1, node2:9042" : undefined}
-                  onChange={(e) => set({ host: e.target.value })}
-                />
-              </Field>
-              <Field label="Port">
-                <Input
-                  value={c.port ?? ""}
-                  inputMode="numeric"
-                  onChange={(e) => set({ port: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })}
-                />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="User">
-                <Input value={c.user ?? ""} onChange={(e) => set({ user: e.target.value })} />
-              </Field>
-              <Field label="Password">
-                <Input
-                  type="password"
-                  value={password}
-                  placeholder={isNew ? "" : "•••••• (unchanged)"}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Field>
-            </div>
-            <Field label={kindInfo(c.kind).dialect === "redis" ? "Database number" : kindInfo(c.kind).dialect === "cql" ? "Keyspace" : "Database"}>
-              <Input value={c.database ?? ""} placeholder={kindInfo(c.kind).dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
-            </Field>
-          </>
-        )}
-
-        {!info.file && !info.api && (
-          <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs">TLS / SSL</span>
-              <Segmented
-                value={tls.mode}
-                onChange={(mode) => setTls({ mode })}
-                options={[
-                  { value: "disable", label: "Off" },
-                  { value: "prefer", label: "Prefer" },
-                  { value: "require", label: "Require" },
-                  { value: "verify-ca", label: "Verify CA" },
-                  { value: "verify-full", label: "Verify full" },
-                ]}
-              />
-            </div>
-            {(tls.mode === "verify-ca" || tls.mode === "verify-full" || tls.caCert || tls.clientCert) && (
-              <div className="grid grid-cols-3 gap-2">
+            {tabSel === "tls" && hasNet && (
+              <>
+                <Field label="TLS / SSL">
+                  <Segmented
+                    value={tls.mode}
+                    onChange={(mode) => setTls({ mode })}
+                    options={[
+                      { value: "disable", label: "Off" },
+                      { value: "prefer", label: "Prefer" },
+                      { value: "require", label: "Require" },
+                      { value: "verify-ca", label: "Verify CA" },
+                      { value: "verify-full", label: "Verify full" },
+                    ]}
+                  />
+                </Field>
                 <Field label="CA certificate">
                   <Input value={tls.caCert ?? ""} placeholder="system roots" onChange={(e) => setTls({ caCert: e.target.value || null })} />
                 </Field>
-                <Field label="Client certificate">
-                  <Input value={tls.clientCert ?? ""} placeholder="optional" onChange={(e) => setTls({ clientCert: e.target.value || null })} />
-                </Field>
-                <Field label="Client key">
-                  <Input value={tls.clientKey ?? ""} placeholder="optional" onChange={(e) => setTls({ clientKey: e.target.value || null })} />
-                </Field>
-              </div>
-            )}
-            {info.tls && tls.mode !== "require" && tls.mode !== "verify-full" && tls.mode !== "verify-ca" && (
-              <span className="text-2xs text-warning">{info.label} requires TLS — set it to Require or stronger.</span>
-            )}
-          </div>
-        )}
-
-        {!info.file && !info.api && (
-          <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
-            <Switch
-              checked={!!ssh}
-              onChange={(v) =>
-                set({ ssh: v ? { host: "", port: 22, user: "", auth: "key", keyPath: "~/.ssh/id_ed25519", hostKey: null } : null })
-              }
-              label="Connect through SSH tunnel"
-            />
-            {ssh && (
-              <>
-                <div className="grid grid-cols-[1fr_72px_1fr] gap-2">
-                  <Field label="SSH host">
-                    <Input value={ssh.host} placeholder="bastion.example.com" onChange={(e) => setSsh({ host: e.target.value, hostKey: null })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Client certificate">
+                    <Input value={tls.clientCert ?? ""} placeholder="optional (mutual TLS)" onChange={(e) => setTls({ clientCert: e.target.value || null })} />
                   </Field>
-                  <Field label="Port">
-                    <Input
-                      value={ssh.port ?? ""}
-                      inputMode="numeric"
-                      onChange={(e) => setSsh({ port: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })}
-                    />
-                  </Field>
-                  <Field label="SSH user">
-                    <Input value={ssh.user} placeholder="ubuntu" onChange={(e) => setSsh({ user: e.target.value })} />
+                  <Field label="Client key">
+                    <Input value={tls.clientKey ?? ""} placeholder="optional" onChange={(e) => setTls({ clientKey: e.target.value || null })} />
                   </Field>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Segmented
-                    value={ssh.auth}
-                    onChange={(auth) => setSsh({ auth })}
-                    options={[
-                      { value: "key", label: "Private key" },
-                      { value: "agent", label: "SSH agent" },
-                      { value: "password", label: "Password" },
-                    ]}
-                  />
-                </div>
-                {ssh.auth === "agent" ? (
-                  <Field label="Agent socket" hint="Leave empty for the system agent ($SSH_AUTH_SOCK / Windows OpenSSH / Pageant). 1Password: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock">
-                    <Input value={ssh.agentSocket ?? ""} placeholder="system default" onChange={(e) => setSsh({ agentSocket: e.target.value || null })} />
-                  </Field>
-                ) : (
-                <div className={cx("grid gap-2", ssh.auth === "key" ? "grid-cols-2" : "grid-cols-1")}>
-                  {ssh.auth === "key" && (
-                    <Field label="Key file">
-                      <Input value={ssh.keyPath ?? ""} placeholder="~/.ssh/id_ed25519" onChange={(e) => setSsh({ keyPath: e.target.value })} />
-                    </Field>
-                  )}
-                  <Field label={ssh.auth === "key" ? "Passphrase" : "SSH password"}>
-                    <Input
-                      type="password"
-                      value={sshSecret}
-                      placeholder={isNew ? (ssh.auth === "key" ? "if encrypted" : "") : "•••••• (unchanged)"}
-                      onChange={(e) => setSshSecret(e.target.value)}
-                    />
-                  </Field>
-                </div>
-                )}
-                {ssh.hostKey && (
-                  <div className="flex items-center gap-1.5 text-2xs text-muted">
-                    <ShieldCheck size={12} className="shrink-0 text-success" />
-                    <span className="truncate font-mono">{ssh.hostKey}</span>
-                    <button type="button" className="ml-auto shrink-0 text-subtle hover:text-fg" onClick={() => setSsh({ hostKey: null })}>
-                      Forget
-                    </button>
-                  </div>
+                {info.tls && tls.mode !== "require" && tls.mode !== "verify-full" && tls.mode !== "verify-ca" && (
+                  <span className="text-2xs text-warning">{info.label} requires TLS — set it to Require or stronger.</span>
                 )}
               </>
             )}
-          </div>
-        )}
 
-        <div className="flex flex-col gap-2 rounded-lg bg-panel p-3">
-          <Switch
-            checked={c.readOnly}
-            onChange={(v) => set({ readOnly: v })}
-            label={c.env === "production" && !c.readOnly ? "Read-only — OFF: writes to production are allowed" : "Read-only — block writes from the app"}
-          />
-          <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v, ...(v ? {} : { mcpWrites: false }) })} label="Expose to AI assistants via MCP (reads)" />
-          {c.mcpEnabled && !c.readOnly && (
-            <Switch
-              checked={!!c.mcpWrites}
-              onChange={(v) => set({ mcpWrites: v })}
-              label="Allow AI to request writes — you approve each one in Rowhouse"
-            />
-          )}
-        </div>
-        <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>
-        <button type="submit" hidden />
-      </form>
+            {tabSel === "ssh" && hasNet && (
+              <>
+                <Switch
+                  checked={!!ssh}
+                  onChange={(v) => set({ ssh: v ? { host: "", port: null, user: "", auth: "key", keyPath: "", hostKey: null } : null })}
+                  label="Connect through an SSH tunnel"
+                />
+                {ssh && (
+                  <>
+                    <div className="grid grid-cols-[1fr_72px_1fr] gap-2">
+                      <Field label="SSH host">
+                        <Input value={ssh.host} placeholder="bastion.example.com" onChange={(e) => setSsh({ host: e.target.value, hostKey: null })} />
+                      </Field>
+                      <Field label="Port">
+                        <Input value={ssh.port ?? ""} placeholder="22" inputMode="numeric" onChange={(e) => setSsh({ port: e.target.value ? Number(e.target.value.replace(/\D/g, "")) : null })} />
+                      </Field>
+                      <Field label="SSH user">
+                        <Input value={ssh.user} placeholder="ubuntu" onChange={(e) => setSsh({ user: e.target.value })} />
+                      </Field>
+                    </div>
+                    <Segmented
+                      value={ssh.auth}
+                      onChange={(auth) => setSsh({ auth })}
+                      options={[
+                        { value: "key", label: "Private key" },
+                        { value: "agent", label: "SSH agent" },
+                        { value: "password", label: "Password" },
+                      ]}
+                    />
+                    {ssh.auth === "agent" ? (
+                      <Field label="Agent socket" hint="Empty = system agent. 1Password: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock">
+                        <Input value={ssh.agentSocket ?? ""} placeholder="system default" onChange={(e) => setSsh({ agentSocket: e.target.value || null })} />
+                      </Field>
+                    ) : (
+                      <div className={cx("grid gap-2", ssh.auth === "key" ? "grid-cols-2" : "grid-cols-1")}>
+                        {ssh.auth === "key" && (
+                          <Field label="Key file">
+                            <Input value={ssh.keyPath ?? ""} placeholder="~/.ssh/id_ed25519" onChange={(e) => setSsh({ keyPath: e.target.value })} />
+                          </Field>
+                        )}
+                        <Field label={ssh.auth === "key" ? "Passphrase" : "SSH password"}>
+                          <Input type="password" value={sshSecret} placeholder={isNew ? (ssh.auth === "key" ? "if encrypted" : "") : "•••••• (unchanged)"} onChange={(e) => setSshSecret(e.target.value)} />
+                        </Field>
+                      </div>
+                    )}
+                    {ssh.hostKey && (
+                      <div className="flex items-center gap-1.5 text-2xs text-muted">
+                        <ShieldCheck size={12} className="shrink-0 text-success" />
+                        <span className="truncate font-mono">{ssh.hostKey}</span>
+                        <button type="button" className="ml-auto shrink-0 text-subtle hover:text-fg" onClick={() => setSsh({ hostKey: null })}>
+                          Forget
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {tabSel === "safety" && (
+              <div className="flex flex-col gap-2.5">
+                <Switch
+                  checked={c.readOnly}
+                  onChange={(v) => set({ readOnly: v })}
+                  label={c.env === "production" && !c.readOnly ? "Read-only — OFF: writes to production are allowed" : "Read-only — block writes from the app"}
+                />
+                <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v, ...(v ? {} : { mcpWrites: false }) })} label="Expose to AI assistants via MCP (reads)" />
+                {c.mcpEnabled && !c.readOnly && (
+                  <Switch checked={!!c.mcpWrites} onChange={(v) => set({ mcpWrites: v })} label="Allow AI to request writes — you approve each one" />
+                )}
+                <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>
+              </div>
+            )}
+          </div>
+          <button type="submit" hidden />
+        </form>
+      </div>
     </Modal>
   );
+}
+
+const KIND_GROUPS: { label: string; kinds: DbKind[] }[] = [
+  { label: "Relational", kinds: ["postgres", "mysql", "mariadb", "mssql", "sqlite", "duckdb"] },
+  { label: "Cloud", kinds: ["neon", "supabase", "turso", "d1", "upstash", "cockroach", "redshift", "tidb", "singlestore", "greenplum"] },
+  { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "cassandra", "scylla"] },
+];
+
+/** Empty host / port / user fall back to the placeholders' defaults. */
+export function withDefaults(c: ConnectionConfig): ConnectionConfig {
+  const k = kindInfo(c.kind);
+  if (k.file || k.api) return c;
+  const ssh = c.ssh && c.ssh.auth === "key" && !c.ssh.keyPath?.trim() ? { ...c.ssh, keyPath: "~/.ssh/id_ed25519" } : c.ssh;
+  return { ...c, ssh, host: c.host?.trim() || "localhost", port: c.port ?? k.port, user: c.user?.trim() || k.user };
 }
 
 function defaultName(c: ConnectionConfig) {

@@ -16,7 +16,9 @@ export function Titlebar({
   database,
   onSwitchDb,
   onTool,
+  onSwitch,
 }: {
+  onSwitch?: () => void;
   /** database picked this session (overrides the profile's) */
   database?: string | null;
   onSwitchDb: (db: string) => void;
@@ -48,8 +50,11 @@ export function Titlebar({
         {conn && (
           <>
             <span className="text-subtle">/</span>
-            <Dot color={conn.color} />
-            <span className="truncate font-medium">{conn.name}</span>
+            <button onClick={onSwitch} title={`Switch connection (${mod}+O)`} className="flex min-w-0 items-center gap-1.5 rounded px-1 hover:bg-hover">
+              <Dot color={conn.color} />
+              <span className="truncate font-medium">{conn.name}</span>
+              <ChevronDown size={11} className="shrink-0 text-subtle" />
+            </button>
             <span className="truncate text-muted">
               {kindInfo(conn.kind).file ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}`}
             </span>

@@ -1,9 +1,9 @@
-import { Braces, ChevronRight, Database, Eye, FileInput, Hash, Layers, ListOrdered, SquareFunction, Zap, GitCompareArrows, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
+import { Braces, ChevronRight, Database, Eye, Hash, Layers, ListOrdered, SquareFunction, Zap, GitCompareArrows, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { ConnectionConfig, DbObject, TableInfo } from "../lib/api";
-import { KindBadge } from "./KindBadge";
+import { ConnectionSwitcher } from "./ConnectionSwitcher";
 import { ContextMenu, type MenuItem } from "./TableActions";
-import { Button, Dot, cx } from "./ui";
+import { Button, cx } from "./ui";
 
 
 const OBJECT_GROUP: Record<string, { label: string; icon: typeof Braces }> = {
@@ -49,7 +49,13 @@ export function Sidebar({
   canEdit = true,
   objects = [],
   onOpenObject,
+  connected = {},
+  switcherOpen,
+  onSwitcherOpen,
 }: {
+  connected?: Record<string, boolean>;
+  switcherOpen: boolean;
+  onSwitcherOpen: (o: boolean) => void;
   connections: ConnectionConfig[];
   activeId: string | null;
   tables: TableInfo[];
@@ -119,59 +125,33 @@ export function Sidebar({
 
   return (
     <aside className="flex h-full w-full flex-col bg-panel">
-      <div className="flex h-8 items-center justify-between pr-1.5 pl-3">
-        <span className="text-2xs font-semibold tracking-wide text-subtle uppercase">Connections</span>
-        <span className="flex">
-          <Button variant="ghost" size="icon" onClick={onImport} title="Import from DBeaver / TablePlus / Navicat">
-            <FileInput size={13} />
+      <div className="flex items-center gap-0.5 px-1.5 pt-1.5 pb-1">
+        <div className="min-w-0 flex-1">
+          <ConnectionSwitcher
+            connections={connections}
+            activeId={activeId}
+            connected={connected}
+            open={switcherOpen}
+            onOpenChange={onSwitcherOpen}
+            onSelect={onSelect}
+            onEdit={onEdit}
+            onNew={onNew}
+            onImport={onImport}
+          />
+        </div>
+        {activeId && (
+          <Button variant="ghost" size="icon" title="Edit this connection" onClick={() => {
+            const c = connections.find((x) => x.id === activeId);
+            if (c) onEdit(c);
+          }}>
+            <Settings2 size={12} />
           </Button>
-          <Button variant="ghost" size="icon" onClick={onNew} title="New connection">
-            <Plus size={14} />
-          </Button>
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-px px-1.5">
-        {connections.length === 0 && (
-          <button
-            onClick={onNew}
-            className="m-1 rounded-lg border border-dashed border-line-strong px-3 py-4 text-center text-2xs text-muted hover:bg-hover"
-          >
-            Add your first connection
-          </button>
         )}
-        {connections.map((c) => (
-          <div
-            key={c.id}
-            onClick={() => onSelect(c.id)}
-            onDoubleClick={() => onEdit(c)}
-            className={cx(
-              "group flex h-7 cursor-default items-center gap-2 rounded-md px-2 text-xs",
-              c.id === activeId ? "bg-selected text-fg" : "text-muted hover:bg-hover hover:text-fg",
-            )}
-          >
-            <Dot color={c.color} />
-            <span className="flex-1 truncate font-medium">{c.name || "Untitled"}</span>
-            {c.readOnly && <Lock size={11} className="text-subtle" />}
-            <KindBadge kind={c.kind} size={15} className="opacity-80" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(c);
-              }}
-              className="hidden text-subtle group-hover:block hover:text-fg"
-              title="Edit connection"
-            >
-              <Settings2 size={12} />
-            </button>
-          </div>
-        ))}
       </div>
 
       {activeId && (
         <>
-          <div className="mx-3 mt-3 mb-1.5 h-px bg-line" />
-          <div className="flex items-center gap-1 px-1.5">
+          <div className="flex items-center gap-0.5 px-1.5">
             <div className="relative flex-1">
               <Search size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-subtle" />
               <input

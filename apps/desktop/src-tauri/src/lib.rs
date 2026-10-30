@@ -405,6 +405,11 @@ async fn ext_query(
     }
 }
 
+#[tauri::command]
+async fn ai_detect_local() -> Vec<rowhouse_core::ai_local::Detected> {
+    rowhouse_core::ai_local::detect().await
+}
+
 #[derive(serde::Serialize)]
 struct Relations {
     outgoing: Vec<rowhouse_core::erd::ForeignKey>,
@@ -1260,20 +1265,38 @@ fn import_save(
     Ok(saved)
 }
 
-/// Info for the "Connect an AI assistant" panel.
-#[tauri::command]
-fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
+fn mcp_bin() -> String {
     let exe = std::env::current_exe().ok();
     let bin_name = if cfg!(windows) {
         "rowhouse-mcp.exe"
     } else {
         "rowhouse-mcp"
     };
-    let bin = exe
-        .as_ref()
+    exe.as_ref()
         .and_then(|p| p.parent())
         .map(|d| d.join(bin_name).to_string_lossy().to_string())
-        .unwrap_or_else(|| bin_name.to_string());
+        .unwrap_or_else(|| bin_name.to_string())
+}
+
+#[tauri::command]
+fn mcp_clients() -> CmdResult<Vec<rowhouse_core::mcp_clients::McpClient>> {
+    rowhouse_core::mcp_clients::list(&mcp_bin())
+}
+
+#[tauri::command]
+fn mcp_install(client: String) -> CmdResult<String> {
+    rowhouse_core::mcp_clients::install(&client, &mcp_bin())
+}
+
+#[tauri::command]
+fn mcp_remove(client: String) -> CmdResult<()> {
+    rowhouse_core::mcp_clients::remove(&client)
+}
+
+/// Info for the "Connect an AI assistant" panel.
+#[tauri::command]
+fn mcp_info(state: State<'_, AppState>) -> serde_json::Value {
+    let bin = mcp_bin();
     serde_json::json!({
         "command": bin,
         "configPath": state.store.path().to_string_lossy(),
@@ -1391,6 +1414,10 @@ pub fn run() {
             table_ddl,
             table_relations,
             list_objects,
+            ai_detect_local,
+            mcp_clients,
+            mcp_install,
+            mcp_remove,
             ext_list,
             ext_install,
             ext_uninstall,

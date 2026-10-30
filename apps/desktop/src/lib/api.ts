@@ -169,10 +169,20 @@ export interface HistoryEntry {
 
 export interface AiSettings {
   enabled: boolean;
-  provider: "openai" | "anthropic";
+  provider: "openai" | "anthropic" | "local";
   baseUrl: string;
   model: string;
   inlineCompletions?: boolean;
+  /** provider "local": claude | codex | opencode | gemini | cursor | copilot */
+  agent?: string;
+}
+export interface LocalAi {
+  id: string;
+  label: string;
+  kind: "cli" | "server";
+  location: string;
+  version: string | null;
+  models: string[];
 }
 
 export interface AiAnswer {
@@ -488,6 +498,13 @@ export interface SchemaDiff {
   crossDialect: boolean;
 }
 
+export interface McpClient {
+  id: string;
+  label: string;
+  configPath: string;
+  detected: boolean;
+  status: "missing" | "installed" | "outdated" | "unreadable";
+}
 export interface McpInfo {
   command: string;
   configPath: string;
@@ -590,6 +607,9 @@ export const api = {
     call<HistoryEntry[]>("list_history", { id, search, limit }),
   clearHistory: (id?: string) => call<void>("clear_history", { id }),
   mcpInfo: () => call<McpInfo>("mcp_info"),
+  mcpClients: () => call<McpClient[]>("mcp_clients"),
+  mcpInstall: (client: string) => call<string>("mcp_install", { client }),
+  mcpRemove: (client: string) => call<void>("mcp_remove", { client }),
   writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
   writeBase64File: (path: string, data: string) => call<void>("write_base64_file", { path, data }),
   parseConnectionUrl: (url: string) => call<{ config: ConnectionConfig; password: string | null }>("parse_connection_url", { url }),
@@ -636,6 +656,7 @@ export const api = {
     entry: (ext: string) => call<string>("ext_entry", { ext }),
     query: (ext: string, id: string, sql: string, limit?: number) => call<QueryOutput>("ext_query", { ext, id, sql, limit }),
   },
+  aiDetectLocal: () => call<LocalAi[]>("ai_detect_local"),
   listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
   roleGrants: (id: string, role: string) => call<RoleGrant[]>("role_grants", { id, role }),
   roleAction: (id: string, op: RoleOp, preview: boolean) => call<string[]>("role_action", { id, op, preview }),
@@ -761,6 +782,16 @@ const mockExts: ExtensionInfo[] = [
     granted: [],
   },
 ];
+const mockMcpClients: McpClient[] = [
+  { id: "claude-desktop", label: "Claude Desktop", configPath: "~/Library/Application Support/Claude/claude_desktop_config.json", detected: true, status: "installed" },
+  { id: "claude-code", label: "Claude Code", configPath: "~/.claude.json", detected: true, status: "missing" },
+  { id: "cursor", label: "Cursor", configPath: "~/.cursor/mcp.json", detected: true, status: "outdated" },
+  { id: "windsurf", label: "Windsurf", configPath: "~/.codeium/windsurf/mcp_config.json", detected: false, status: "missing" },
+  { id: "vscode", label: "VS Code", configPath: "~/Library/Application Support/Code/User/mcp.json", detected: true, status: "missing" },
+  { id: "codex", label: "Codex", configPath: "~/.codex/config.toml", detected: true, status: "missing" },
+  { id: "opencode", label: "OpenCode", configPath: "~/.config/opencode/opencode.json", detected: false, status: "missing" },
+  { id: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", detected: false, status: "missing" },
+];
 const mockRoles: RoleInfo[] = [
   { id: "postgres", name: "postgres", host: null, login: true, superuser: true, attributes: ["CREATEDB", "CREATEROLE", "REPLICATION"], memberOf: [] },
   { id: "app", name: "app", host: null, login: true, superuser: false, attributes: ["connection limit 50"], memberOf: ["readwrite"] },
@@ -832,6 +863,17 @@ const mockConns: ConnectionConfig[] = typeof location !== "undefined" && locatio
   { ...newConnection("redis"), id: "redis-local", name: "redis-local", host: "127.0.0.1", env: "local" },
   { ...newConnection("mongodb"), id: "mongo-shop", name: "shop (MongoDB)", host: "127.0.0.1", database: "shop", env: "development" },
   { ...newConnection("postgres"), id: "staging-pg", name: "Billing (staging)", host: "staging.db.internal", database: "billing", env: "staging", ssh: { host: "bastion.internal", port: 22, user: "deploy", auth: "agent" } },
+  ...(typeof location !== "undefined" && location.search.includes("many")
+    ? ["MogiOps", "Mogi Admin", "SIKORWAS dev", "Eksus", "Krimum", "Bot Tele", "mogipay dev", "mogi sound dev", "MogiPos Dev", "Mgp Live", "Mgp Staging", "AALF", "Opinix", "Bukutamu", "Novagen", "Sisdalkara Krimum", "Sisdalkara NEW", "JagaSeribu", "Sikorwas Prod", "Mogi Living"].map((name, i) => ({
+        ...newConnection(i % 3 === 0 ? "postgres" : "mysql"),
+        id: `m${i}`,
+        name,
+        host: `10.0.${i}.12`,
+        database: name.toLowerCase().replace(/\W+/g, "_"),
+        env: (/prod|live/i.test(name) ? "production" : /stag/i.test(name) ? "staging" : /dev/i.test(name) ? "development" : "none") as ConnectionConfig["env"],
+        readOnly: /prod|live/i.test(name),
+      }))
+    : []),
 ];
 
 const mockTables: TableInfo[] = [
@@ -1054,6 +1096,14 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       }
       return mock("run_query", { sql });
     }
+    case "ai_detect_local":
+      await sleep(400);
+      return [
+        { id: "claude", label: "Claude Code", kind: "cli", location: "~/.local/bin/claude", version: "2.1.3 (Claude Code)", models: [] },
+        { id: "codex", label: "Codex CLI", kind: "cli", location: "/opt/homebrew/bin/codex", version: "codex-cli 0.48.0", models: [] },
+        { id: "opencode", label: "OpenCode", kind: "cli", location: "~/.opencode/bin/opencode", version: "0.15.2", models: [] },
+        { id: "ollama", label: "Ollama", kind: "server", location: "http://localhost:11434/v1", version: null, models: ["qwen2.5-coder:7b", "llama3.1:8b"] },
+      ] satisfies LocalAi[];
     case "list_roles":
       return mockRoles;
     case "role_grants":
@@ -1556,6 +1606,17 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
       const saved = cs.map((c) => ({ ...c, id: crypto.randomUUID() }));
       mockConns.push(...saved);
       return saved;
+    }
+    case "mcp_clients":
+      return mockMcpClients.map((c) => ({ ...c }));
+    case "mcp_install": {
+      const c = mockMcpClients.find((x) => x.id === a.client)!;
+      c.status = "installed";
+      return c.configPath;
+    }
+    case "mcp_remove": {
+      mockMcpClients.find((x) => x.id === a.client)!.status = "missing";
+      return null;
     }
     case "mcp_info":
       return {
