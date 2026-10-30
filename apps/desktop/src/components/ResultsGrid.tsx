@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, CopyPlus, PenLine, Plus, Trash2, Undo2 } from "lucide-react";
+import { Copy, CopyPlus, PanelRight, PenLine, Plus, Search, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Cell, QueryResult } from "../lib/api";
 import { formatCells, parseClipboard, type CopyFormat } from "../lib/gridcopy";
@@ -71,6 +71,23 @@ export function ResultsGrid({
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const [bulk, setBulk] = useState<string | null>(null);
+  const [find, setFind] = useState<string | null>(null);
+  const [details, setDetails] = useState(() => {
+    try {
+      return localStorage.getItem("rh-row-details") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleDetails = () =>
+    setDetails((d) => {
+      try {
+        localStorage.setItem("rh-row-details", d ? "0" : "1");
+      } catch {
+        /* not remembered */
+      }
+      return !d;
+    });
   const [editing, setEditing] = useState<{ r: number; c: number; draft: string } | null>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [sort, setSort] = useState<{ c: number; dir: 1 | -1 } | null>(null);
@@ -109,11 +126,13 @@ export function ResultsGrid({
         return display(x).localeCompare(display(y)) * dir;
       });
     }
+    const needle = (find ?? "").trim().toLowerCase();
+    const hit = (row: Cell[]) => row.some((v) => v !== null && display(v).toLowerCase().includes(needle));
     return [
-      ...idx.map((i) => ({ kind: "orig" as const, i })),
+      ...(needle ? idx.filter((i) => hit(result.rows[i])) : idx).map((i) => ({ kind: "orig" as const, i })),
       ...pending.inserts.map((_, i) => ({ kind: "new" as const, i })),
     ];
-  }, [result.rows, sort, pending.inserts]);
+  }, [result.rows, sort, pending.inserts, find]);
 
   const valueAt = (row: DRow, c: number): Cell | undefined => {
     if (row.kind === "new") return pending.inserts[row.i][c];
@@ -350,6 +369,7 @@ export function ResultsGrid({
     else if (e.key === "ArrowRight") (moveSel(sel.r, sel.c + 1, x), handled());
     else if (e.key === "Tab") (moveSel(sel.r, sel.c + 1), handled());
     else if (e.key === "Escape") (setAnchor(null), setCtx(null), handled());
+    else if (m && e.key.toLowerCase() === "f") (setFind((f) => f ?? ""), handled());
     else if (m && e.key.toLowerCase() === "a") {
       setAnchor({ r: 0, c: 0 });
       setSel({ r: rows.length - 1, c: result.columns.length - 1 });
@@ -401,13 +421,38 @@ export function ResultsGrid({
 
   return (
     <div className="relative flex h-full flex-col">
+      {find !== null && (
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-2 font-sans text-xs">
+          <Search size={12} className="text-subtle" />
+          <input
+            autoFocus
+            value={find}
+            onChange={(e) => (setFind(e.target.value), setSel(null), setAnchor(null))}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") (setFind(null), scrollRef.current?.focus());
+              if (e.key === "Enter" && rows.length) (setSel({ r: 0, c: 0 }), scrollRef.current?.focus());
+            }}
+            placeholder="Find in results…"
+            className="h-6 flex-1 bg-transparent outline-none placeholder:text-subtle"
+          />
+          {find && (
+            <span className="text-2xs text-muted tabular-nums">
+              {rows.length - pending.inserts.length} of {result.rows.length} rows
+            </span>
+          )}
+          <button className="rounded p-0.5 text-subtle hover:bg-hover hover:text-fg" onClick={() => setFind(null)} title="Close (Esc)">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1">
       <div
         ref={scrollRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         onMouseDown={() => setCtx(null)}
-        className="relative min-h-0 flex-1 overflow-auto font-mono text-xs outline-none"
+        className="relative min-h-0 min-w-0 flex-1 overflow-auto font-mono text-xs outline-none"
       >
         <div style={{ width: total, minWidth: "100%" }}>
           {/* header */}
@@ -533,6 +578,19 @@ export function ResultsGrid({
         </div>
       </div>
 
+      {details && (
+        <RowDetails
+          columns={result.columns}
+          row={selRow}
+          values={selRow ? result.columns.map((_, c) => valueAt(selRow, c)) : []}
+          edited={(c) => !!selRow && isEdited(selRow, c)}
+          focus={sel?.c}
+          onEdit={edit && selRow && !isDeleted(selRow) ? (c, v) => setCell(sel!.r, c, v) : undefined}
+          onClose={toggleDetails}
+        />
+      )}
+      </div>
+
       {ctx && range && (
         <div
           className="animate-pop absolute z-40 min-w-52 rounded-lg border border-line bg-elevated p-1 font-sans text-xs shadow-pop"
@@ -609,8 +667,9 @@ export function ResultsGrid({
         </form>
       )}
 
-      {edit && (
-        <div className="flex h-8 shrink-0 items-center gap-1 border-t border-line bg-panel px-2 text-2xs text-muted">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-t border-line bg-panel px-2 text-2xs text-muted">
+        {edit && (
+          <>
           <Button variant="ghost" size="xs" onClick={addRow}>
             <Plus size={12} /> Row
           </Button>
@@ -636,8 +695,171 @@ export function ResultsGrid({
             <Kbd>S</Kbd> commit
           </span>
           {countPending(pending) > 0 && <span className="ml-2 whitespace-nowrap text-warning">{countPending(pending)} pending</span>}
+          </>
+        )}
+        {!edit && <span className="flex-1" />}
+        <Button variant="ghost" size="xs" onClick={() => setFind((f) => (f === null ? "" : null))} className={cx(find !== null && "bg-selected text-fg")} title={`Find in results (${mod}F)`}>
+          <Search size={12} />
+        </Button>
+        <Button variant="ghost" size="xs" onClick={toggleDetails} className={cx(details && "bg-selected text-fg")} title="Row details">
+          <PanelRight size={12} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Selected row, one field per line; long text and JSON get room to breathe. */
+function RowDetails({
+  columns,
+  row,
+  values,
+  edited,
+  focus,
+  onEdit,
+  onClose,
+}: {
+  columns: { name: string; data_type: string }[];
+  row: DRow | undefined;
+  values: (Cell | undefined)[];
+  edited: (c: number) => boolean;
+  focus?: number;
+  onEdit?: (c: number, v: Cell) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus === undefined) return;
+    ref.current?.querySelector(`[data-field="${focus}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [focus, row]);
+  return (
+    <div className="flex w-80 shrink-0 flex-col border-l border-line bg-panel font-sans">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3 text-xs">
+        <span className="font-medium">{row ? (row.kind === "new" ? "New row" : `Row ${row.i + 1}`) : "Row details"}</span>
+        <button className="ml-auto rounded p-0.5 text-subtle hover:bg-hover hover:text-fg" onClick={onClose}>
+          <X size={12} />
+        </button>
+      </div>
+      {!row ? (
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-xs text-subtle">Select a cell to see its row here</div>
+      ) : (
+        <div ref={ref} className="flex-1 overflow-y-auto">
+          {columns.map((col, c) => (
+            <Field
+              key={c}
+              index={c}
+              name={col.name}
+              type={col.data_type}
+              value={values[c]}
+              active={focus === c}
+              edited={edited(c)}
+              onEdit={onEdit ? (v) => onEdit(c, v) : undefined}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function isJsonish(v: Cell | undefined, type: string) {
+  if (v !== null && typeof v === "object") return true;
+  if (/json/i.test(type)) return true;
+  return typeof v === "string" && /^\s*[[{]/.test(v) && (() => {
+    try {
+      JSON.parse(v);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+}
+
+function Field({
+  index,
+  name,
+  type,
+  value,
+  active,
+  edited,
+  onEdit,
+}: {
+  index: number;
+  name: string;
+  type: string;
+  value: Cell | undefined;
+  active: boolean;
+  edited: boolean;
+  onEdit?: (v: Cell) => void;
+}) {
+  const json = isJsonish(value, type);
+  const shown = useMemo(() => {
+    if (value === null || value === undefined) return "";
+    if (json) {
+      try {
+        return JSON.stringify(typeof value === "string" ? JSON.parse(value) : value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+    return typeof value === "object" ? JSON.stringify(value) : String(value);
+  }, [value, json]);
+  const [draft, setDraft] = useState(shown);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => (setDraft(shown), setErr(null)), [shown]);
+  const multi = json || shown.length > 40 || shown.includes("\n");
+  const commit = () => {
+    if (!onEdit || draft === shown) return;
+    if (json && draft.trim()) {
+      try {
+        onEdit(JSON.stringify(JSON.parse(draft)));
+        setErr(null);
+      } catch (e) {
+        setErr(String(e).replace(/^SyntaxError: /, ""));
+      }
+      return;
+    }
+    onEdit(parseDraft(draft, value));
+  };
+  return (
+    <div data-field={index} className={cx("border-b border-line/70 px-3 py-2", active && "bg-accent-soft/40")}>
+      <div className="mb-1 flex items-baseline gap-1.5">
+        <span className="truncate text-xs font-medium">{name}</span>
+        <span className="truncate text-[10px] text-subtle">{type.toLowerCase()}</span>
+        {edited && <span className="ml-auto text-[10px] text-warning">edited</span>}
+        {json && shown && (
+          <button
+            className={cx("text-[10px] text-subtle hover:text-fg", !edited && "ml-auto")}
+            onClick={() => navigator.clipboard.writeText(shown)}
+            title="Copy"
+          >
+            <Copy size={10} />
+          </button>
+        )}
+      </div>
+      {multi ? (
+        <textarea
+          value={value === null && !onEdit ? "NULL" : draft}
+          readOnly={!onEdit}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          spellCheck={false}
+          rows={json ? Math.min(14, Math.max(3, shown.split("\n").length)) : 3}
+          className="w-full resize-y rounded-md border border-line bg-elevated px-2 py-1.5 font-mono text-[11.5px] leading-relaxed outline-none focus:border-accent"
+        />
+      ) : (
+        <input
+          value={draft}
+          placeholder={value === null ? "NULL" : value === undefined ? "DEFAULT" : ""}
+          readOnly={!onEdit}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+          spellCheck={false}
+          className="h-7 w-full rounded-md border border-line bg-elevated px-2 font-mono text-[11.5px] outline-none placeholder:text-subtle placeholder:italic focus:border-accent"
+        />
+      )}
+      {err && <div className="mt-1 text-[10.5px] text-danger">Invalid JSON: {err}</div>}
     </div>
   );
 }
