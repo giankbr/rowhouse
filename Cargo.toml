@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/rowhouse-core", "crates/rowhouse-mcp", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/giankbr/rowhouse"
