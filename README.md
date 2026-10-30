@@ -4,9 +4,10 @@ A fast, compact, open-source database client for macOS and Windows (Linux too),
 built with Tauri 2 + Rust + React, with a built-in read-only **MCP server** so AI
 assistants can explore your databases safely.
 
-> Status: early scaffold (v0.1). PostgreSQL, MySQL/MariaDB and SQLite work end-to-end.
+> Status: v0.5 — installers for macOS, Windows and Linux built on every release.
+> 20+ databases, from PostgreSQL / MySQL / SQLite to MongoDB, Redis, ClickHouse and DuckDB.
 
-## Features (v0.1)
+## Features
 
 - Connection manager: passwords live in the OS keychain (Keychain / Credential Manager)
 - Per-connection **read-only** mode and color tags (e.g. red = production)

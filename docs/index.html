@@ -253,16 +253,25 @@
   .sfc code { font-family: var(--f-mono); font-size: 11.5px; color: var(--accent-ink); }
 
   /* ---------- databases ---------- */
-  .support { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-  @media (max-width: 860px) { .support { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 460px) { .support { grid-template-columns: 1fr; } }
-  .scard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
-  .scard .st { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; margin-bottom: 14px; }
-  .st.live { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
-  .st.soon { background: var(--accent-soft); color: var(--accent-ink); }
-  .scard ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-  .scard li { font-size: 13px; color: var(--muted); font-family: var(--f-mono); }
-  .scard li.hot { color: var(--fg); }
+  .dbmatrix { margin-top: 30px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
+  .dbrow { display: grid; grid-template-columns: 196px 1fr; gap: 10px 28px; padding: 22px 24px; align-items: start; }
+  .dbrow + .dbrow { border-top: 1px solid var(--line); }
+  @media (max-width: 680px) { .dbrow { grid-template-columns: 1fr; gap: 14px; padding: 20px 18px; } }
+  .dbhd .lbl { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; color: var(--fg); }
+  .dbhd .cnt { margin-left: auto; font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-weight: 500; }
+  @media (max-width: 680px) { .dbhd .cnt { margin-left: 10px; } }
+  .dbhd .sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 7px 0 0 17px; }
+  @media (max-width: 680px) { .dbhd .sub { margin-left: 17px; } }
+  .ddot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+  .ddot.live { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
+  .ddot.beta { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 16%, transparent); }
+  .ddot.soon { background: var(--muted); opacity: .5; }
+  .dbchips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dbchip { font-family: var(--f-mono); font-size: 12.5px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; transition: border-color .14s var(--ease), color .14s var(--ease); }
+  .dbchip:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent-ink); }
+  .dbrow.r-beta .dbchip { color: var(--muted); }
+  .dbrow.r-soon .dbchip { color: var(--muted); border-style: dashed; background: transparent; }
+  .dbrow.r-soon .dbchip:hover { color: var(--muted); border-color: var(--line); }
 
 
   /* ---------- pricing ---------- */
@@ -535,22 +544,33 @@
           </div>
           <p class="desc">SQL, key-value, document and wide-column stores — browse, edit, back up and query them the same way. Beta drivers are marked until they have run against live servers in CI.</p>
         </div>
-        <div class="support stagger">
-          <div class="scard">
-            <span class="st live"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 5 5L20 7"/></svg>Shipping</span>
-            <ul><li class="hot">PostgreSQL</li><li class="hot">MySQL</li><li class="hot">MariaDB</li><li class="hot">SQLite</li></ul>
+        <div class="dbmatrix reveal">
+          <div class="dbrow r-live">
+            <div class="dbhd">
+              <div class="lbl"><span class="ddot live"></span> Shipping <span class="cnt">11</span></div>
+              <p class="sub">Integration-tested in CI — browse, edit, back up and query.</p>
+            </div>
+            <div class="dbchips">
+              <span class="dbchip">PostgreSQL</span><span class="dbchip">MySQL</span><span class="dbchip">MariaDB</span><span class="dbchip">SQLite</span><span class="dbchip">DuckDB</span><span class="dbchip">ClickHouse</span><span class="dbchip">Redis &amp; Upstash</span><span class="dbchip">Neon</span><span class="dbchip">Supabase</span><span class="dbchip">Turso / libSQL</span><span class="dbchip">Cloudflare D1</span>
+            </div>
           </div>
-          <div class="scard">
-            <span class="st live"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 5 5L20 7"/></svg>Shipping</span>
-            <ul><li class="hot">DuckDB</li><li class="hot">ClickHouse</li><li class="hot">Redis &amp; Upstash</li><li class="hot">Neon</li><li class="hot">Supabase</li><li class="hot">Turso / libSQL</li><li class="hot">Cloudflare D1</li></ul>
+          <div class="dbrow r-beta">
+            <div class="dbhd">
+              <div class="lbl"><span class="ddot beta"></span> Beta <span class="cnt">8</span></div>
+              <p class="sub">Wired into CI — verified the first time they run against a live server.</p>
+            </div>
+            <div class="dbchips">
+              <span class="dbchip">SQL Server</span><span class="dbchip">MongoDB</span><span class="dbchip">Cassandra</span><span class="dbchip">ScyllaDB</span><span class="dbchip">CockroachDB</span><span class="dbchip">Redshift</span><span class="dbchip">TiDB</span><span class="dbchip">SingleStore</span>
+            </div>
           </div>
-          <div class="scard">
-            <span class="st soon">Beta</span>
-            <ul><li>SQL Server</li><li>MongoDB</li><li>Cassandra</li><li>ScyllaDB</li><li>CockroachDB</li><li>Redshift</li><li>TiDB</li><li>SingleStore</li></ul>
-          </div>
-          <div class="scard">
-            <span class="st soon">Roadmap</span>
-            <ul><li>Oracle</li><li>Snowflake</li><li>BigQuery</li><li>Elasticsearch</li></ul>
+          <div class="dbrow r-soon">
+            <div class="dbhd">
+              <div class="lbl"><span class="ddot soon"></span> Roadmap <span class="cnt">4</span></div>
+              <p class="sub">Next up, by demand.</p>
+            </div>
+            <div class="dbchips">
+              <span class="dbchip">Oracle</span><span class="dbchip">Snowflake</span><span class="dbchip">BigQuery</span><span class="dbchip">Elasticsearch</span>
+            </div>
           </div>
         </div>
       </div>
@@ -650,7 +670,7 @@
             <svg class="arr" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5"/></svg>
           </a>
         </div>
-        <p class="dl-note">v0.1 · every build on <a href="https://github.com/giankbr/rowhouse/releases">GitHub Releases</a></p>
+        <p class="dl-note">v0.5 · every build on <a href="https://github.com/giankbr/rowhouse/releases">GitHub Releases</a></p>
       </div>
     </section>
   </main>
