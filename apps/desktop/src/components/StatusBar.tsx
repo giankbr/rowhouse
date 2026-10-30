@@ -10,7 +10,7 @@ export function StatusBar({ tab, connected }: { tab: Tab | null; connected: bool
         {connected ? "Connected" : "Not connected"}
       </span>
       <span className="flex-1" />
-      {tab?.error && <span className="text-danger">Error</span>}
+      {tab?.error && (/cancelled$/i.test(tab.error.trim()) ? <span>Cancelled</span> : <span className="text-danger">Error</span>)}
       {r && (
         <span className="tabular-nums">
           {r.columns.length > 0

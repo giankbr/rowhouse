@@ -18,6 +18,11 @@ export interface Tab {
   resultIndex?: number;
   error?: string;
   running?: boolean;
+  /** id of the running query (for cancel) */
+  runId?: string;
+  runStarted?: number;
+  /** restored from the last session; reload data when shown */
+  stale?: boolean;
   /** table tabs: server-side browsing */
   filters?: import("./api").Filter[];
   sort?: { column: string; desc: boolean } | null;

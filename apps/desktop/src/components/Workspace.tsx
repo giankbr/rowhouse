@@ -1,4 +1,4 @@
-import { AlertCircle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
@@ -9,7 +9,7 @@ import { PlanView } from "./PlanView";
 import { StructureEditor } from "./StructureEditor";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
-import { Button, Field, Input, Menu, Modal, Segmented, Switch, cx } from "./ui";
+import { Button, Field, Input, Kbd, Menu, Modal, Segmented, Switch, cx } from "./ui";
 
 export function Workspace({
   tab,
@@ -21,6 +21,7 @@ export function Workspace({
   onToast,
   onHistory,
   onSchedule,
+  onCancel,
   aiEnabled,
   inlineAi = false,
   onOpenSettings,
@@ -36,6 +37,8 @@ export function Workspace({
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onHistory: () => void;
   onSchedule?: (sql: string) => void;
+  /** stop the running query */
+  onCancel?: () => void;
   aiEnabled: boolean;
   /** ghost-text suggestions in the editor (AI settings) */
   inlineAi?: boolean;
@@ -135,6 +138,11 @@ export function Workspace({
   useEffect(() => {
     if (tab.kind !== "query" || !active) return;
     const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "." && tab.running) {
+        e.preventDefault();
+        onCancel?.();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
         // inside the editor, Mod+I is the inline edit box (handled by SqlEditor)
         if (aiEnabled && (e.target as HTMLElement | null)?.closest?.(".cm-editor")) return;
@@ -264,9 +272,15 @@ export function Workspace({
             />
           )}
           <Toolbar>
-            <Button variant="primary" size="xs" onClick={() => onRun()} disabled={tab.running} title={`Run selection or all (${mod}+Enter)`}>
-              <Play size={11} fill="currentColor" /> Run
-            </Button>
+            {tab.running && onCancel ? (
+              <Button variant="danger" size="xs" className="bg-danger/10" onClick={onCancel} title={`Cancel the running query (${mod}+.)`}>
+                <Square size={9} fill="currentColor" /> Cancel
+              </Button>
+            ) : (
+              <Button variant="primary" size="xs" onClick={() => onRun()} disabled={tab.running} title={`Run selection or all (${mod}+Enter)`}>
+                <Play size={11} fill="currentColor" /> Run
+              </Button>
+            )}
             <Button variant="ghost" size="xs" onClick={askAi} title={`Ask AI (${mod}+I)`}>
               <Sparkles size={11} className="text-accent" /> Ask AI
             </Button>
@@ -400,6 +414,8 @@ export function Workspace({
             analyze={analyze}
             onAnalyze={(v) => (setAnalyze(v), explainPlan(v))}
           />
+        ) : tab.error && /cancelled$/i.test(tab.error.trim()) ? (
+          <div className="flex h-full items-center justify-center text-xs text-muted">Query cancelled</div>
         ) : tab.error ? (
           <div className="selectable m-3 flex gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-xs text-danger">
             <AlertCircle size={14} className="mt-px shrink-0" />
@@ -423,8 +439,23 @@ export function Workspace({
             edit={editable ? { pending: tab.pending ?? { edits: {}, deletes: [], inserts: [] }, onChange: (p) => onChange({ pending: p }) } : undefined}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-subtle">
-            {tab.running ? "Running…" : "Run a query to see results"}
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-subtle">
+            {tab.running ? (
+              <>
+                <span className="flex items-center gap-2 text-muted">
+                  <span className="size-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  Running… <Elapsed since={tab.runStarted} />
+                </span>
+                {onCancel && (
+                  <Button size="xs" onClick={onCancel}>
+                    Cancel <Kbd>{mod}</Kbd>
+                    <Kbd>.</Kbd>
+                  </Button>
+                )}
+              </>
+            ) : (
+              "Run a query to see results"
+            )}
           </div>
         )}
         {tab.running && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-accent" />}
@@ -572,4 +603,16 @@ function Structure({ tab }: { tab: Tab }) {
       </table>
     </div>
   );
+}
+
+/** Live "3.2 s" counter while a query runs. */
+function Elapsed({ since }: { since?: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 200);
+    return () => clearInterval(t);
+  }, []);
+  if (!since) return null;
+  const s = (Date.now() - since) / 1000;
+  return <span className="tabular-nums">{s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`}</span>;
 }

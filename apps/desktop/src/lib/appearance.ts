@@ -8,10 +8,12 @@ export interface Appearance {
   uiFont: UiFont;
   monoFont: MonoFont;
   density: Density;
+  /** stop queries that run longer than this (0 = never) */
+  queryTimeoutSec: number;
 }
 
 const KEY = "rh-appearance";
-export const DEFAULT_APPEARANCE: Appearance = { uiFont: "inter", monoFont: "jetbrains", density: "compact" };
+export const DEFAULT_APPEARANCE: Appearance = { uiFont: "inter", monoFont: "jetbrains", density: "compact", queryTimeoutSec: 0 };
 
 export function loadAppearance(): Appearance {
   try {

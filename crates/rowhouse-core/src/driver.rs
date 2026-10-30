@@ -138,6 +138,8 @@ pub struct Connection {
     pool: Pool,
     /// Kept alive for as long as the connection; dropped = tunnel closed.
     tunnel: Option<crate::tunnel::Tunnel>,
+    /// Server-side session ids of running tagged queries (for cancel).
+    running: std::sync::Mutex<std::collections::HashMap<String, i64>>,
 }
 
 impl Connection {
@@ -349,6 +351,7 @@ impl Connection {
             config: config.clone(),
             pool,
             tunnel,
+            running: Default::default(),
         })
     }
 
@@ -394,6 +397,79 @@ impl Connection {
             results,
             elapsed_ms: started.elapsed().as_millis(),
         })
+    }
+
+    /// Like [`query`](Self::query), but remembers the server session running it under
+    /// `tag`, so [`cancel`](Self::cancel) can stop it on the server (Postgres family,
+    /// MySQL family). Other engines stop when the caller drops the future.
+    pub async fn query_tagged(&self, sql: &str, limit: usize, tag: &str) -> Result<QueryOutput> {
+        if self.config.read_only {
+            return self.query_read_only(sql, limit).await;
+        }
+        let started = Instant::now();
+        let out = |results| QueryOutput {
+            results,
+            elapsed_ms: started.elapsed().as_millis(),
+        };
+        match &self.pool {
+            Pool::Pg(p) => {
+                let mut c = p.acquire().await?;
+                let pid: Result<Vec<QueryResult>> =
+                    async { Ok(run_script!(&mut *c, "SELECT pg_backend_pid()", 1, pg_value)) }
+                        .await;
+                if let Some(pid) = pid.ok().as_deref().and_then(first_i64) {
+                    self.track(tag, Some(pid));
+                }
+                let r: Result<Vec<QueryResult>> =
+                    async { Ok(run_script!(&mut *c, sql, limit, pg_value)) }.await;
+                self.track(tag, None);
+                Ok(out(r?))
+            }
+            Pool::My(p) => {
+                let mut c = p.acquire().await?;
+                let id: Result<Vec<QueryResult>> =
+                    async { Ok(run_script!(&mut *c, "SELECT CONNECTION_ID()", 1, my_value)) }.await;
+                if let Some(id) = id.ok().as_deref().and_then(first_i64) {
+                    self.track(tag, Some(id));
+                }
+                let r: Result<Vec<QueryResult>> =
+                    async { Ok(run_script!(&mut *c, sql, limit, my_value)) }.await;
+                self.track(tag, None);
+                Ok(out(r?))
+            }
+            _ => Ok(out(self.run(sql, limit).await?)),
+        }
+    }
+
+    fn track(&self, tag: &str, id: Option<i64>) {
+        if let Ok(mut m) = self.running.lock() {
+            match id {
+                Some(id) => m.insert(tag.to_string(), id),
+                None => m.remove(tag),
+            };
+        }
+    }
+
+    /// Ask the server to stop the query started with `tag`. `Ok(false)` when the
+    /// engine can't cancel server-side (dropping the future is all there is).
+    pub async fn cancel(&self, tag: &str) -> Result<bool> {
+        let id = self.running.lock().ok().and_then(|mut m| m.remove(tag));
+        let Some(id) = id else { return Ok(false) };
+        match &self.pool {
+            Pool::Pg(p) => {
+                sqlx::raw_sql(AssertSqlSafe(format!("SELECT pg_cancel_backend({id})")))
+                    .execute(p)
+                    .await?;
+                Ok(true)
+            }
+            Pool::My(p) => {
+                sqlx::raw_sql(AssertSqlSafe(format!("KILL QUERY {id}")))
+                    .execute(p)
+                    .await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     async fn run(&self, sql: &str, limit: usize) -> Result<Vec<QueryResult>> {
@@ -923,5 +999,14 @@ pub(crate) fn lite_value(row: &SqliteRow, i: usize) -> Value {
             .try_get_unchecked::<String, _>(i)
             .map(Value::String)
             .unwrap_or(Value::Null),
+    }
+}
+
+/// First cell of the first result as i64.
+fn first_i64(r: &[QueryResult]) -> Option<i64> {
+    match r.first()?.rows.first()?.first()? {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
     }
 }

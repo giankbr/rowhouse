@@ -16,6 +16,8 @@ struct AppState {
     store: ConnectionStore,
     history: Option<History>,
     open: Mutex<HashMap<String, Arc<Connection>>>,
+    /// running queries by run id, so they can be cancelled
+    runs: std::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
 
 impl AppState {
@@ -140,15 +142,45 @@ async fn run_query(
     id: String,
     sql: String,
     limit: Option<usize>,
+    run_id: Option<String>,
+    timeout_ms: Option<u64>,
 ) -> CmdResult<QueryOutput> {
     let c = state.conn(&id).await?;
     let started = std::time::Instant::now();
-    let res = c
-        .query(
-            &sql,
-            limit.unwrap_or(rowhouse_core::driver::DEFAULT_ROW_LIMIT),
-        )
-        .await;
+    let limit = limit.unwrap_or(rowhouse_core::driver::DEFAULT_ROW_LIMIT);
+    let tag = run_id.unwrap_or_else(|| format!("run-{}", started.elapsed().as_nanos()));
+    // run in its own task so cancel_query can abort it
+    let task = {
+        let (c, sql, tag) = (c.clone(), sql.clone(), tag.clone());
+        tokio::spawn(async move { c.query_tagged(&sql, limit, &tag).await })
+    };
+    if let Ok(mut runs) = state.runs.lock() {
+        runs.insert(tag.clone(), task.abort_handle());
+    }
+    let joined = match timeout_ms.filter(|t| *t > 0) {
+        Some(ms) => match tokio::time::timeout(std::time::Duration::from_millis(ms), task).await {
+            Ok(j) => j,
+            Err(_) => {
+                let _ = c.cancel(&tag).await;
+                if let Some(h) = state.runs.lock().ok().and_then(|mut r| r.remove(&tag)) {
+                    h.abort();
+                }
+                Ok(Err(Error::Other(format!(
+                    "query timed out after {:.0} s (Settings → Query timeout)",
+                    ms as f64 / 1000.0
+                ))))
+            }
+        },
+        None => task.await,
+    };
+    if let Ok(mut runs) = state.runs.lock() {
+        runs.remove(&tag);
+    }
+    let res = match joined {
+        Ok(r) => r,
+        Err(e) if e.is_cancelled() => Err(Error::Other("query cancelled".into())),
+        Err(e) => Err(Error::Other(e.to_string())),
+    };
     if let Some(h) = &state.history {
         let err = res.as_ref().err().map(|e| e.to_string());
         let rows = res
@@ -172,6 +204,19 @@ async fn run_query(
             .await;
     }
     res
+}
+
+/// Stop a running query: cancel it on the server (Postgres / MySQL family) and
+/// abort the task so the UI gets control back immediately.
+#[tauri::command]
+async fn cancel_query(state: State<'_, AppState>, id: String, run_id: String) -> CmdResult<()> {
+    if let Some(c) = state.open.lock().await.get(&id).cloned() {
+        let _ = c.cancel(&run_id).await;
+    }
+    if let Some(h) = state.runs.lock().ok().and_then(|mut r| r.remove(&run_id)) {
+        h.abort();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -788,6 +833,7 @@ pub fn run() {
                 store: ConnectionStore::open_default(),
                 history,
                 open: Mutex::new(HashMap::new()),
+                runs: Default::default(),
             });
             Ok(())
         })
@@ -802,6 +848,7 @@ pub fn run() {
             describe_table,
             table_sql,
             run_query,
+            cancel_query,
             list_history,
             clear_history,
             preview_changes,

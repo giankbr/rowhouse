@@ -12,6 +12,8 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { SchedulesDialog } from "./components/SchedulesDialog";
 import { setWindowMode } from "./lib/windowSize";
+import { loadSession, saveSession } from "./lib/session";
+import { loadAppearance } from "./lib/appearance";
 import { QueryBuilder } from "./components/QueryBuilder";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -30,9 +32,15 @@ export default function App() {
   const [connected, setConnected] = useState<Record<string, boolean>>({});
   const [tables, setTables] = useState<Record<string, TableInfo[]>>({});
   const [loadingTables, setLoadingTables] = useState(false);
-  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [session] = useState(loadSession);
+  const [tabs, setTabs] = useState<Tab[]>(session.tabs);
   // per split pane: last selected tab (falls back to the pane's last tab)
-  const [activeByPane, setActiveByPane] = useState<[string | null, string | null]>([null, null]);
+  const [activeByPane, setActiveByPane] = useState<[string | null, string | null]>(session.active);
+  // save open tabs (not results) so they come back after a restart
+  useEffect(() => {
+    const t = setTimeout(() => saveSession(tabs, activeByPane), 400);
+    return () => clearTimeout(t);
+  }, [tabs, activeByPane]);
   const [focusedPane, setFocusedPane] = useState<0 | 1>(0);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ tab: Tab; sql: string; items: Destructive[] } | null>(null);
@@ -62,7 +70,14 @@ export default function App() {
   }, [dark]);
 
   useEffect(() => {
-    api.listConnections().then(setConnections).catch((e) => setToast(String(e)));
+    api
+      .listConnections()
+      .then((cs) => {
+        setConnections(cs);
+        // drop restored tabs of connections that no longer exist
+        setTabs((ts) => ts.filter((t) => cs.some((c) => c.id === t.connId)));
+      })
+      .catch((e) => setToast(String(e)));
     api.ai
       .getSettings()
       .then((r) => (setAiEnabled(r.settings.enabled && !!r.settings.model), setInlineAi(r.settings.enabled && !!r.settings.inlineCompletions)))
@@ -184,8 +199,11 @@ export default function App() {
         }
         return;
       }
+      const runId = uid();
+      patchTab(t.id, { runId, runStarted: Date.now() });
       try {
-        const output = await api.runQuery(t.connId, sqlOverride ?? t.sql);
+        const timeout = loadAppearance().queryTimeoutSec;
+        const output = await api.runQuery(t.connId, sqlOverride ?? t.sql, undefined, runId, timeout ? timeout * 1000 : undefined);
         setConnected((c) => ({ ...c, [t.connId]: true }));
         patchTab(t.id, { output, running: false, resultIndex: 0, pending: undefined });
         // DDL may have changed the schema.
@@ -195,6 +213,13 @@ export default function App() {
       }
     },
     [patchTab, loadTables],
+  );
+
+  const cancelTab = useCallback(
+    (t: Tab) => {
+      if (t.running && t.runId) api.cancelQuery(t.connId, t.runId).catch((e) => setToast(String(e)));
+    },
+    [setToast],
   );
 
   /** Run, but stop for a typed confirmation on DROP / TRUNCATE / unfiltered DELETE & UPDATE. */
@@ -341,6 +366,20 @@ export default function App() {
     [activeConn, tabs, runTab, patchTab, addTab, selectTab, setToast],
   );
 
+  // restored table tabs load their data the first time they're shown
+  useEffect(() => {
+    for (const p of [0, 1] as const) {
+      const t = activeIn(p);
+      if (!t?.stale || !t.schema || !t.table) continue;
+      patchTab(t.id, { stale: false });
+      execTab(t);
+      api
+        .describeTable(t.connId, t.schema, t.table)
+        .then((columns) => patchTab(t.id, { columns }))
+        .catch(() => {});
+    }
+  }, [activeIn, execTab, patchTab]);
+
   const closeTab = useCallback((id: string) => {
     // the pane falls back to its last remaining tab; an empty right pane closes the split
     setTabs((ts) => ts.filter((t) => t.id !== id));
@@ -449,6 +488,7 @@ export default function App() {
               active={isFocused}
               onChange={(patch) => patchTab(t.id, patch)}
               onRun={(sql) => runTab(t, sql)}
+              onCancel={() => cancelTab(t)}
               onBrowse={(patch) => {
                 const next = { ...t, ...patch };
                 patchTab(t.id, patch);

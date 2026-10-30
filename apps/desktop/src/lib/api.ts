@@ -403,8 +403,9 @@ export const api = {
     call<ColumnInfo[]>("describe_table", { id, schema, table }),
   tableSql: (id: string, schema: string, table: string, limit = 300) =>
     call<string>("table_sql", { id, schema, table, limit }),
-  runQuery: (id: string, sql: string, limit?: number) =>
-    call<QueryOutput>("run_query", { id, sql, limit }),
+  runQuery: (id: string, sql: string, limit?: number, runId?: string, timeoutMs?: number) =>
+    call<QueryOutput>("run_query", { id, sql, limit, runId, timeoutMs }),
+  cancelQuery: (id: string, runId: string) => call<void>("cancel_query", { id, runId }),
   previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
   applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
   exportQuery: (id: string, sql: string, format: ExportFormat, path: string, schema?: string, table?: string) =>
@@ -525,6 +526,7 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
 // Browser mock
 // ---------------------------------------------------------------------------
 
+const mockCancelled = new Set<string>();
 const mockScheduleListeners = new Set<(e: { schedule: Schedule; run: ScheduleRun }) => void>();
 const nowS = () => Math.floor(Date.now() / 1000);
 let mockSchedules: Schedule[] = [
@@ -646,8 +648,21 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return mockCols;
     case "table_sql":
       return `SELECT * FROM "${a.schema}"."${a.table}" LIMIT ${a.limit}`;
+    case "cancel_query":
+      mockCancelled.add(String(a.runId));
+      return null;
     case "run_query": {
       const sql = String(a.sql).trim().toLowerCase();
+      if (/sleep\(/.test(sql)) {
+        // long query for trying cancel / timeout in the preview
+        const until = Date.now() + 8000;
+        const limitAt = a.timeoutMs ? Date.now() + Number(a.timeoutMs) : Infinity;
+        while (Date.now() < until) {
+          await sleep(100);
+          if (mockCancelled.has(String(a.runId))) throw "query cancelled";
+          if (Date.now() > limitAt) throw `query timed out after ${Number(a.timeoutMs) / 1000} s (Settings → Query timeout)`;
+        }
+      }
       if (sql.startsWith("select") || sql.startsWith("with")) {
         return {
           elapsed_ms: 12 + Math.round(Math.random() * 30),

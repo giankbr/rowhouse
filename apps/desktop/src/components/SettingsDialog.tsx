@@ -224,6 +224,19 @@ function AppearanceSection() {
         />
       </div>
       <div className={row}>
+        <span className={label}>Query timeout</span>
+        <Segmented<string>
+          value={String(a.queryTimeoutSec)}
+          onChange={(v) => set({ queryTimeoutSec: Number(v) })}
+          options={[
+            { value: "0", label: "Off" },
+            { value: "30", label: "30 s" },
+            { value: "120", label: "2 min" },
+            { value: "600", label: "10 min" },
+          ]}
+        />
+      </div>
+      <div className={row}>
         <span className={label}>Density</span>
         <Segmented<Density>
           value={a.density}
