@@ -25,10 +25,13 @@ export function ConnectionDialog({
   const [sshSecret, setSshSecret] = useState<string>("");
   const [test, setTest] = useState<{ state: "idle" | "busy" | "ok" | "err"; msg?: string }>({ state: "idle" });
   const isNew = !initial;
+  // the type grid is big; collapse it when the type is already chosen
+  const [pickKind, setPickKind] = useState(true);
 
   useEffect(() => {
     if (open) {
       setC(initial ?? newConnection(initialKind));
+      setPickKind(!initial && !initialKind);
       setPassword("");
       setSshSecret("");
       setUrl("");
@@ -121,6 +124,15 @@ export function ConnectionDialog({
             {urlError && <span className="text-2xs text-danger">{urlError}</span>}
           </div>
         )}
+        {!pickKind ? (
+          <div className="flex items-center gap-2.5 rounded-lg bg-accent-soft/50 px-2.5 py-2 ring-1 ring-accent/40">
+            <KindBadge kind={c.kind} size={26} />
+            <span className="text-xs font-medium">{info.label}</span>
+            <button type="button" onClick={() => setPickKind(true)} className="ml-auto text-2xs text-accent hover:underline">
+              Change
+            </button>
+          </div>
+        ) : (
         <div className="grid grid-cols-5 gap-1">
           {KINDS.map((k) => (
             <button
@@ -138,6 +150,7 @@ export function ConnectionDialog({
             </button>
           ))}
         </div>
+        )}
         <div className="flex items-center justify-between">
           <span className="text-2xs text-subtle">
             {info.beta ? "Beta — not yet verified against a live server" : info.api ? `${info.label} · over HTTPS` : `${info.label} · default port ${info.port ?? "—"}`}

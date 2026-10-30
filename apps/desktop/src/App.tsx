@@ -11,6 +11,7 @@ import { Launcher, touchRecent } from "./components/Launcher";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { SchedulesDialog } from "./components/SchedulesDialog";
+import { setWindowMode } from "./lib/windowSize";
 import { QueryBuilder } from "./components/QueryBuilder";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -75,6 +76,10 @@ export default function App() {
   }, [toast]);
 
   const conn = connections.find((c) => c.id === activeConn) ?? null;
+  // small start window, full-size workspace
+  useEffect(() => {
+    setWindowMode(conn ? "workspace" : "launcher");
+  }, [!!conn]); // eslint-disable-line react-hooks/exhaustive-deps
   const connTables = (activeConn && tables[activeConn]) || [];
   const visibleTabs = useMemo(() => tabs.filter((t) => t.connId === activeConn), [tabs, activeConn]);
   const paneTabs = useCallback((p: 0 | 1) => visibleTabs.filter((t) => (t.pane ?? 0) === p), [visibleTabs]);
@@ -484,6 +489,7 @@ export default function App() {
           title={`${env?.label} connection`}
         />
       )}
+      {conn && (
       <Titlebar
         conn={conn}
         dark={dark}
@@ -494,6 +500,7 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
         onHome={() => setActiveConn(null)}
       />
+      )}
 
       <div className="flex min-h-0 flex-1">
         {conn && (
@@ -553,7 +560,7 @@ export default function App() {
         <HistoryPanel connId={activeConn} open={historyOpen && !!conn} onClose={() => setHistoryOpen(false)} onPick={pickHistory} />
       </div>
 
-      <StatusBar tab={tab} connected={!!(activeConn && connected[activeConn])} />
+      {conn && <StatusBar tab={tab} connected={!!(activeConn && connected[activeConn])} />}
 
       <ConnectionDialog
         open={dialog.open}

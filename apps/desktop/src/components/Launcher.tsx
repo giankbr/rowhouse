@@ -121,28 +121,28 @@ export function Launcher({
     else if (e.key === "Enter" && list[sel]) (e.preventDefault(), onOpen(list[sel].id));
   };
 
-  const action = "flex h-11 w-full items-center gap-3 rounded-xl border border-line bg-elevated/60 px-4 text-sm text-fg/90 transition-colors hover:border-line-strong hover:bg-elevated";
+  const action = "flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-lg border border-line bg-elevated/60 px-3 text-[13px] text-fg/90 transition-colors hover:border-line-strong hover:bg-elevated";
 
   return (
-    <div className="flex flex-1 items-center justify-center overflow-auto p-6">
-      <div className="animate-pop flex h-[min(640px,100%)] w-full max-w-[1000px] overflow-hidden rounded-2xl border border-line bg-elevated shadow-pop">
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-elevated">
+      <div className="flex min-h-0 w-full overflow-hidden">
         {/* brand + actions */}
-        <div className="flex w-[36%] min-w-64 flex-col items-center border-r border-line bg-panel px-7 pt-12 pb-7">
-          <div className="text-fg">
-            <RowhouseMark size={84} />
+        <div data-tauri-drag-region className="flex w-[34%] min-w-60 flex-col items-center border-r border-line bg-panel px-6 pt-12 pb-5">
+          <div className="pointer-events-none text-fg">
+            <RowhouseMark size={72} />
           </div>
-          <h1 className="mt-3 text-[26px] font-semibold tracking-tight">Rowhouse</h1>
+          <h1 className="pointer-events-none mt-2.5 text-[24px] font-semibold tracking-tight">Rowhouse</h1>
           <span className="mt-0.5 text-xs text-muted">Version {version}</span>
           <span className="mt-3 rounded-full bg-success/12 px-2.5 py-0.5 text-[11px] font-medium text-success">Free &amp; open source</span>
-          <div className="mt-auto flex w-full flex-col gap-2">
+          <div className="mt-auto flex w-full flex-col gap-1.5">
             <button className={action} onClick={() => onNew()}>
               <Plus size={16} className="text-accent" /> Create connection
             </button>
             <button className={action} onClick={() => onImport()}>
-              <FileInput size={16} className="text-muted" /> Import from another app
+              <FileInput size={16} className="shrink-0 text-muted" /> <span className="truncate">Import connections</span>
               {detected.length > 0 && (
-                <span className="ml-auto rounded-full bg-accent/12 px-1.5 text-2xs font-medium text-accent">
-                  {detected.reduce((n, d) => n + d.count, 0)} found
+                <span className="ml-auto shrink-0 rounded-full bg-accent/12 px-1.5 text-2xs font-medium text-accent" title="Found in other apps">
+                  {detected.reduce((n, d) => n + d.count, 0)}
                 </span>
               )}
             </button>
@@ -157,11 +157,11 @@ export function Launcher({
 
         {/* connections */}
         <div className="flex min-w-0 flex-1 flex-col" onKeyDown={onKey}>
-          <div className="flex items-center gap-2.5 px-5 pt-5 pb-3">
+          <div data-tauri-drag-region className="flex items-center gap-2.5 px-4 pt-4 pb-2.5">
             <button
               onClick={() => onNew()}
               title="New connection"
-              className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line text-muted hover:border-line-strong hover:text-fg"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line text-muted hover:border-line-strong hover:text-fg"
             >
               <Plus size={17} />
             </button>
@@ -173,13 +173,13 @@ export function Launcher({
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search for connection…"
                 spellCheck={false}
-                className="h-10 w-full rounded-full border border-line bg-panel pr-4 pl-10 text-sm outline-none transition-colors placeholder:text-subtle focus:border-accent/70 focus:bg-elevated"
+                className="h-9 w-full rounded-full border border-line bg-panel pr-4 pl-10 text-[13px] outline-none transition-colors placeholder:text-subtle focus:border-accent/70 focus:bg-elevated"
               />
             </div>
             <button
               onClick={onSettings}
               title="Settings"
-              className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-fg"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-fg"
             >
               <Settings size={16} />
             </button>
@@ -187,7 +187,7 @@ export function Launcher({
 
           <div ref={listRef} className="flex-1 overflow-y-auto px-3 pb-4">
             {connections.length === 0 && (
-              <div className="flex flex-col gap-6 px-3 pt-4">
+              <div className="flex flex-col gap-4 px-2 pt-2">
                 {detected.length > 0 && (
                   <section className="flex flex-col gap-2">
                     <h3 className="text-[11px] font-medium tracking-wide text-subtle uppercase">Found on this computer</h3>
@@ -195,16 +195,16 @@ export function Launcher({
                       <button
                         key={d.path}
                         onClick={() => onImport(d.path)}
-                        className="group flex items-center gap-3 rounded-xl border border-line px-3.5 py-3 text-left transition-colors hover:border-accent/60 hover:bg-accent-soft/30"
+                        className="group flex items-center gap-3 rounded-xl border border-line px-3 py-2.5 text-left transition-colors hover:border-accent/60 hover:bg-accent-soft/30"
                       >
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-sm font-semibold text-accent">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-xs font-semibold text-accent">
                           {APP_LABEL[d.source].slice(0, 2)}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block text-[14px] font-medium">
+                          <span className="block text-[13px] font-medium">
                             {d.count} connection{d.count === 1 ? "" : "s"} in {APP_LABEL[d.source]}
                           </span>
-                          <span className="block truncate text-xs text-muted">Import them in one click · passwords are asked on first connect</span>
+                          <span className="block truncate text-[11.5px] text-muted">One click · passwords are asked on first connect</span>
                         </span>
                         <span className="flex items-center gap-1 text-xs font-medium text-accent opacity-80 group-hover:opacity-100">
                           Import <ArrowRight size={13} />
@@ -220,16 +220,16 @@ export function Launcher({
                       <button
                         key={k}
                         onClick={() => (kindInfo(k).file ? onOpenFile() : onNew(k))}
-                        className="flex items-center gap-2.5 rounded-xl border border-line px-3 py-2.5 text-left text-[13px] transition-colors hover:border-line-strong hover:bg-hover"
+                        className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-2 text-left text-[12.5px] transition-colors hover:border-line-strong hover:bg-hover"
                       >
-                        <KindBadge kind={k} size={26} />
+                        <KindBadge kind={k} size={22} />
                         {kindInfo(k).label}
                       </button>
                     ))}
                   </div>
                   <button
                     onClick={() => onNew()}
-                    className="flex items-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left text-[13px] text-muted transition-colors hover:border-line-strong hover:text-fg"
+                    className="flex items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-left text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-fg"
                   >
                     <Link2 size={14} /> Paste a connection URL, or pick from {"20+"} databases…
                   </button>
@@ -248,18 +248,18 @@ export function Launcher({
                   onMouseEnter={() => setSel(i)}
                   onClick={() => onOpen(c.id)}
                   className={cx(
-                    "group flex cursor-default items-center gap-3.5 rounded-xl px-3 py-2.5",
+                    "group flex cursor-default items-center gap-3 rounded-lg px-2.5 py-2",
                     i === sel ? "bg-selected" : "hover:bg-hover",
                   )}
                 >
-                  <KindBadge kind={c.kind} size={38} />
+                  <KindBadge kind={c.kind} size={32} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[15px] font-medium">{c.name || "Untitled"}</span>
+                      <span className="truncate text-[13.5px] font-medium">{c.name || "Untitled"}</span>
                       {env && <span className={cx("shrink-0 rounded-md px-1.5 py-px text-[11.5px] font-medium", ENV_STYLE[c.env!])}>{env.label.toLowerCase()}</span>}
                       {c.readOnly && <Lock size={12} className="shrink-0 text-subtle" />}
                     </div>
-                    <div className="truncate text-[12.5px] text-muted">{subtitle(c)}</div>
+                    <div className="truncate text-[11.5px] text-muted">{subtitle(c)}</div>
                   </div>
                   <button
                     onClick={(e) => (e.stopPropagation(), onEdit(c))}
@@ -272,7 +272,7 @@ export function Launcher({
               );
             })}
           </div>
-          <div className="flex items-center gap-3 border-t border-line px-5 py-2 text-[11px] text-subtle">
+          <div className="flex items-center gap-3 border-t border-line px-4 py-1.5 text-[11px] text-subtle">
             <span className="flex items-center gap-1">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> select

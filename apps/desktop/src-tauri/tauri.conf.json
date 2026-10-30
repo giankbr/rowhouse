@@ -14,10 +14,11 @@
       {
         "label": "main",
         "title": "Rowhouse",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 900,
-        "minHeight": 560,
+        "width": 860,
+        "height": 540,
+        "minWidth": 760,
+        "minHeight": 480,
+        "center": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": {
