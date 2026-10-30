@@ -6,8 +6,8 @@ import { mod } from "../lib/types";
 import { Button, Kbd, cx } from "./ui";
 
 export type AiState =
-  | { mode: "ask"; prompt: string; loading?: boolean; answer?: AiAnswer; error?: string }
-  | { mode: "fix" | "explain"; loading?: boolean; answer?: AiAnswer; error?: string };
+  | { mode: "ask"; prompt: string; loading?: boolean; answer?: AiAnswer; error?: string; streamed?: string }
+  | { mode: "fix" | "explain"; loading?: boolean; answer?: AiAnswer; error?: string; streamed?: string };
 
 /** Inline AI strip under the editor: prompt input, then a diff proposal to accept or discard. */
 export function AiPanel({
@@ -64,6 +64,13 @@ export function AiPanel({
 
       {state.error && (
         <div className="selectable mx-2 mb-2 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-2xs text-danger">{state.error}</div>
+      )}
+
+      {state.loading && state.streamed && (
+        <pre className="selectable mx-2 mb-2 max-h-56 overflow-auto rounded-lg border border-line bg-elevated px-3 py-2 font-mono text-[11.5px] leading-[1.55] whitespace-pre-wrap text-muted">
+          {state.streamed.replace(/```[a-zA-Z]*\n?/g, "")}
+          <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-accent align-middle" />
+        </pre>
       )}
 
       {state.answer && (

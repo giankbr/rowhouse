@@ -51,11 +51,15 @@ async fn openai_generate_sends_schema_not_rows() {
             provider: Provider::Openai,
             base_url: format!("{}/v1/", server.uri()),
             model: "m-1".into(),
+            inline_completions: false,
         },
         Some("sk-test".into()),
     )
     .unwrap();
-    let a = ai.generate(&c, "revenue per user", None).await.unwrap();
+    let a = ai
+        .generate(&c, "revenue per user", None, None)
+        .await
+        .unwrap();
     assert!(a.sql.starts_with("SELECT u.email"));
     assert_eq!(a.explanation, "Total order value per user.");
 
@@ -92,12 +96,13 @@ async fn anthropic_fix_uses_messages_api() {
             provider: Provider::Anthropic,
             base_url: format!("{}/v1", server.uri()),
             model: "c".into(),
+            inline_completions: false,
         },
         Some("ak".into()),
     )
     .unwrap();
     let a = ai
-        .fix(&c, "SELECT mail FROM users", "no such column: mail")
+        .fix(&c, "SELECT mail FROM users", "no such column: mail", None)
         .await
         .unwrap();
     assert_eq!(a.sql, "SELECT email FROM users");
@@ -134,12 +139,131 @@ async fn provider_errors_are_readable() {
             provider: Provider::Openai,
             base_url: format!("{}/v1", server.uri()),
             model: "m".into(),
+            inline_completions: false,
         },
         None,
     )
     .unwrap();
-    let e = ai.explain(&c, "select 1").await.unwrap_err().to_string();
+    let e = ai
+        .explain(&c, "select 1", None)
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("401") && e.contains("Invalid API key"), "{e}");
     assert_eq!(ai.list_models().await.unwrap(), vec!["a", "b"]);
     assert!(AiClient::new(AiSettings::default(), None).is_err()); // no model
+}
+
+#[tokio::test]
+async fn streaming_both_providers_and_inline() {
+    let server = MockServer::start().await;
+    let openai_sse = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"```sql\\nSELECT \"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"email FROM users\\n```\\nAll emails.\"}}]}\n\n\
+data: [DONE]\n\n";
+    Mock::given(method("POST"))
+        .and(path("/oa/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_raw(openai_sse, "text/event-stream"),
+        )
+        .mount(&server)
+        .await;
+    let anthropic_sse = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"It lists \"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"users.\"}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/an/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(anthropic_sse, "text/event-stream"))
+        .mount(&server)
+        .await;
+
+    let (_d, c) = db().await;
+    let oa = AiClient::new(
+        AiSettings {
+            enabled: true,
+            provider: Provider::Openai,
+            base_url: format!("{}/oa", server.uri()),
+            model: "m".into(),
+            inline_completions: true,
+        },
+        None,
+    )
+    .unwrap();
+    let mut chunks = Vec::new();
+    let mut sink = |s: &str| chunks.push(s.to_string());
+    let a = oa
+        .generate(&c, "emails", None, Some(&mut sink))
+        .await
+        .unwrap();
+    assert_eq!(a.sql, "SELECT email FROM users");
+    assert_eq!(a.explanation, "All emails.");
+    assert_eq!(chunks.len(), 2, "{chunks:?}");
+    let b = server.received_requests().await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&b[0].body).unwrap()["stream"],
+        true
+    );
+
+    let an = AiClient::new(
+        AiSettings {
+            enabled: true,
+            provider: Provider::Anthropic,
+            base_url: format!("{}/an", server.uri()),
+            model: "c".into(),
+            inline_completions: false,
+        },
+        Some("k".into()),
+    )
+    .unwrap();
+    let mut got = String::new();
+    let mut sink = |s: &str| got.push_str(s);
+    let e = an
+        .explain(&c, "select * from users", Some(&mut sink))
+        .await
+        .unwrap();
+    assert_eq!(
+        (e.explanation.as_str(), got.as_str()),
+        ("It lists users.", "It lists users.")
+    );
+}
+
+#[tokio::test]
+async fn inline_completion_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"choices": [{"message": {"content": "FROM orders WHERE total > 100"}}]}),
+        ))
+        .mount(&server)
+        .await;
+    let (_d, c) = db().await;
+    let ai = AiClient::new(
+        AiSettings {
+            enabled: true,
+            provider: Provider::Openai,
+            base_url: format!("{}/v1", server.uri()),
+            model: "m".into(),
+            inline_completions: true,
+        },
+        None,
+    )
+    .unwrap();
+    let s = ai
+        .complete_inline(&c, "SELECT id, total ", "")
+        .await
+        .unwrap();
+    assert_eq!(s, "FROM orders WHERE total > 100");
+    let body: Value =
+        serde_json::from_slice(&server.received_requests().await.unwrap()[0].body).unwrap();
+    assert!(body["messages"][1]["content"]
+        .as_str()
+        .unwrap()
+        .ends_with("total <CURSOR>"));
+    assert!(body["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("orders("));
 }

@@ -313,16 +313,30 @@ async fn ai_test(settings: AiSettings, api_key: Option<String>) -> CmdResult<Str
         .await
 }
 
+/// Streams text deltas to the UI over `on_delta` while the model answers.
+fn delta_sink(ch: &tauri::ipc::Channel<String>) -> Option<impl FnMut(&str) + Send + '_> {
+    Some(move |s: &str| {
+        let _ = ch.send(s.to_string());
+    })
+}
+
 #[tauri::command]
 async fn ai_generate(
     state: State<'_, AppState>,
     id: String,
     prompt: String,
     current_sql: Option<String>,
+    on_delta: tauri::ipc::Channel<String>,
 ) -> CmdResult<AiAnswer> {
     let c = state.conn(&id).await?;
+    let mut sink = delta_sink(&on_delta);
     AiClient::from_saved()?
-        .generate(&c, &prompt, current_sql.as_deref())
+        .generate(
+            &c,
+            &prompt,
+            current_sql.as_deref(),
+            sink.as_mut().map(|f| f as &mut (dyn FnMut(&str) + Send)),
+        )
         .await
 }
 
@@ -332,15 +346,54 @@ async fn ai_fix(
     id: String,
     sql: String,
     error: String,
+    on_delta: tauri::ipc::Channel<String>,
 ) -> CmdResult<AiAnswer> {
     let c = state.conn(&id).await?;
-    AiClient::from_saved()?.fix(&c, &sql, &error).await
+    let mut sink = delta_sink(&on_delta);
+    AiClient::from_saved()?
+        .fix(
+            &c,
+            &sql,
+            &error,
+            sink.as_mut().map(|f| f as &mut (dyn FnMut(&str) + Send)),
+        )
+        .await
 }
 
 #[tauri::command]
-async fn ai_explain(state: State<'_, AppState>, id: String, sql: String) -> CmdResult<AiAnswer> {
+async fn ai_explain(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    on_delta: tauri::ipc::Channel<String>,
+) -> CmdResult<AiAnswer> {
     let c = state.conn(&id).await?;
-    AiClient::from_saved()?.explain(&c, &sql).await
+    let mut sink = delta_sink(&on_delta);
+    AiClient::from_saved()?
+        .explain(
+            &c,
+            &sql,
+            sink.as_mut().map(|f| f as &mut (dyn FnMut(&str) + Send)),
+        )
+        .await
+}
+
+/// Ghost-text suggestion at the cursor; empty when inline completions are off.
+#[tauri::command]
+async fn ai_complete_inline(
+    state: State<'_, AppState>,
+    id: String,
+    before: String,
+    after: String,
+) -> CmdResult<String> {
+    let settings = AiSettings::load()?;
+    if !settings.enabled || !settings.inline_completions {
+        return Ok(String::new());
+    }
+    let c = state.conn(&id).await?;
+    AiClient::new(settings, AiSettings::api_key()?)?
+        .complete_inline(&c, &before, &after)
+        .await
 }
 
 // ---- safety, ERD, import ---------------------------------------------------
@@ -570,10 +623,26 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let history = tauri::async_runtime::block_on(History::open_default())
                 .map_err(|e| eprintln!("history disabled: {e}"))
                 .ok();
+            // Auto-update only once a signing key is configured (see RELEASING.md):
+            // the updater plugin refuses to start without a public key.
+            let updater_ready = app
+                .config()
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|u| u.get("pubkey"))
+                .and_then(|k| k.as_str())
+                .is_some_and(|k| !k.trim().is_empty());
+            if updater_ready {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+
             // Tell rowhouse-mcp the app is open, so write requests can be approved.
             tauri::async_runtime::spawn(async {
                 if let Ok(a) = Approvals::open_default() {
@@ -634,6 +703,7 @@ pub fn run() {
             ai_generate,
             ai_fix,
             ai_explain,
+            ai_complete_inline,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rowhouse");

@@ -165,6 +165,15 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
               </Button>
             </div>
           </Field>
+          <Switch
+            checked={!!s.inlineCompletions}
+            onChange={(v) => set({ inlineCompletions: v })}
+            label={
+              <span className="text-xs">
+                Inline suggestions while typing <span className="text-subtle">— Tab to accept; one small request per pause</span>
+              </span>
+            }
+          />
           <div className="flex gap-2 rounded-lg bg-panel p-3 text-2xs text-muted">
             <ShieldCheck size={14} className="mt-px shrink-0 text-success" />
             <span>

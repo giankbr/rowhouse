@@ -158,6 +158,7 @@ export interface AiSettings {
   provider: "openai" | "anthropic";
   baseUrl: string;
   model: string;
+  inlineCompletions?: boolean;
 }
 
 export interface AiAnswer {
@@ -303,6 +304,15 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   return mock(cmd, args ?? {}) as Promise<T>;
 }
 
+/** A Tauri IPC channel that forwards streamed text to `fn` (a plain callback in the browser mock). */
+async function channel(fn?: (s: string) => void): Promise<unknown> {
+  if (!isTauri) return fn;
+  const { Channel } = await import("@tauri-apps/api/core");
+  const ch = new Channel<string>();
+  ch.onmessage = (s) => fn?.(s);
+  return ch;
+}
+
 export const api = {
   listConnections: () => call<ConnectionConfig[]>("list_connections"),
   saveConnection: (config: ConnectionConfig, password?: string, sshSecret?: string) =>
@@ -360,10 +370,13 @@ export const api = {
     saveSettings: (settings: AiSettings, apiKey?: string) => call<void>("ai_save_settings", { settings, apiKey }),
     listModels: (settings: AiSettings, apiKey?: string) => call<string[]>("ai_list_models", { settings, apiKey }),
     test: (settings: AiSettings, apiKey?: string) => call<string>("ai_test", { settings, apiKey }),
-    generate: (id: string, prompt: string, currentSql?: string) =>
-      call<AiAnswer>("ai_generate", { id, prompt, currentSql }),
-    fix: (id: string, sql: string, error: string) => call<AiAnswer>("ai_fix", { id, sql, error }),
-    explain: (id: string, sql: string) => call<AiAnswer>("ai_explain", { id, sql }),
+    generate: async (id: string, prompt: string, currentSql?: string, onDelta?: (s: string) => void) =>
+      call<AiAnswer>("ai_generate", { id, prompt, currentSql, onDelta: await channel(onDelta) }),
+    fix: async (id: string, sql: string, error: string, onDelta?: (s: string) => void) =>
+      call<AiAnswer>("ai_fix", { id, sql, error, onDelta: await channel(onDelta) }),
+    explain: async (id: string, sql: string, onDelta?: (s: string) => void) =>
+      call<AiAnswer>("ai_explain", { id, sql, onDelta: await channel(onDelta) }),
+    completeInline: (id: string, before: string, after: string) => call<string>("ai_complete_inline", { id, before, after }),
   },
 };
 
@@ -472,7 +485,7 @@ let mockSnippets: Snippet[] = [
 ];
 
 const mockAi: { settings: AiSettings; hasKey: boolean } = {
-  settings: { enabled: true, provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-mock" },
+  settings: { enabled: true, provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-mock", inlineCompletions: true },
   hasKey: true,
 };
 
@@ -567,8 +580,19 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return ["gpt-mock", "gpt-mock-mini", "local-llama"];
     case "ai_test":
       return "OK";
+    case "ai_complete_inline": {
+      await sleep(250);
+      const before = String(a.before);
+      if (/from\s*$/i.test(before)) return "users u JOIN orders o ON o.user_id = u.id";
+      if (/select\s*$/i.test(before)) return "u.id, u.full_name, sum(o.total) AS revenue ";
+      if (/where\s*$/i.test(before)) return "o.status = 'paid'";
+      return "";
+    }
     case "ai_generate":
-      await sleep(600);
+      for (const piece of ["```sql\nSELECT u.id, u.full_name,", " SUM(o.total) AS revenue\nFROM users u", "\nJOIN orders o ON …"]) {
+        await sleep(200);
+        (a.onDelta as ((s: string) => void) | undefined)?.(piece);
+      }
       return {
         sql: "SELECT u.id, u.full_name, SUM(o.total) AS revenue\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid'\nGROUP BY u.id, u.full_name\nORDER BY revenue DESC\nLIMIT 10;",
         explanation: "Top 10 customers by paid order revenue.",

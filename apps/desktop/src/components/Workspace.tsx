@@ -21,6 +21,7 @@ export function Workspace({
   onToast,
   onHistory,
   aiEnabled,
+  inlineAi = false,
   onOpenSettings,
   active = true,
   onBrowse,
@@ -34,6 +35,8 @@ export function Workspace({
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onHistory: () => void;
   aiEnabled: boolean;
+  /** ghost-text suggestions in the editor (AI settings) */
+  inlineAi?: boolean;
   onOpenSettings: () => void;
   /** focused pane: only it reacts to global shortcuts */
   active?: boolean;
@@ -103,14 +106,15 @@ export function Workspace({
   };
   const askAi = () => needAi() && setAi({ mode: "ask", prompt: "" });
   const runAi = async (state: AiState) => {
-    setAi({ ...state, loading: true, error: undefined, answer: undefined });
+    setAi({ ...state, loading: true, error: undefined, answer: undefined, streamed: "" });
+    const onDelta = (d: string) => setAi((cur) => cur && { ...cur, streamed: (cur.streamed ?? "") + d });
     try {
       const answer =
         state.mode === "ask"
-          ? await api.ai.generate(tab.connId, state.prompt, tab.sql)
+          ? await api.ai.generate(tab.connId, state.prompt, tab.sql, onDelta)
           : state.mode === "fix"
-            ? await api.ai.fix(tab.connId, tab.sql, tab.error ?? "")
-            : await api.ai.explain(tab.connId, tab.sql);
+            ? await api.ai.fix(tab.connId, tab.sql, tab.error ?? "", onDelta)
+            : await api.ai.explain(tab.connId, tab.sql, onDelta);
       setAi((cur) => cur && { ...cur, loading: false, answer });
     } catch (e) {
       setAi((cur) => cur && { ...cur, loading: false, error: String(e) });
@@ -230,7 +234,14 @@ export function Workspace({
       {tab.kind === "query" ? (
         <>
           <div style={{ height: editorH }} className="min-h-0 shrink-0 overflow-hidden">
-            <SqlEditor value={tab.sql} onChange={onSql} onRun={onRun} kind={conn?.kind ?? "postgres"} tables={tables} />
+            <SqlEditor
+              value={tab.sql}
+              onChange={onSql}
+              onRun={onRun}
+              kind={conn?.kind ?? "postgres"}
+              tables={tables}
+              suggest={inlineAi ? (before, after) => api.ai.completeInline(tab.connId, before, after) : undefined}
+            />
           </div>
           <div onMouseDown={startDrag} className="group relative h-px shrink-0 cursor-row-resize bg-line">
             <div className="absolute inset-x-0 -top-1 -bottom-1 group-hover:bg-accent/30" />

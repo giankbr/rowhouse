@@ -7,6 +7,7 @@ import { tags as t } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef } from "react";
 import { kindInfo, type DbKind, type TableInfo } from "../lib/api";
+import { ghostText } from "../lib/ghost";
 
 const theme = EditorView.theme({
   "&": { color: "var(--fg)" },
@@ -36,13 +37,18 @@ export function SqlEditor({
   onRun,
   kind,
   tables,
+  suggest,
 }: {
   value: string;
   onChange: (v: string) => void;
   onRun: (selection?: string) => void;
   kind: DbKind;
   tables: TableInfo[];
+  /** inline AI suggestions; omit to turn them off */
+  suggest?: (before: string, after: string) => Promise<string>;
 }) {
+  const suggestRef = useRef(suggest);
+  suggestRef.current = suggest;
   const runRef = useRef(onRun);
   runRef.current = onRun;
   const extensions = useMemo(() => {
@@ -63,6 +69,7 @@ export function SqlEditor({
       ...(d === "redis" ? [] : [sql({ dialect, schema, upperCaseKeywords: true })]),
       theme,
       syntaxHighlighting(highlight),
+      ...(suggest ? [ghostText((b, a) => suggestRef.current?.(b, a) ?? Promise.resolve(""))] : []),
       Prec.highest(
         keymap.of([
           {
@@ -77,7 +84,7 @@ export function SqlEditor({
         ]),
       ),
     ];
-  }, [kind, tables]);
+  }, [kind, tables, !!suggest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <CodeMirror

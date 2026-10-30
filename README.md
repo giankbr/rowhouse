@@ -155,7 +155,7 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [ ] Scheduled queries, MongoDB driver
 - [x] ERD view, table structure editor
 - [x] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
-- [ ] Auto-update, code signing (macOS notarization, Windows signing)
+- [x] Auto-update and code-signing pipeline (see [RELEASING.md](RELEASING.md); needs your keys/certificates)
 
 ## License
 

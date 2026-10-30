@@ -41,6 +41,9 @@ pub struct AiSettings {
     pub base_url: String,
     #[serde(default)]
     pub model: String,
+    /// Ghost-text completions while typing (sends a request per pause).
+    #[serde(default)]
+    pub inline_completions: bool,
 }
 
 impl Default for AiSettings {
@@ -50,6 +53,7 @@ impl Default for AiSettings {
             provider: Provider::Openai,
             base_url: "https://api.openai.com/v1".into(),
             model: String::new(),
+            inline_completions: false,
         }
     }
 }
@@ -234,6 +238,28 @@ fn system_prompt(kind: DbKind, schema: &str) -> String {
     )
 }
 
+/// Optional streaming callback: receives each text delta.
+pub type Delta<'a> = Option<&'a mut (dyn FnMut(&str) + Send)>;
+
+/// Strip fences / echoed prefix from an inline completion.
+pub fn clean_inline(reply: &str, before: &str) -> String {
+    let mut s = reply.trim_end().to_string();
+    if s.trim_start().starts_with("```") {
+        s = extract_sql(&s).sql;
+    }
+    s = s.replace("<CURSOR>", "");
+    // models sometimes repeat the current line; drop the overlap
+    let last_line = before.rsplit('\n').next().unwrap_or("");
+    let trimmed = last_line.trim_start();
+    if !trimmed.is_empty() && s.trim_start().starts_with(trimmed) {
+        s = s.trim_start()[trimmed.len()..].to_string();
+    }
+    if before.ends_with(char::is_whitespace) {
+        s = s.trim_start().to_string();
+    }
+    s
+}
+
 /// Pull the first ```sql (or ```) block out of a model reply.
 pub fn extract_sql(reply: &str) -> AiAnswer {
     let lower = reply.to_lowercase();
@@ -403,12 +429,148 @@ impl AiClient {
         Ok(ids)
     }
 
+    /// Stream when the caller wants deltas, otherwise one request.
+    async fn ask(&self, system: &str, user: &str, on_delta: Delta<'_>) -> Result<String> {
+        match on_delta {
+            Some(f) => self.complete_stream(system, user, f).await,
+            None => self.complete(system, user).await,
+        }
+    }
+
+    /// Like [`Self::complete`], but calls `on_delta` with each text chunk as it
+    /// arrives (server-sent events). Returns the full text.
+    pub async fn complete_stream(
+        &self,
+        system: &str,
+        user: &str,
+        on_delta: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String> {
+        use futures_util::StreamExt;
+        let key = self.api_key.clone().unwrap_or_default();
+        let (url, body, headers): (String, Value, Vec<(&str, String)>) = match self
+            .settings
+            .provider
+        {
+            Provider::Openai => (
+                self.url("chat/completions"),
+                json!({
+                    "model": self.settings.model, "temperature": 0, "stream": true,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                }),
+                if key.is_empty() {
+                    vec![]
+                } else {
+                    vec![("authorization", format!("Bearer {key}"))]
+                },
+            ),
+            Provider::Anthropic => (
+                self.url("messages"),
+                json!({
+                    "model": self.settings.model, "max_tokens": 2048, "temperature": 0, "stream": true,
+                    "system": system, "messages": [{"role": "user", "content": user}],
+                }),
+                vec![
+                    ("x-api-key", key),
+                    ("anthropic-version", "2023-06-01".into()),
+                ],
+            ),
+        };
+        let mut req = self
+            .http
+            .post(url)
+            .header("content-type", "application/json")
+            .body(body.to_string());
+        for (k, v) in &headers {
+            req = req.header(*k, v);
+        }
+        let res = req.send().await.map_err(err)?;
+        let status = res.status();
+        if !status.is_success() {
+            let text = res.text().await.map_err(err)?;
+            let msg = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
+                .unwrap_or(text);
+            return Err(err(format!("{status}: {}", msg.trim())));
+        }
+        let mut stream = res.bytes_stream();
+        let mut buf = String::new();
+        let mut full = String::new();
+        'read: while let Some(chunk) = stream.next().await {
+            buf.push_str(&String::from_utf8_lossy(&chunk.map_err(err)?));
+            // SSE events are separated by a blank line
+            while let Some(end) = buf.find("\n\n").or_else(|| buf.find("\r\n\r\n")) {
+                let event: String = buf.drain(..end).collect();
+                buf = buf.trim_start_matches(['\r', '\n']).to_string();
+                for line in event.lines() {
+                    let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+                        continue;
+                    };
+                    if data == "[DONE]" {
+                        break 'read;
+                    }
+                    let Ok(v) = serde_json::from_str::<Value>(data) else {
+                        continue;
+                    };
+                    if let Some(e) = v.get("error") {
+                        return Err(err(e["message"].as_str().unwrap_or("stream error")));
+                    }
+                    let piece = match self.settings.provider {
+                        Provider::Openai => v["choices"][0]["delta"]["content"].as_str(),
+                        Provider::Anthropic => match v["type"].as_str() {
+                            Some("content_block_delta") => v["delta"]["text"].as_str(),
+                            Some("message_stop") => break 'read,
+                            _ => None,
+                        },
+                    };
+                    if let Some(p) = piece.filter(|p| !p.is_empty()) {
+                        full.push_str(p);
+                        on_delta(p);
+                    }
+                }
+            }
+        }
+        Ok(full)
+    }
+
+    /// Ghost-text completion: what to insert at the cursor. Empty when there's
+    /// nothing useful. Short and cheap: small schema context, few tokens.
+    pub async fn complete_inline(
+        &self,
+        conn: &Connection,
+        before: &str,
+        after: &str,
+    ) -> Result<String> {
+        let before: String = before
+            .chars()
+            .rev()
+            .take(2000)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let after: String = after.chars().take(500).collect();
+        let schema = schema_context(conn, &before).await?;
+        let schema: String = schema.lines().take(25).collect::<Vec<_>>().join("\n");
+        let system = format!(
+            "You are an autocomplete engine for {d} in a database client. Return ONLY the text to insert at <CURSOR> \
+             — no explanations, no code fences, no repetition of text before the cursor. Complete at most one statement. \
+             Use only tables and columns from this schema:\n{schema}\n\nIf there is nothing useful to add, return an empty reply.",
+            d = dialect_name(conn.kind())
+        );
+        let reply = self
+            .complete(&system, &format!("{before}<CURSOR>{after}"))
+            .await?;
+        Ok(clean_inline(&reply, &before))
+    }
+
     /// Natural language → SQL. `current_sql` gives the model the editor context.
     pub async fn generate(
         &self,
         conn: &Connection,
         request: &str,
         current_sql: Option<&str>,
+        on_delta: Delta<'_>,
     ) -> Result<AiAnswer> {
         let schema = schema_context(
             conn,
@@ -420,33 +582,44 @@ impl AiClient {
             user.push_str(&format!("\n\nCurrent editor SQL (modify it if the request refers to it):\n```sql\n{sql}\n```"));
         }
         let reply = self
-            .complete(&system_prompt(conn.kind(), &schema), &user)
+            .ask(&system_prompt(conn.kind(), &schema), &user, on_delta)
             .await?;
         Ok(extract_sql(&reply))
     }
 
     /// Propose a corrected query for an error.
-    pub async fn fix(&self, conn: &Connection, sql: &str, error: &str) -> Result<AiAnswer> {
+    pub async fn fix(
+        &self,
+        conn: &Connection,
+        sql: &str,
+        error: &str,
+        on_delta: Delta<'_>,
+    ) -> Result<AiAnswer> {
         let schema = schema_context(conn, &format!("{sql} {error}")).await?;
         let user = format!(
             "This query fails. Return the corrected query and say in one sentence what was wrong.\n\n\
              ```sql\n{sql}\n```\n\nError:\n{error}"
         );
         let reply = self
-            .complete(&system_prompt(conn.kind(), &schema), &user)
+            .ask(&system_prompt(conn.kind(), &schema), &user, on_delta)
             .await?;
         Ok(extract_sql(&reply))
     }
 
     /// Plain-language explanation of a query (no SQL returned).
-    pub async fn explain(&self, conn: &Connection, sql: &str) -> Result<AiAnswer> {
+    pub async fn explain(
+        &self,
+        conn: &Connection,
+        sql: &str,
+        on_delta: Delta<'_>,
+    ) -> Result<AiAnswer> {
         let schema = schema_context(conn, sql).await?;
         let user = format!(
             "Explain what this query does in 2–4 short sentences for a developer, and mention any \
              obvious performance or correctness risk. Do not rewrite it.\n\n```sql\n{sql}\n```"
         );
         let reply = self
-            .complete(&system_prompt(conn.kind(), &schema), &user)
+            .ask(&system_prompt(conn.kind(), &schema), &user, on_delta)
             .await?;
         Ok(AiAnswer {
             sql: String::new(),
@@ -458,6 +631,23 @@ impl AiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleans_inline_completions() {
+        assert_eq!(
+            clean_inline("```sql\nFROM users\n```", "SELECT * "),
+            "FROM users"
+        );
+        assert_eq!(
+            clean_inline("SELECT id FROM users", "SELECT id"),
+            " FROM users"
+        );
+        assert_eq!(
+            clean_inline("  WHERE active", "SELECT * FROM t "),
+            "WHERE active"
+        );
+        assert_eq!(clean_inline("", "x"), "");
+    }
 
     #[test]
     fn extracts_sql_block() {

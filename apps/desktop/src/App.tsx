@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDestructive } from "./components/ConfirmDestructive";
 import { ApprovalCenter } from "./components/ApprovalDialog";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { CompareView } from "./components/CompareView";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { ErdView } from "./components/ErdView";
@@ -38,6 +39,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [inlineAi, setInlineAi] = useState(false);
   const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null }>({ open: false, edit: null });
   const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const setToast = useCallback(
@@ -58,7 +60,7 @@ export default function App() {
     api.listConnections().then(setConnections).catch((e) => setToast(String(e)));
     api.ai
       .getSettings()
-      .then((r) => setAiEnabled(r.settings.enabled && !!r.settings.model))
+      .then((r) => (setAiEnabled(r.settings.enabled && !!r.settings.model), setInlineAi(r.settings.enabled && !!r.settings.inlineCompletions)))
       .catch(() => {});
   }, [setToast]);
 
@@ -417,6 +419,7 @@ export default function App() {
               onToast={setToast}
               onHistory={() => setHistoryOpen((h) => !h)}
               aiEnabled={aiEnabled}
+              inlineAi={inlineAi}
               onOpenSettings={() => setSettingsOpen(true)}
             />
           )
@@ -536,6 +539,7 @@ export default function App() {
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
       <ApprovalCenter connections={connections} />
+      <UpdateBanner />
       <ImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -557,7 +561,7 @@ export default function App() {
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSaved={(s) => setAiEnabled(s.enabled && !!s.model)}
+        onSaved={(s) => (setAiEnabled(s.enabled && !!s.model), setInlineAi(s.enabled && !!s.inlineCompletions))}
       />
       <CommandPalette
         open={palette}
