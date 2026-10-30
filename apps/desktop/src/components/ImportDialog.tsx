@@ -1,6 +1,6 @@
 import { FileUp, KeyRound, Lock, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, dialogs, kindInfo, type ConnectionConfig, type ImportCandidate, type ImportSource } from "../lib/api";
+import { api, dialogs, kindInfo, type ConnectionConfig, type DetectedImport, type ImportCandidate, type ImportSource } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { Button, Modal, cx } from "./ui";
 
@@ -10,12 +10,15 @@ export function ImportDialog({
   open,
   onClose,
   onImported,
+  initialPath,
 }: {
   open: boolean;
+  /** go straight to the preview of this file (e.g. picked on the start screen) */
+  initialPath?: string | null;
   onClose: () => void;
   onImported: (saved: ConnectionConfig[]) => void;
 }) {
-  const [detected, setDetected] = useState<{ source: ImportSource; path: string }[]>([]);
+  const [detected, setDetected] = useState<DetectedImport[]>([]);
   const [preview, setPreview] = useState<{ source: ImportSource; path: string; candidates: ImportCandidate[] } | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -26,7 +29,8 @@ export function ImportDialog({
     setPreview(null);
     setError(null);
     api.importDetect().then(setDetected).catch(() => setDetected([]));
-  }, [open]);
+    if (initialPath) parse(initialPath);
+  }, [open, initialPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parse = async (path: string | null) => {
     if (!path) return;
@@ -103,7 +107,8 @@ export function ImportDialog({
                   className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 text-left hover:border-accent hover:bg-accent-soft/40"
                 >
                   <span className="font-medium">{SOURCE_LABEL[d.source]}</span>
-                  <span className="truncate font-mono text-2xs text-subtle">{d.path}</span>
+                  <span className="shrink-0 rounded-full bg-accent/12 px-1.5 text-2xs font-medium text-accent">{d.count}</span>
+                  <span className="truncate font-mono text-2xs text-subtle" title={d.path}>{d.path.replace(/^\/Users\/[^/]+/, "~")}</span>
                 </button>
               ))}
             </div>

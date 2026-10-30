@@ -36,6 +36,8 @@ pub struct Candidate {
 pub struct DetectedFile {
     pub source: Source,
     pub path: String,
+    /// importable connections in the file
+    pub count: usize,
 }
 
 /// Map a free-form driver/provider name to a [`DbKind`].
@@ -70,6 +72,20 @@ fn kind_from(name: &str) -> Option<DbKind> {
         DbKind::Mssql
     } else if has("clickhouse") {
         DbKind::Clickhouse
+    } else if has("upstash") {
+        DbKind::Upstash
+    } else if has("redis") || has("valkey") {
+        DbKind::Redis
+    } else if has("mongo") {
+        DbKind::Mongodb
+    } else if has("scylla") {
+        DbKind::Scylla
+    } else if has("cassandra") {
+        DbKind::Cassandra
+    } else if has("libsql") || has("turso") {
+        DbKind::Turso
+    } else if has("cloudflared1") || n == "d1" {
+        DbKind::D1
     } else {
         return None;
     })
@@ -363,53 +379,112 @@ pub fn parse_file(path: &Path) -> Result<(Source, Vec<Candidate>)> {
     Ok((Source::Tableplus, parse_tableplus(&bytes)?))
 }
 
-/// Default locations of other clients' connection files on this machine.
+/// Connection files of other clients on this machine (TablePlus incl. App Store /
+/// Setapp builds, DBeaver CE/EE workspaces), with how many connections each holds.
 pub fn detect() -> Vec<DetectedFile> {
     let Some(base) = directories::BaseDirs::new() else {
         return vec![];
     };
-    let home = base.home_dir();
-    let mut c: Vec<(Source, PathBuf)> = vec![
-        // DBeaver (macOS, Windows, Linux)
-        (
-            Source::Dbeaver,
-            home.join("Library/DBeaverData/workspace6/General/.dbeaver/data-sources.json"),
-        ),
-        (
-            Source::Dbeaver,
-            base.data_dir()
-                .join("DBeaverData/workspace6/General/.dbeaver/data-sources.json"),
-        ),
-        (
-            Source::Dbeaver,
-            home.join(".local/share/DBeaverData/workspace6/General/.dbeaver/data-sources.json"),
-        ),
-        // TablePlus (macOS app + Setapp)
-        (
-            Source::Tableplus,
-            home.join("Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist"),
-        ),
-        (
-            Source::Tableplus,
-            home.join(
-                "Library/Application Support/com.tinyapp.TablePlus-setapp/Data/Connections.plist",
-            ),
-        ),
-    ];
-    // TablePlus for Windows
-    c.push((
-        Source::Tableplus,
-        base.data_dir()
-            .join("com.tinyapp.TablePlus/Data/Connections.json"),
-    ));
-    let mut seen = std::collections::HashSet::new();
-    c.into_iter()
-        .filter(|(_, p)| p.is_file() && seen.insert(p.clone()))
-        .map(|(source, p)| DetectedFile {
-            source,
-            path: p.to_string_lossy().into_owned(),
+    detect_in(base.home_dir(), base.data_dir())
+}
+
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
+}
+
+fn name_starts(p: &Path, prefix: &str) -> bool {
+    p.file_name().is_some_and(|n| {
+        n.to_string_lossy()
+            .to_lowercase()
+            .starts_with(&prefix.to_lowercase())
+    })
+}
+
+/// `detect` with explicit roots (tests point these at a temp dir).
+pub fn detect_in(home: &Path, data_dir: &Path) -> Vec<DetectedFile> {
+    let mut found: Vec<(Source, PathBuf)> = Vec::new();
+
+    // --- TablePlus: every com.tinyapp.TablePlus* folder under Application Support,
+    // including sandboxed App Store builds under ~/Library/Containers.
+    let mut support_dirs = vec![
+        home.join("Library/Application Support"),
+        data_dir.to_path_buf(),
+    ];
+    for c in subdirs(&home.join("Library/Containers")) {
+        if name_starts(&c, "com.tinyapp.tableplus") {
+            support_dirs.push(c.join("Data/Library/Application Support"));
+        }
+    }
+    for dir in &support_dirs {
+        for app in subdirs(dir)
+            .into_iter()
+            .filter(|p| name_starts(p, "com.tinyapp.tableplus"))
+        {
+            for f in [
+                "Data/Connections.plist",
+                "Data/Connections.json",
+                "Connections.plist",
+            ] {
+                found.push((Source::Tableplus, app.join(f)));
+            }
+        }
+    }
+
+    // --- DBeaver CE / EE / Ultimate: <data>/DBeaver*Data/workspace*/General/.dbeaver/data-sources*.json
+    let roots = [
+        home.join("Library"),
+        data_dir.to_path_buf(),
+        home.join(".local/share"),
+    ];
+    for root in &roots {
+        for d in subdirs(root)
+            .into_iter()
+            .filter(|p| name_starts(p, "dbeaver"))
+        {
+            for ws in subdirs(&d)
+                .into_iter()
+                .filter(|p| name_starts(p, "workspace"))
+            {
+                for proj in subdirs(&ws) {
+                    let meta = proj.join(".dbeaver");
+                    if let Ok(rd) = std::fs::read_dir(&meta) {
+                        for e in rd.filter_map(|e| e.ok()) {
+                            let n = e.file_name().to_string_lossy().to_lowercase();
+                            if n.starts_with("data-sources") && n.ends_with(".json") {
+                                found.push((Source::Dbeaver, e.path()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<DetectedFile> = found
+        .into_iter()
+        .filter(|(_, p)| p.is_file())
+        .filter(|(_, p)| seen.insert(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())))
+        .filter_map(|(source, p)| {
+            let count = parse_file(&p)
+                .map(|(_, c)| c.iter().filter(|x| x.skipped_reason.is_none()).count())
+                .unwrap_or(0);
+            (count > 0).then(|| DetectedFile {
+                source,
+                path: p.to_string_lossy().into_owned(),
+                count,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.count.cmp(&a.count));
+    out
 }
 
 #[cfg(test)]
@@ -508,6 +583,7 @@ mod tests {
      SSH="true" SSH_Host="bastion" SSH_Port="22" SSH_UserName="ops" SSH_AuthenMethod="PUBLICKEY" SSH_PrivateKey="/k/id_rsa"/>
   <Connection ConnectionName="Maria" ConnType="MARIADB" Host="m" Port="3306" UserName="root" SSH="false"/>
   <Connection ConnectionName="Mongo" ConnType="MONGODB" Host="mg" Port="27017"/>
+  <Connection ConnectionName="Ora" ConnType="ORACLE" Host="o" Port="1521"/>
 </Connections>"#;
         let c = parse_navicat(xml).unwrap();
         assert_eq!(c[0].config.kind, DbKind::Postgres);
@@ -518,6 +594,42 @@ mod tests {
         );
         assert_eq!(c[1].config.kind, DbKind::Mariadb);
         assert!(c[1].config.ssh.is_none());
-        assert!(c[2].skipped_reason.as_deref().unwrap().contains("MONGODB"));
+        assert_eq!(c[2].config.kind, DbKind::Mongodb);
+        assert!(c[3].skipped_reason.as_deref().unwrap().contains("ORACLE"));
+    }
+
+    #[test]
+    fn detects_sandboxed_tableplus_and_dbeaver_workspaces() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        let data = h.join("Library/Application Support");
+        // App Store TablePlus (sandboxed)
+        let tp = h.join("Library/Containers/com.tinyapp.TablePlus/Data/Library/Application Support/com.tinyapp.TablePlus/Data");
+        std::fs::create_dir_all(&tp).unwrap();
+        std::fs::write(
+            tp.join("Connections.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><array>
+              <dict><key>ConnectionName</key><string>A</string><key>Driver</key><string>PostgreSQL</string><key>DatabaseHost</key><string>a</string></dict>
+              <dict><key>ConnectionName</key><string>B</string><key>Driver</key><string>MySQL</string><key>DatabaseHost</key><string>b</string></dict>
+            </array></plist>"#,
+        )
+        .unwrap();
+        // DBeaver EE, second workspace, extra data-sources file
+        let db = h.join("Library/DBeaverEEData/workspace6/Work/.dbeaver");
+        std::fs::create_dir_all(&db).unwrap();
+        std::fs::write(
+            db.join("data-sources-2.json"),
+            r#"{"connections":{"x":{"provider":"postgresql","name":"X","configuration":{"host":"x"}}}}"#,
+        )
+        .unwrap();
+        // an empty TablePlus folder is ignored
+        std::fs::create_dir_all(data.join("com.tinyapp.TablePlus-setapp/Data")).unwrap();
+        let found = detect_in(h, &data);
+        let summary: Vec<_> = found.iter().map(|f| (f.source, f.count)).collect();
+        assert_eq!(
+            summary,
+            vec![(Source::Tableplus, 2), (Source::Dbeaver, 1)],
+            "{found:?}"
+        );
     }
 }

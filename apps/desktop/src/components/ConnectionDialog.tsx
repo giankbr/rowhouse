@@ -10,9 +10,12 @@ export function ConnectionDialog({
   onClose,
   onSaved,
   onDeleted,
+  initialKind,
 }: {
   open: boolean;
   initial: ConnectionConfig | null;
+  /** kind preselected for a new connection */
+  initialKind?: DbKind;
   onClose: () => void;
   onSaved: (c: ConnectionConfig) => void;
   onDeleted: (id: string) => void;
@@ -25,7 +28,7 @@ export function ConnectionDialog({
 
   useEffect(() => {
     if (open) {
-      setC(initial ?? newConnection());
+      setC(initial ?? newConnection(initialKind));
       setPassword("");
       setSshSecret("");
       setUrl("");

@@ -19,7 +19,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type Destructive, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 
@@ -35,7 +35,7 @@ export default function App() {
   const [focusedPane, setFocusedPane] = useState<0 | 1>(0);
   const [draggingTab, setDraggingTab] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ tab: Tab; sql: string; items: Destructive[] } | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState<boolean | string>(false);
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -44,7 +44,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [inlineAi, setInlineAi] = useState(false);
-  const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null }>({ open: false, edit: null });
+  const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null; kind?: DbKind }>({ open: false, edit: null });
   const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const setToast = useCallback(
     (msg: string | null, kind: "ok" | "err" = "err") => setToastState(msg ? { msg, kind } : null),
@@ -542,8 +542,8 @@ export default function App() {
               version={version}
               onOpen={selectConnection}
               onEdit={(c) => setDialog({ open: true, edit: c })}
-              onNew={() => setDialog({ open: true, edit: null })}
-              onImport={() => setImportOpen(true)}
+              onNew={(kind) => setDialog({ open: true, edit: null, kind })}
+              onImport={(path) => setImportOpen(path ?? true)}
               onOpenFile={openDatabaseFile}
               onMcp={() => setMcpOpen(true)}
               onSettings={() => setSettingsOpen(true)}
@@ -558,6 +558,7 @@ export default function App() {
       <ConnectionDialog
         open={dialog.open}
         initial={dialog.edit}
+        initialKind={dialog.kind}
         onClose={() => setDialog({ open: false, edit: null })}
         onSaved={(c) => {
           setConnections((cs) => (cs.some((x) => x.id === c.id) ? cs.map((x) => (x.id === c.id ? c : x)) : [...cs, c]));
@@ -578,7 +579,8 @@ export default function App() {
       <ApprovalCenter connections={connections} />
       <UpdateBanner />
       <ImportDialog
-        open={importOpen}
+        open={!!importOpen}
+        initialPath={typeof importOpen === "string" ? importOpen : null}
         onClose={() => setImportOpen(false)}
         onImported={(saved) => {
           setConnections((cs) => [...cs, ...saved]);

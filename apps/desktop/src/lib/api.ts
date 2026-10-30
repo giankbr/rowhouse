@@ -270,6 +270,13 @@ export interface Snippet {
   updatedAt: number;
 }
 
+export interface DetectedImport {
+  source: ImportSource;
+  path: string;
+  /** importable connections in the file */
+  count: number;
+}
+
 export type Every =
   | { kind: "minutes"; n: number }
   | { kind: "daily"; at: string }
@@ -445,7 +452,7 @@ export const api = {
   },
   checkDestructive: (sql: string) => call<Destructive[]>("check_destructive", { sql }),
   erd: (id: string, schema?: string) => call<Erd>("erd", { id, schema }),
-  importDetect: () => call<{ source: ImportSource; path: string }[]>("import_detect"),
+  importDetect: () => call<DetectedImport[]>("import_detect"),
   importParse: (path: string) => call<{ source: ImportSource; candidates: ImportCandidate[] }>("import_parse", { path }),
   importSave: (configs: ConnectionConfig[]) => call<ConnectionConfig[]>("import_save", { configs }),
   ai: {
@@ -553,7 +560,7 @@ let mockSchedules: Schedule[] = [
   },
 ];
 
-const mockConns: ConnectionConfig[] = [
+const mockConns: ConnectionConfig[] = typeof location !== "undefined" && location.search.includes("empty") ? [] : [
   { ...newConnection("postgres"), id: "local-pg", name: "Local Postgres", database: "app_dev", color: "green" },
   { ...newConnection("mysql"), id: "prod-my", name: "Production MySQL", host: "db.internal", database: "shop", readOnly: true, color: "red", env: "production" },
   { ...newConnection("sqlite"), id: "lite", name: "analytics.db", file: "~/data/analytics.db" },
@@ -986,7 +993,10 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
       } satisfies Erd;
     }
     case "import_detect":
-      return [{ source: "tableplus", path: "~/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist" }];
+      return [
+        { source: "tableplus", path: "/Users/you/Library/Containers/com.tinyapp.TablePlus/Data/Library/Application Support/com.tinyapp.TablePlus/Data/Connections.plist", count: 12 },
+        { source: "dbeaver", path: "/Users/you/Library/DBeaverData/workspace6/General/.dbeaver/data-sources.json", count: 3 },
+      ] satisfies DetectedImport[];
     case "import_parse":
       return {
         source: "navicat",
@@ -994,7 +1004,7 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
           { config: { ...newConnection("postgres"), name: "Main PG", host: "pg.internal", port: 5433, database: "main", env: "production", readOnly: true }, skippedReason: null },
           { config: { ...newConnection("mariadb"), name: "Legacy shop", host: "10.0.0.7", database: "shop", ssh: { host: "bastion", port: 22, user: "ops", auth: "key", keyPath: "~/.ssh/id_rsa" } }, skippedReason: null },
           { config: { ...newConnection("sqlite"), name: "Notes", file: "/Users/me/notes.db" }, skippedReason: null },
-          { config: { ...newConnection("postgres"), name: "Mongo cluster" }, skippedReason: "MONGODB is not supported yet" },
+          { config: { ...newConnection("postgres"), name: "Billing (Oracle)" }, skippedReason: "Oracle is not supported yet" },
         ],
       };
     case "import_save": {

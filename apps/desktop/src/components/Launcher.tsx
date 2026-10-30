@@ -1,6 +1,6 @@
-import { Bot, FileInput, FolderOpen, Lock, Pencil, Plus, Search, Settings } from "lucide-react";
+import { ArrowRight, Bot, FileInput, FolderOpen, Link2, Lock, Pencil, Plus, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ENVIRONMENTS, isTauri, kindInfo, type ConnectionConfig, type Environment } from "../lib/api";
+import { api, ENVIRONMENTS, isTauri, kindInfo, type ConnectionConfig, type DbKind, type DetectedImport, type Environment } from "../lib/api";
 import { mod } from "../lib/types";
 import { KindBadge } from "./KindBadge";
 import { Kbd, cx } from "./ui";
@@ -76,8 +76,9 @@ export function Launcher({
   version: string;
   onOpen: (id: string) => void;
   onEdit: (c: ConnectionConfig) => void;
-  onNew: () => void;
-  onImport: () => void;
+  onNew: (kind?: DbKind) => void;
+  /** with a path: open that detected file's import preview */
+  onImport: (path?: string) => void;
   onOpenFile: () => void;
   onMcp: () => void;
   onSettings: () => void;
@@ -85,6 +86,11 @@ export function Launcher({
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const [detected, setDetected] = useState<DetectedImport[]>([]);
+  useEffect(() => {
+    api.importDetect().then(setDetected).catch(() => setDetected([]));
+  }, []);
+  const APP_LABEL = { tableplus: "TablePlus", dbeaver: "DBeaver", navicat: "Navicat" } as const;
 
   const list = useMemo(() => {
     const recent = readRecent();
@@ -119,21 +125,26 @@ export function Launcher({
 
   return (
     <div className="flex flex-1 items-center justify-center overflow-auto p-6">
-      <div className="animate-pop flex h-[min(620px,100%)] w-full max-w-[980px] overflow-hidden rounded-2xl border border-line bg-elevated shadow-pop">
+      <div className="animate-pop flex h-[min(640px,100%)] w-full max-w-[1000px] overflow-hidden rounded-2xl border border-line bg-elevated shadow-pop">
         {/* brand + actions */}
-        <div className="flex w-[38%] min-w-64 flex-col items-center border-r border-line bg-panel px-7 pt-10 pb-7">
+        <div className="flex w-[36%] min-w-64 flex-col items-center border-r border-line bg-panel px-7 pt-12 pb-7">
           <div className="text-fg">
-            <RowhouseMark size={104} />
+            <RowhouseMark size={84} />
           </div>
-          <h1 className="mt-3 text-[28px] font-semibold tracking-tight">Rowhouse</h1>
-          <span className="mt-1 text-xs text-muted">Version {version}</span>
+          <h1 className="mt-3 text-[26px] font-semibold tracking-tight">Rowhouse</h1>
+          <span className="mt-0.5 text-xs text-muted">Version {version}</span>
           <span className="mt-3 rounded-full bg-success/12 px-2.5 py-0.5 text-[11px] font-medium text-success">Free &amp; open source</span>
-          <div className="mt-auto flex w-full flex-col gap-2.5">
-            <button className={action} onClick={onNew}>
+          <div className="mt-auto flex w-full flex-col gap-2">
+            <button className={action} onClick={() => onNew()}>
               <Plus size={16} className="text-accent" /> Create connection
             </button>
-            <button className={action} onClick={onImport}>
-              <FileInput size={16} className="text-muted" /> Import from TablePlus, DBeaver…
+            <button className={action} onClick={() => onImport()}>
+              <FileInput size={16} className="text-muted" /> Import from another app
+              {detected.length > 0 && (
+                <span className="ml-auto rounded-full bg-accent/12 px-1.5 text-2xs font-medium text-accent">
+                  {detected.reduce((n, d) => n + d.count, 0)} found
+                </span>
+              )}
             </button>
             <button className={action} onClick={onOpenFile}>
               <FolderOpen size={16} className="text-muted" /> Open SQLite / DuckDB file
@@ -148,7 +159,7 @@ export function Launcher({
         <div className="flex min-w-0 flex-1 flex-col" onKeyDown={onKey}>
           <div className="flex items-center gap-2.5 px-5 pt-5 pb-3">
             <button
-              onClick={onNew}
+              onClick={() => onNew()}
               title="New connection"
               className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line text-muted hover:border-line-strong hover:text-fg"
             >
@@ -162,7 +173,7 @@ export function Launcher({
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search for connection…"
                 spellCheck={false}
-                className="h-10 w-full rounded-full border border-line bg-panel pr-4 pl-10 text-sm outline-none placeholder:text-subtle focus:border-accent focus-visible:outline-none"
+                className="h-10 w-full rounded-full border border-line bg-panel pr-4 pl-10 text-sm outline-none transition-colors placeholder:text-subtle focus:border-accent/70 focus:bg-elevated"
               />
             </div>
             <button
@@ -176,9 +187,53 @@ export function Launcher({
 
           <div ref={listRef} className="flex-1 overflow-y-auto px-3 pb-4">
             {connections.length === 0 && (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted">
-                No connections yet.
-                <span className="text-xs text-subtle">Create one, paste a connection URL, or import from another app.</span>
+              <div className="flex flex-col gap-6 px-3 pt-4">
+                {detected.length > 0 && (
+                  <section className="flex flex-col gap-2">
+                    <h3 className="text-[11px] font-medium tracking-wide text-subtle uppercase">Found on this computer</h3>
+                    {detected.map((d) => (
+                      <button
+                        key={d.path}
+                        onClick={() => onImport(d.path)}
+                        className="group flex items-center gap-3 rounded-xl border border-line px-3.5 py-3 text-left transition-colors hover:border-accent/60 hover:bg-accent-soft/30"
+                      >
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-sm font-semibold text-accent">
+                          {APP_LABEL[d.source].slice(0, 2)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[14px] font-medium">
+                            {d.count} connection{d.count === 1 ? "" : "s"} in {APP_LABEL[d.source]}
+                          </span>
+                          <span className="block truncate text-xs text-muted">Import them in one click · passwords are asked on first connect</span>
+                        </span>
+                        <span className="flex items-center gap-1 text-xs font-medium text-accent opacity-80 group-hover:opacity-100">
+                          Import <ArrowRight size={13} />
+                        </span>
+                      </button>
+                    ))}
+                  </section>
+                )}
+                <section className="flex flex-col gap-2">
+                  <h3 className="text-[11px] font-medium tracking-wide text-subtle uppercase">Start with</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["postgres", "mysql", "sqlite", "supabase", "redis", "mongodb"] as DbKind[]).map((k) => (
+                      <button
+                        key={k}
+                        onClick={() => (kindInfo(k).file ? onOpenFile() : onNew(k))}
+                        className="flex items-center gap-2.5 rounded-xl border border-line px-3 py-2.5 text-left text-[13px] transition-colors hover:border-line-strong hover:bg-hover"
+                      >
+                        <KindBadge kind={k} size={26} />
+                        {kindInfo(k).label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => onNew()}
+                    className="flex items-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-left text-[13px] text-muted transition-colors hover:border-line-strong hover:text-fg"
+                  >
+                    <Link2 size={14} /> Paste a connection URL, or pick from {"20+"} databases…
+                  </button>
+                </section>
               </div>
             )}
             {connections.length > 0 && list.length === 0 && (

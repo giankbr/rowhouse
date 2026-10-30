@@ -123,9 +123,17 @@ textarea,
 ::selection {
   background: var(--accent-soft);
 }
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+@layer base {
+  /* keyboard focus for buttons & co.; text fields style their own focus */
+  :focus-visible:not(input, textarea, select) {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+  }
 }
 
 /* CodeMirror fit */
