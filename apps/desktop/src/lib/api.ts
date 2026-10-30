@@ -16,9 +16,10 @@ export type DbKind =
   | "duckdb"
   | "mssql"
   | "clickhouse"
-  | "redis";
+  | "redis"
+  | "mongodb";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb";
 
 export interface KindInfo {
   kind: DbKind;
@@ -47,6 +48,7 @@ export const KINDS: KindInfo[] = [
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
   { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
+  { kind: "mongodb", label: "MongoDB", abbr: "Mo", color: "#00684a", dialect: "mongodb", port: 27017, user: null, beta: true },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
   { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },
@@ -433,6 +435,7 @@ const mockConns: ConnectionConfig[] = [
   { ...newConnection("sqlite"), id: "lite", name: "analytics.db", file: "~/data/analytics.db" },
   { ...newConnection("clickhouse"), id: "ch", name: "Events (ClickHouse)", database: "events", color: "yellow" },
   { ...newConnection("redis"), id: "redis-local", name: "redis-local", host: "127.0.0.1", env: "local" },
+  { ...newConnection("mongodb"), id: "mongo-shop", name: "shop (MongoDB)", host: "127.0.0.1", database: "shop", env: "development" },
   { ...newConnection("postgres"), id: "staging-pg", name: "Billing (staging)", host: "staging.db.internal", database: "billing", env: "staging", ssh: { host: "bastion.internal", port: 22, user: "deploy", auth: "agent" } },
 ];
 

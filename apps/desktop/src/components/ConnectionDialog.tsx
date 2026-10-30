@@ -180,8 +180,12 @@ export function ConnectionDialog({
         ) : (
           <>
             <div className="grid grid-cols-[1fr_88px] gap-2">
-              <Field label="Host">
-                <Input value={c.host ?? ""} onChange={(e) => set({ host: e.target.value })} />
+              <Field label={c.kind === "mongodb" ? "Host or mongodb:// URI" : "Host"}>
+                <Input
+                  value={c.host ?? ""}
+                  placeholder={c.kind === "mongodb" ? "localhost or mongodb+srv://…" : undefined}
+                  onChange={(e) => set({ host: e.target.value })}
+                />
               </Field>
               <Field label="Port">
                 <Input
@@ -205,7 +209,7 @@ export function ConnectionDialog({
               </Field>
             </div>
             <Field label={c.kind === "redis" ? "Database number" : "Database"}>
-              <Input value={c.database ?? ""} placeholder={c.kind === "redis" ? "0" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
+              <Input value={c.database ?? ""} placeholder={c.kind === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
             </Field>
           </>
         )}

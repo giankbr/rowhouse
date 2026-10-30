@@ -270,7 +270,7 @@ export function Workspace({
               variant="ghost"
               size="xs"
               onClick={() => (tab.showPlan ? onChange({ showPlan: false }) : explainPlan())}
-              disabled={!tab.sql.trim() || conn?.kind === "redis"}
+              disabled={!tab.sql.trim() || conn?.kind === "redis" || conn?.kind === "mongodb"}
               title="Show the query plan (EXPLAIN)"
               className={cx(tab.showPlan && "bg-selected text-fg")}
             >
@@ -364,7 +364,7 @@ export function Workspace({
 
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
-          conn && !conn.readOnly && conn.kind !== "redis" && tab.columns && tab.schema && tab.table ? (
+          conn && !conn.readOnly && conn.kind !== "redis" && conn.kind !== "mongodb" && tab.columns && tab.schema && tab.table ? (
             <StructureEditor
               conn={conn}
               schema={tab.schema}

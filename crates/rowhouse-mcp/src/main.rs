@@ -297,7 +297,7 @@ impl Rowhouse {
     }
 
     #[tool(
-        description = "Run a READ-ONLY SQL query. Writes (INSERT/UPDATE/DELETE/DDL) are rejected."
+        description = "Run a READ-ONLY query: SQL for SQL databases, Redis read commands for Redis, mongosh find/aggregate/countDocuments for MongoDB (e.g. db.orders.find({ status: \"paid\" }).limit(10)). Writes are rejected."
     )]
     async fn run_query(&self, Parameters(a): Parameters<QueryArg>) -> Result<String, String> {
         let c = self.conn(&a.connection).await?;

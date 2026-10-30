@@ -1,7 +1,8 @@
+import { javascript } from "@codemirror/lang-javascript";
 import { sql, PostgreSQL, MySQL, SQLite, MSSQL, StandardSQL, type SQLNamespace } from "@codemirror/lang-sql";
 import { keymap, EditorView } from "@codemirror/view";
 import { Prec } from "@codemirror/state";
-import { closeCompletion } from "@codemirror/autocomplete";
+import { autocompletion, closeCompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
@@ -19,6 +20,37 @@ const theme = EditorView.theme({
   ".cm-tooltip-autocomplete ul li[aria-selected]": { background: "var(--accent)", color: "var(--accent-fg)" },
   ".cm-tooltip-autocomplete ul": { fontFamily: "var(--font-mono)", fontSize: "12px" },
 });
+
+const MONGO_METHODS = [
+  "find", "findOne", "aggregate", "countDocuments", "estimatedDocumentCount", "distinct", "getIndexes",
+  "insertOne", "insertMany", "updateOne", "updateMany", "replaceOne", "deleteOne", "deleteMany",
+  "createIndex", "dropIndex", "drop", "stats",
+];
+const MONGO_CURSOR = ["sort", "limit", "skip", "projection", "count"];
+const MONGO_OPS = [
+  "$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$regex", "$and", "$or", "$not", "$elemMatch",
+  "$set", "$unset", "$inc", "$push", "$pull", "$addToSet",
+  "$match", "$group", "$project", "$sort", "$limit", "$skip", "$lookup", "$unwind", "$count", "$sum", "$avg", "$min", "$max",
+];
+
+/** `db.<collection>.<method>(…).<cursor>()` and `$operators`. */
+function mongoCompletions(collections: string[]) {
+  return (ctx: CompletionContext) => {
+    const line = ctx.state.doc.lineAt(ctx.pos);
+    const before = line.text.slice(0, ctx.pos - line.from);
+    let m = /\bdb\.(\w*)$/.exec(before);
+    if (m) return { from: ctx.pos - m[1].length, options: collections.map((c) => ({ label: c, type: "class" })) };
+    m = /\bdb\.\w+\.(\w*)$/.exec(before);
+    if (m) return { from: ctx.pos - m[1].length, options: MONGO_METHODS.map((x) => ({ label: x, type: "method", apply: `${x}(` })) };
+    m = /\)\s*\.(\w*)$/.exec(before);
+    if (m) return { from: ctx.pos - m[1].length, options: MONGO_CURSOR.map((x) => ({ label: x, type: "method", apply: `${x}(` })) };
+    m = /(\$\w*)$/.exec(before);
+    if (m) return { from: ctx.pos - m[1].length, options: MONGO_OPS.map((x) => ({ label: x, type: "keyword" })) };
+    if (/^\s*\w*$/.test(before) && ctx.explicit)
+      return { from: ctx.pos - (/\w*$/.exec(before)?.[0].length ?? 0), options: [{ label: "db", type: "variable" }, { label: "show collections", type: "keyword" }] };
+    return null;
+  };
+}
 
 const highlight = HighlightStyle.define([
   { tag: t.keyword, color: "var(--accent)", fontWeight: "500" },
@@ -66,7 +98,11 @@ export function SqlEditor({
               ? StandardSQL
               : PostgreSQL;
     return [
-      ...(d === "redis" ? [] : [sql({ dialect, schema, upperCaseKeywords: true })]),
+      ...(d === "redis"
+        ? []
+        : d === "mongodb"
+          ? [javascript(), autocompletion({ override: [mongoCompletions(tables.map((t) => t.name))] })]
+          : [sql({ dialect, schema, upperCaseKeywords: true })]),
       theme,
       syntaxHighlighting(highlight),
       ...(suggest ? [ghostText((b, a) => suggestRef.current?.(b, a) ?? Promise.resolve(""))] : []),

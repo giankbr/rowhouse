@@ -119,6 +119,7 @@ enum Pool {
     Mssql(backend::mssql::Client),
     Ch(backend::clickhouse::Client),
     Redis(backend::redis::Client),
+    Mongo(backend::mongo::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -286,6 +287,17 @@ impl Connection {
             Driver::Redis => {
                 Pool::Redis(backend::redis::Client::connect(&host, port, user, password, db).await?)
             }
+            Driver::Mongo => Pool::Mongo(
+                backend::mongo::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.tls.as_ref(),
+                )
+                .await?,
+            ),
             Driver::Clickhouse => Pool::Ch(
                 backend::clickhouse::Client::connect(
                     &host,
@@ -358,6 +370,7 @@ impl Connection {
             Pool::Mssql(c) => c.run(sql, limit, false).await?,
             Pool::Ch(c) => c.run(sql, limit, false).await?,
             Pool::Redis(c) => c.run(sql, limit, false).await?,
+            Pool::Mongo(c) => c.run(sql, limit, false).await?,
         })
     }
 
@@ -367,6 +380,14 @@ impl Connection {
         let started = Instant::now();
         if let Pool::Redis(c) = &self.pool {
             // Redis commands, not SQL: the backend checks them against its read allowlist
+            let results = c.run(sql, limit, true).await?;
+            return Ok(QueryOutput {
+                results,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+        if let Pool::Mongo(c) = &self.pool {
+            // mongosh statements: the backend checks them against its read allowlist
             let results = c.run(sql, limit, true).await?;
             return Ok(QueryOutput {
                 results,
@@ -414,7 +435,7 @@ impl Connection {
             Pool::Duck(c) => c.run(sql, limit, true).await?,
             Pool::Mssql(c) => c.run(sql, limit, true).await?,
             Pool::Ch(c) => c.run(sql, limit, true).await?,
-            Pool::Redis(_) => unreachable!("handled above"),
+            Pool::Redis(_) | Pool::Mongo(_) => unreachable!("handled above"),
         };
         Ok(QueryOutput {
             results,
@@ -455,6 +476,10 @@ impl Connection {
             Pool::Redis(_) => Err(Error::Other(
                 "editing isn't supported for Redis — use commands in a query tab".into(),
             )),
+            Pool::Mongo(_) => Err(Error::Other(
+                "not supported for MongoDB — use the grid or mongosh statements in a query tab"
+                    .into(),
+            )),
             Pool::Ch(c) => {
                 if stmts.iter().any(|(e, _)| *e != Expect::Any) {
                     return Err(Error::Other(
@@ -472,7 +497,17 @@ impl Connection {
         if let Pool::Redis(c) = &self.pool {
             return c.raw(&["PING".into()]).await.map(|_| ());
         }
+        if let Pool::Mongo(c) = &self.pool {
+            return c.ping().await;
+        }
         self.meta("SELECT 1").await.map(|_| ())
+    }
+
+    pub(crate) fn mongo(&self) -> Option<&backend::mongo::Client> {
+        match &self.pool {
+            Pool::Mongo(c) => Some(c),
+            _ => None,
+        }
     }
 
     pub(crate) fn redis(&self) -> Option<&backend::redis::Client> {
@@ -486,8 +521,11 @@ impl Connection {
         if let Pool::Redis(c) = &self.pool {
             return c.keys(2_000).await;
         }
+        if let Pool::Mongo(c) = &self.pool {
+            return c.collections().await;
+        }
         let sql = match self.driver() {
-            Driver::Redis => unreachable!("handled above"),
+            Driver::Redis | Driver::Mongo => unreachable!("handled above"),
             Driver::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
                  WHERE table_schema NOT IN ('pg_catalog','information_schema','crdb_internal','pg_extension','pg_internal','gp_toolkit') \
                  AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2",
@@ -523,6 +561,10 @@ impl Connection {
     }
 
     pub async fn describe_table(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
+        if let Pool::Mongo(c) = &self.pool {
+            let _ = schema;
+            return c.describe(table).await;
+        }
         if let Pool::Redis(c) = &self.pool {
             // a key has no schema; report the value's type as a single pseudo column
             let ty = c.raw(&["TYPE".into(), table.into()]).await?;
@@ -555,7 +597,7 @@ impl Connection {
             )
         };
         let rows = match self.driver() {
-            Driver::Redis => unreachable!("handled above"),
+            Driver::Redis | Driver::Mongo => unreachable!("handled above"),
             // Redshift's catalog is too old for this query; it uses information_schema below.
             Driver::Postgres if self.kind() != DbKind::Redshift => {
                 // pg_catalog gives full types (varchar(64), numeric(12,2), text[]) and real defaults
@@ -634,6 +676,9 @@ impl Connection {
 
     /// `SELECT * FROM <table> LIMIT n` (or `TOP n`) with correct identifier quoting.
     pub fn select_table_sql(&self, schema: &str, table: &str, limit: usize) -> String {
+        if self.driver() == Driver::Mongo {
+            return format!("{}.limit({limit})", self.select_all_sql(schema, table));
+        }
         if self.driver() == Driver::Mssql {
             return format!("SELECT TOP {limit} * FROM {}", self.target(schema, table));
         }
@@ -642,6 +687,17 @@ impl Connection {
 
     /// `SELECT * FROM <table>` (no limit — for full exports).
     pub fn select_all_sql(&self, schema: &str, table: &str) -> String {
+        if self.driver() == Driver::Mongo {
+            let _ = schema;
+            return if table.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                format!("db.{table}.find({{}})")
+            } else {
+                format!(
+                    "db.getCollection({}).find({{}})",
+                    serde_json::to_string(table).unwrap_or_default()
+                )
+            };
+        }
         format!("SELECT * FROM {}", self.target(schema, table))
     }
 

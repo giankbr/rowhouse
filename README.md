@@ -91,9 +91,11 @@ The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI r
 | Status | Databases | How |
 | --- | --- | --- |
 | ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), Redis, MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
-| 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8 | `tiberius`, Postgres protocol |
+| 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8, MongoDB (beta) | `tiberius`, Postgres protocol, official `mongodb` driver |
 | 🟡 beta (wire-compatible, not yet run against a live server) | Neon, Supabase (Postgres + TLS), Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
-| ⏳ planned | LibSQL/Turso, Cloudflare D1, MongoDB, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
+| ⏳ planned | LibSQL/Turso, Cloudflare D1, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
+
+MongoDB: collections are tables; the editor takes mongosh-style statements (`db.orders.find({ status: 'paid' }).sort({ total: -1 }).limit(10)`, `aggregate([...])`, `insertOne`, `updateMany`, `show collections`, …). Grid edits are keyed by `_id` and keep each field's BSON type; they're checked up front but not transactional (MongoDB needs a replica set for that). Paste a `mongodb://` / `mongodb+srv://` URI to connect to Atlas.
 
 Notes: ClickHouse has no transactions, so grid editing is disabled there (CSV import still works).
 SQL Server connections encrypt and accept self-signed certificates, like most DB GUIs.
@@ -109,7 +111,7 @@ SQL Server connections encrypt and accept self-signed certificates, like most DB
 | `list_tables` | Tables & views |
 | `describe_table` | Columns, types, nullability, defaults, PK |
 | `sample_rows` | First N rows of a table |
-| `run_query` | Read-only SQL (SELECT / WITH / SHOW / EXPLAIN) |
+| `run_query` | Read-only SQL (SELECT / WITH / SHOW / EXPLAIN); read commands for Redis, find/aggregate for MongoDB |
 | `execute_sql` | A write, only after you approve it in Rowhouse (connections with “Allow AI to request writes”) |
 
 Safety: every MCP query passes a keyword guard **and** runs inside a read-only transaction
@@ -143,16 +145,17 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] TLS options (CA / client certs), Neon & Supabase
 - [x] Query history (app + MCP)
 - [x] Export (CSV, JSON, SQL INSERTs) and CSV import
-- [ ] Saved queries / snippets
+- [x] Saved queries / snippets
 - [x] SQL Server, DuckDB, ClickHouse, CockroachDB (+ beta: Redshift, Greenplum, TiDB, SingleStore)
 - [x] Redis
-- [ ] MongoDB, LibSQL/Turso, D1, Cassandra drivers
+- [x] MongoDB (beta)
+- [ ] LibSQL/Turso, D1, Cassandra drivers
 - [x] AI: natural-language → SQL, fix, explain with your own model
-- [ ] AI: streaming responses, inline completions in the editor
+- [x] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import
 - [x] Query plan viewer, schema compare, saved queries
 - [x] Data compare (PK-matched rows + sync script)
-- [ ] Scheduled queries, MongoDB driver
+- [ ] Scheduled queries
 - [x] ERD view, table structure editor
 - [x] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [x] Auto-update and code-signing pipeline (see [RELEASING.md](RELEASING.md); needs your keys/certificates)

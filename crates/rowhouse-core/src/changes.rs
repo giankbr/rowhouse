@@ -128,6 +128,9 @@ impl Connection {
 
     /// The exact SQL that [`Self::apply_changes`] will run.
     pub fn preview_changes(&self, cs: &ChangeSet) -> Result<Vec<String>> {
+        if let Some(m) = self.mongo() {
+            return m.preview(cs);
+        }
         Ok(self.statements(cs)?.into_iter().map(|(_, s)| s).collect())
     }
 
@@ -135,6 +138,9 @@ impl Connection {
     pub async fn apply_changes(&self, cs: &ChangeSet) -> Result<u64> {
         if self.config.read_only {
             return Err(Error::ReadOnly("connection is read-only".into()));
+        }
+        if let Some(m) = self.mongo() {
+            return m.apply(cs).await;
         }
         // MySQL reports 0 for an UPDATE that sets identical values; accept that.
         let lenient = self.driver() == Driver::Mysql;

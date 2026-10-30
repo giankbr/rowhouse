@@ -3,6 +3,8 @@
 
 pub mod clickhouse;
 pub mod duck;
+pub mod mongo;
+pub mod mongo_shell;
 pub mod mssql;
 pub mod redis;
 

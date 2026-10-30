@@ -146,6 +146,7 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Mssql => "Microsoft SQL Server (T-SQL)",
         Clickhouse => "ClickHouse",
         Redis => "Redis (reply with Redis commands, one per line, instead of SQL)",
+        Mongodb => "MongoDB (reply with mongosh statements such as db.orders.find({ status: \"paid\" }).sort({ total: -1 }).limit(10) or db.orders.aggregate([...]) instead of SQL; the schema lists collections and sampled fields)",
     }
 }
 

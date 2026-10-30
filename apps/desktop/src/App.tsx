@@ -219,7 +219,7 @@ export default function App() {
       if (!activeConn) return;
       if (sql === undefined) {
         const k = connections.find((c) => c.id === activeConn)?.kind;
-        sql = k === "redis" ? "PING" : "SELECT 1;";
+        sql = k === "redis" ? "PING" : k === "mongodb" ? "show collections" : "SELECT 1;";
       }
       const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
       addTab({ id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql });

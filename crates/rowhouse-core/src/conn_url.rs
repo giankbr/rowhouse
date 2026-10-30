@@ -20,6 +20,9 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
     let input = input.trim();
     // jdbc:postgresql://… → postgresql://…
     let input = input.strip_prefix("jdbc:").unwrap_or(input);
+    if input.starts_with("mongodb://") || input.starts_with("mongodb+srv://") {
+        return Ok(mongo_url(input));
+    }
     let url = Url::parse(input).map_err(|e| Error::Other(format!("not a connection URL: {e}")))?;
     let host = url.host_str().unwrap_or_default().to_string();
     let kind = match url.scheme() {
@@ -120,6 +123,45 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
     Ok((c, password))
 }
 
+/// MongoDB URIs can list several hosts (`a:1,b:2`) and use `+srv`, so the whole
+/// URI (minus the password) is kept as the host and handed to the driver.
+fn mongo_url(input: &str) -> (ConnectionConfig, Option<String>) {
+    let (scheme, rest) = input.split_once("://").unwrap_or(("mongodb", input));
+    let auth_end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(auth_end);
+    let (userinfo, hosts) = match authority.rfind('@') {
+        Some(i) => (Some(&authority[..i]), &authority[i + 1..]),
+        None => (None, authority),
+    };
+    let (user, password) = match userinfo {
+        Some(u) => match u.split_once(':') {
+            Some((u, p)) => (Some(u), Some(p)),
+            None => (Some(u), None),
+        },
+        None => (None, None),
+    };
+    let db = tail
+        .strip_prefix('/')
+        .map(|t| t.split('?').next().unwrap_or(""))
+        .filter(|d| !d.is_empty())
+        .map(decode);
+    let mut c = ConnectionConfig::new("", DbKind::Mongodb);
+    c.host = Some(match user {
+        Some(u) => format!("{scheme}://{u}@{hosts}{tail}"),
+        None => format!("{scheme}://{hosts}{tail}"),
+    });
+    c.port = None;
+    c.user = user.map(decode);
+    c.database = db.clone();
+    let first_host = hosts.split(',').next().unwrap_or(hosts);
+    c.name = format!(
+        "{}@{}",
+        db.as_deref().unwrap_or("mongodb"),
+        first_host.split(':').next().unwrap_or(first_host)
+    );
+    (c, password.map(decode).filter(|p| !p.is_empty()))
+}
+
 fn kind_label(k: DbKind) -> &'static str {
     match k {
         DbKind::Mssql => "sqlserver",
@@ -193,6 +235,30 @@ mod tests {
             (c.kind, c.file.as_deref()),
             (DbKind::Sqlite, Some("/Users/me/app.db"))
         );
-        assert!(parse_connection_url("mongodb://x").is_err());
+        assert!(parse_connection_url("oracle://x").is_err());
+    }
+
+    #[test]
+    fn mongodb_uri_keeps_hosts_and_drops_password() {
+        let (c, pw) = parse_connection_url(
+            "mongodb+srv://app%40x:s3cr%2Ft@cluster0.abcde.mongodb.net/shop?retryWrites=true&w=majority",
+        )
+        .unwrap();
+        assert_eq!(c.kind, DbKind::Mongodb);
+        assert_eq!(
+            c.host.as_deref(),
+            Some(
+                "mongodb+srv://app%40x@cluster0.abcde.mongodb.net/shop?retryWrites=true&w=majority"
+            )
+        );
+        assert_eq!(c.user.as_deref(), Some("app@x"));
+        assert_eq!(pw.as_deref(), Some("s3cr/t"));
+        assert_eq!(c.database.as_deref(), Some("shop"));
+        let (c, pw) = parse_connection_url("mongodb://h1:27017,h2:27018/?replicaSet=rs0").unwrap();
+        assert_eq!(
+            c.host.as_deref(),
+            Some("mongodb://h1:27017,h2:27018/?replicaSet=rs0")
+        );
+        assert!(pw.is_none() && c.database.is_none());
     }
 }

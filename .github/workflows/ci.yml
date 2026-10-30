@@ -44,6 +44,9 @@ jobs:
       redis:
         image: redis:7
         ports: ["6379:6379"]
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
         env: { CLICKHOUSE_USER: rh, CLICKHOUSE_PASSWORD: rh, CLICKHOUSE_DB: default }
@@ -68,6 +71,7 @@ jobs:
           ROWHOUSE_TEST_MSSQL: localhost:1433:sa:Rowhouse!Pass1
           ROWHOUSE_TEST_CH: localhost:8123:rh:rh
           ROWHOUSE_TEST_REDIS: localhost:6379
+          ROWHOUSE_TEST_MONGO: localhost:27017
           ROWHOUSE_TEST_COCKROACH: localhost:26257:root
 
   desktop:

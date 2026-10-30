@@ -297,6 +297,10 @@ fn has_kw(toks: &[Tok], k: &str) -> bool {
 
 /// Find statements that drop / truncate objects, or DELETE / UPDATE without WHERE.
 pub fn destructive(sql: &str) -> Vec<Destructive> {
+    let head = sql.trim_start();
+    if head.starts_with("db.") || head.starts_with("db[") {
+        return destructive_mongo(sql);
+    }
     let mut out = Vec::new();
     for stmt in split_statements(sql) {
         let t = tokenize(&stmt);
@@ -377,6 +381,52 @@ pub fn check_read_only(sql: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// mongosh statements: `drop()`, and deleteMany / updateMany with an empty filter.
+fn destructive_mongo(src: &str) -> Vec<Destructive> {
+    use crate::backend::mongo_shell::{parse, shell, Stmt};
+    use mongodb::bson::Bson;
+    let Ok(stmts) = parse(src) else { return vec![] };
+    let mut out = Vec::new();
+    for s in stmts {
+        let Stmt::Call {
+            coll,
+            method,
+            args,
+            chain,
+        } = &s
+        else {
+            continue;
+        };
+        let empty_filter = match args.first() {
+            None => true,
+            Some(Bson::Document(d)) => d.is_empty(),
+            _ => false,
+        };
+        let kind = match method.as_str() {
+            "drop" => "drop",
+            "deleteMany" | "remove" if empty_filter => "delete-all",
+            "updateMany" if empty_filter => "update-all",
+            _ => continue,
+        };
+        let mut text = format!(
+            "db.{coll}.{method}({})",
+            args.iter().map(shell).collect::<Vec<_>>().join(", ")
+        );
+        for (m, a) in chain {
+            text.push_str(&format!(
+                ".{m}({})",
+                a.iter().map(shell).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        out.push(Destructive {
+            kind: kind.into(),
+            object: coll.clone(),
+            statement: text,
+        });
+    }
+    out
 }
 
 #[cfg(test)]
