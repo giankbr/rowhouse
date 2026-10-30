@@ -66,6 +66,58 @@ struct WriteArg {
     reason: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SearchArg {
+    /// Connection name or id.
+    connection: String,
+    /// Words to look for in table and column names, e.g. "customer email" or "invoice".
+    query: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExplainArg {
+    /// Connection name or id.
+    connection: String,
+    /// One statement to explain.
+    sql: String,
+    /// Run it to get real timings (only allowed for read-only statements). Default false.
+    analyze: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ObjectArg {
+    /// Connection name or id.
+    connection: String,
+    /// Object name as returned by `list_objects`.
+    name: String,
+    /// function | procedure | trigger | sequence | type | matview | macro
+    kind: String,
+    /// Schema of the object.
+    schema: Option<String>,
+    /// For functions: the argument list from `list_objects` (picks the right overload).
+    detail: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SavedArg {
+    /// Connection name or id. For `list_saved_queries` it filters; global queries are always included.
+    connection: Option<String>,
+    /// Saved query name (for `run_saved_query`).
+    name: Option<String>,
+    /// Max rows (default 100).
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct HistoryArg {
+    /// Connection name or id.
+    connection: String,
+    /// Only queries containing this text.
+    search: Option<String>,
+    /// How many (default 20, max 100).
+    limit: Option<i64>,
+}
+
 /// How long a write waits for the user to answer.
 const APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -300,6 +352,206 @@ impl Rowhouse {
     }
 
     #[tool(
+        description = "Find tables and columns whose names match the words in `query` (case-insensitive). \
+                       Use this first on large databases instead of listing every table."
+    )]
+    async fn search_schema(&self, Parameters(a): Parameters<SearchArg>) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        let words: Vec<String> = a
+            .query
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        if words.is_empty() {
+            return Err("give at least one word to search for".into());
+        }
+        let erd = c.erd(None).await.map_err(|e| e.to_string())?;
+        let mut hits = vec![];
+        for t in &erd.tables {
+            let tname = t.name.to_lowercase();
+            let cols: Vec<_> = t
+                .columns
+                .iter()
+                .filter(|col| words.iter().any(|w| col.name.to_lowercase().contains(w)))
+                .map(|col| json!({ "column": col.name, "type": col.data_type }))
+                .collect();
+            let table_hit = words.iter().any(|w| tname.contains(w));
+            if table_hit || !cols.is_empty() {
+                hits.push(json!({
+                    "schema": t.schema, "table": t.name, "kind": t.kind,
+                    "matchedTable": table_hit, "matchedColumns": cols,
+                    "columns": t.columns.len(),
+                }));
+            }
+        }
+        hits.sort_by_key(|h| {
+            std::cmp::Reverse(
+                h["matchedTable"].as_bool().unwrap_or(false) as u8 * 100
+                    + h["matchedColumns"].as_array().map(|a| a.len()).unwrap_or(0) as u8,
+            )
+        });
+        hits.truncate(50);
+        Ok(pretty(
+            json!({ "matches": hits, "truncated": erd.truncated }),
+        ))
+    }
+
+    #[tool(
+        description = "Foreign keys of a table: what it references (outgoing) and which tables reference it (incoming). Use it to write correct JOINs."
+    )]
+    async fn get_relations(&self, Parameters(a): Parameters<TableArg>) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        let schema = self.default_schema(&c, a.schema, &a.table).await?;
+        let fks = c.foreign_keys().await.map_err(|e| e.to_string())?;
+        let outgoing: Vec<_> = fks
+            .iter()
+            .filter(|f| f.schema == schema && f.table == a.table)
+            .collect();
+        let incoming: Vec<_> = fks
+            .iter()
+            .filter(|f| f.ref_schema == schema && f.ref_table == a.table)
+            .collect();
+        Ok(pretty(
+            json!({ "outgoing": outgoing, "incoming": incoming }),
+        ))
+    }
+
+    #[tool(
+        description = "The CREATE statement (DDL) of a table or view, including indexes and constraints."
+    )]
+    async fn get_ddl(&self, Parameters(a): Parameters<TableArg>) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        let schema = self.default_schema(&c, a.schema, &a.table).await?;
+        c.table_ddl(&schema, &a.table)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "List functions, procedures, triggers, sequences, enum types and materialized views."
+    )]
+    async fn list_objects(&self, Parameters(a): Parameters<ConnArg>) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        Ok(pretty(c.list_objects().await.map_err(|e| e.to_string())?))
+    }
+
+    #[tool(
+        description = "The definition (CREATE statement) of a function, trigger, sequence, type or materialized view from `list_objects`."
+    )]
+    async fn get_object_definition(
+        &self,
+        Parameters(a): Parameters<ObjectArg>,
+    ) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        let o = rowhouse_core::objects::DbObject {
+            schema: a.schema.unwrap_or_default(),
+            name: a.name,
+            kind: a.kind,
+            detail: a.detail,
+        };
+        c.object_definition(&o).await.map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Show the query plan (EXPLAIN) for one statement, as a tree with costs. `analyze: true` runs it for real timings and is only allowed for reads."
+    )]
+    async fn explain_query(&self, Parameters(a): Parameters<ExplainArg>) -> Result<String, String> {
+        let c = self.conn(&a.connection).await?;
+        Ok(pretty(
+            c.explain_plan(&a.sql, a.analyze.unwrap_or(false))
+                .await
+                .map_err(|e| e.to_string())?,
+        ))
+    }
+
+    #[tool(
+        description = "Approximate row counts per table (from the database's statistics, so it's cheap even on big tables)."
+    )]
+    async fn table_stats(&self, Parameters(a): Parameters<ConnArg>) -> Result<String, String> {
+        use rowhouse_core::config::Driver;
+        let c = self.conn(&a.connection).await?;
+        let sql = match c.driver() {
+            Driver::Postgres => "SELECT n.nspname AS schema, c.relname AS table, c.reltuples::bigint AS approx_rows, pg_total_relation_size(c.oid) AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY c.reltuples DESC LIMIT 200",
+            Driver::Mysql => "SELECT table_schema AS `schema`, table_name AS `table`, table_rows AS approx_rows, data_length + index_length AS bytes FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('mysql','information_schema','performance_schema','sys') ORDER BY table_rows DESC LIMIT 200",
+            Driver::Mssql => "SELECT s.name AS [schema], t.name AS [table], SUM(p.rows) AS approx_rows FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id JOIN sys.partitions p ON p.object_id = t.object_id AND p.index_id IN (0,1) GROUP BY s.name, t.name ORDER BY 3 DESC",
+            Driver::Clickhouse => "SELECT database AS schema, name AS table, total_rows AS approx_rows, total_bytes AS bytes FROM system.tables WHERE database = currentDatabase() ORDER BY total_rows DESC",
+            _ => return Err("table_stats isn't available for this database — use run_query with COUNT(*)".into()),
+        };
+        self.run_logged(&c, sql, 200).await
+    }
+
+    #[tool(
+        description = "Queries the user saved in Rowhouse (name + SQL). Good starting points: they reflect how the user actually queries this data."
+    )]
+    async fn list_saved_queries(
+        &self,
+        Parameters(a): Parameters<SavedArg>,
+    ) -> Result<String, String> {
+        let h = self
+            .history
+            .as_ref()
+            .ok_or("query history is unavailable")?;
+        let id = match &a.connection {
+            Some(n) => Some(self.profile(n)?.id),
+            None => None,
+        };
+        let list = h
+            .list_snippets(id.as_deref(), None)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(pretty(list.into_iter().map(|s| json!({ "name": s.name, "sql": s.sql, "global": s.connection_id.is_none() })).collect::<Vec<_>>()))
+    }
+
+    #[tool(description = "Run one of the user's saved queries by name (read-only).")]
+    async fn run_saved_query(&self, Parameters(a): Parameters<SavedArg>) -> Result<String, String> {
+        let h = self
+            .history
+            .as_ref()
+            .ok_or("query history is unavailable")?;
+        let conn = a.connection.ok_or("`connection` is required")?;
+        let name = a.name.ok_or("`name` is required")?;
+        let c = self.conn(&conn).await?;
+        let list = h
+            .list_snippets(Some(&c.config.id), None)
+            .await
+            .map_err(|e| e.to_string())?;
+        let s = list
+            .into_iter()
+            .find(|s| s.name.eq_ignore_ascii_case(&name))
+            .ok_or_else(|| format!("no saved query named `{name}`"))?;
+        self.run_logged(&c, &s.sql, a.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT))
+            .await
+    }
+
+    #[tool(
+        description = "Recent queries run on a connection (from the app and from MCP), newest first, with errors and row counts."
+    )]
+    async fn recent_queries(
+        &self,
+        Parameters(a): Parameters<HistoryArg>,
+    ) -> Result<String, String> {
+        let h = self
+            .history
+            .as_ref()
+            .ok_or("query history is unavailable")?;
+        let cfg = self.profile(&a.connection)?;
+        let list = h
+            .list(
+                Some(&cfg.id),
+                a.search.as_deref(),
+                a.limit.unwrap_or(20).clamp(1, 100),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(pretty(
+            list.into_iter()
+                .map(|e| json!({ "sql": e.sql, "source": e.source, "ok": e.ok, "error": e.error, "rows": e.rows, "ms": e.elapsed_ms, "at": e.at }))
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    #[tool(
         description = "Run a READ-ONLY query: SQL for SQL databases, Redis read commands for Redis, mongosh find/aggregate/countDocuments for MongoDB (e.g. db.orders.find({ status: \"paid\" }).limit(10)). Writes are rejected."
     )]
     async fn run_query(&self, Parameters(a): Parameters<QueryArg>) -> Result<String, String> {
@@ -317,7 +569,8 @@ impl ServerHandler for Rowhouse {
             .with_instructions(
                 "Rowhouse gives access to the user's saved database connections. Reads are read-only; \
                  writes go through execute_sql and need the user's approval in the app. \
-                 Start with list_connections, then list_tables / describe_table before writing SQL.",
+                 Start with list_connections, then search_schema (or list_tables) and describe_table / get_relations \
+                 before writing SQL; list_saved_queries shows how the user usually queries the data.",
             )
     }
 }

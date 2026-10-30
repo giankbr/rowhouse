@@ -26,6 +26,8 @@ pub enum Provider {
     #[default]
     Openai,
     Anthropic,
+    /// a coding-agent CLI on this machine (Claude Code, Codex, …) — see `ai_local`
+    Local,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,9 @@ pub struct AiSettings {
     /// Ghost-text completions while typing (sends a request per pause).
     #[serde(default)]
     pub inline_completions: bool,
+    /// `Provider::Local`: which CLI (`claude`, `codex`, `opencode`, …)
+    #[serde(default)]
+    pub agent: String,
 }
 
 impl Default for AiSettings {
@@ -54,6 +59,7 @@ impl Default for AiSettings {
             base_url: "https://api.openai.com/v1".into(),
             model: String::new(),
             inline_completions: false,
+            agent: String::new(),
         }
     }
 }
@@ -297,7 +303,11 @@ pub fn extract_sql(reply: &str) -> AiAnswer {
 impl AiClient {
     pub fn new(settings: AiSettings, api_key: Option<String>) -> Result<Self> {
         crate::init_crypto();
-        if settings.model.trim().is_empty() {
+        if settings.provider == Provider::Local {
+            if settings.agent.trim().is_empty() {
+                return Err(err("pick a local agent in Settings → AI"));
+            }
+        } else if settings.model.trim().is_empty() {
             return Err(err("no model configured — open Settings → AI"));
         }
         Ok(Self {
@@ -350,6 +360,9 @@ impl AiClient {
     pub async fn complete(&self, system: &str, user: &str) -> Result<String> {
         let key = self.api_key.clone().unwrap_or_default();
         match self.settings.provider {
+            Provider::Local => {
+                crate::ai_local::run(&self.settings.agent, &self.settings.model, system, user).await
+            }
             Provider::Openai => {
                 let mut headers = vec![];
                 if !key.is_empty() {
@@ -404,13 +417,25 @@ impl AiClient {
 
     /// Model ids offered by the endpoint (`GET /models`), for the settings picker.
     pub async fn list_models(&self) -> Result<Vec<String>> {
+        if self.settings.provider == Provider::Local {
+            // the CLIs pick a default; these are the common aliases
+            return Ok(match self.settings.agent.as_str() {
+                "claude" => vec!["sonnet", "opus", "haiku"],
+                "gemini" => vec!["gemini-2.5-pro", "gemini-2.5-flash"],
+                "codex" => vec!["gpt-5-codex", "gpt-5"],
+                _ => vec![],
+            }
+            .into_iter()
+            .map(String::from)
+            .collect());
+        }
         let key = self.api_key.clone().unwrap_or_default();
         let mut req = self.http.get(self.url("models"));
         req = match self.settings.provider {
             Provider::Openai if !key.is_empty() => {
                 req.header("authorization", format!("Bearer {key}"))
             }
-            Provider::Openai => req,
+            Provider::Openai | Provider::Local => req,
             Provider::Anthropic => req
                 .header("x-api-key", key)
                 .header("anthropic-version", "2023-06-01"),
@@ -451,11 +476,17 @@ impl AiClient {
         on_delta: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String> {
         use futures_util::StreamExt;
+        if self.settings.provider == Provider::Local {
+            let full = self.complete(system, user).await?;
+            on_delta(&full);
+            return Ok(full);
+        }
         let key = self.api_key.clone().unwrap_or_default();
         let (url, body, headers): (String, Value, Vec<(&str, String)>) = match self
             .settings
             .provider
         {
+            Provider::Local => unreachable!("handled above"),
             Provider::Openai => (
                 self.url("chat/completions"),
                 json!({
@@ -521,7 +552,9 @@ impl AiClient {
                         return Err(err(e["message"].as_str().unwrap_or("stream error")));
                     }
                     let piece = match self.settings.provider {
-                        Provider::Openai => v["choices"][0]["delta"]["content"].as_str(),
+                        Provider::Openai | Provider::Local => {
+                            v["choices"][0]["delta"]["content"].as_str()
+                        }
                         Provider::Anthropic => match v["type"].as_str() {
                             Some("content_block_delta") => v["delta"]["text"].as_str(),
                             Some("message_stop") => break 'read,
@@ -546,6 +579,9 @@ impl AiClient {
         before: &str,
         after: &str,
     ) -> Result<String> {
+        if self.settings.provider == Provider::Local {
+            return Ok(String::new()); // a CLI round-trip is too slow for ghost text
+        }
         let before: String = before
             .chars()
             .rev()

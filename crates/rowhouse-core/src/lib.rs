@@ -6,6 +6,7 @@
 
 pub mod activity;
 pub mod ai;
+pub mod ai_local;
 pub mod approvals;
 pub mod backend;
 pub mod browse;
@@ -24,6 +25,7 @@ pub mod history;
 pub mod import;
 pub mod io;
 pub mod license;
+pub mod mcp_clients;
 pub mod model;
 pub mod objects;
 pub mod plan;

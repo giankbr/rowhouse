@@ -52,6 +52,7 @@ async fn openai_generate_sends_schema_not_rows() {
             base_url: format!("{}/v1/", server.uri()),
             model: "m-1".into(),
             inline_completions: false,
+            agent: String::new(),
         },
         Some("sk-test".into()),
     )
@@ -97,6 +98,7 @@ async fn anthropic_fix_uses_messages_api() {
             base_url: format!("{}/v1", server.uri()),
             model: "c".into(),
             inline_completions: false,
+            agent: String::new(),
         },
         Some("ak".into()),
     )
@@ -140,6 +142,7 @@ async fn provider_errors_are_readable() {
             base_url: format!("{}/v1", server.uri()),
             model: "m".into(),
             inline_completions: false,
+            agent: String::new(),
         },
         None,
     )
@@ -188,6 +191,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             base_url: format!("{}/oa", server.uri()),
             model: "m".into(),
             inline_completions: true,
+            agent: String::new(),
         },
         None,
     )
@@ -214,6 +218,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             base_url: format!("{}/an", server.uri()),
             model: "c".into(),
             inline_completions: false,
+            agent: String::new(),
         },
         Some("k".into()),
     )
@@ -247,6 +252,7 @@ async fn inline_completion_request() {
             base_url: format!("{}/v1", server.uri()),
             model: "m".into(),
             inline_completions: true,
+            agent: String::new(),
         },
         None,
     )
@@ -293,6 +299,7 @@ async fn inline_edit_sends_selection_and_context() {
             base_url: format!("{}/v1", server.uri()),
             model: "m".into(),
             inline_completions: false,
+            agent: String::new(),
         },
         Some("k".into()),
     )
