@@ -5,9 +5,9 @@ import type { Cell, QueryResult } from "../lib/api";
 import { formatCells, parseClipboard, type CopyFormat } from "../lib/gridcopy";
 import { countPending, emptyPending, type Pending } from "../lib/pending";
 import { mod } from "../lib/types";
+import { rowHeight, useAppearance } from "../lib/appearance";
 import { Button, Kbd, cx } from "./ui";
 
-const ROW_H = 26;
 const INDEX_W = 44;
 
 /** A row on screen: an existing result row (by original index) or a new, unsaved one. */
@@ -64,6 +64,7 @@ export function ResultsGrid({
   serverSort?: { column: string; desc: boolean } | null;
   onServerSort?: (s: { column: string; desc: boolean } | null) => void;
 }) {
+  const ROW_H = rowHeight(useAppearance().density);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
   /** other corner of a range selection (shift-click / shift-arrows); null = single cell */
@@ -128,6 +129,7 @@ export function ResultsGrid({
     estimateSize: () => ROW_H,
     overscan: 20,
   });
+  useEffect(() => virt.measure(), [ROW_H]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = INDEX_W + widths.reduce((a, b) => a + b, 0);
   const numeric = result.columns.map((c) => isNumericType(c.data_type));
@@ -461,10 +463,10 @@ export function ResultsGrid({
                 >
                   <div
                     className={cx(
-                      "sticky left-0 shrink-0 border-r border-line bg-bg pr-2 text-right leading-[26px] tabular-nums",
+                      "sticky left-0 shrink-0 border-r border-line bg-bg pr-2 text-right tabular-nums",
                       deleted ? "text-danger" : isNew ? "text-success" : "text-subtle",
                     )}
-                    style={{ width: INDEX_W }}
+                    style={{ width: INDEX_W, lineHeight: `${ROW_H}px` }}
                     onMouseDown={(e) => (e.preventDefault(), scrollRef.current?.focus(), pickRow(vr.index, e.shiftKey))}
                   >
                     {isNew ? "+" : deleted ? "−" : row.i + 1}
@@ -510,7 +512,7 @@ export function ResultsGrid({
                         }}
                         onDoubleClick={() => startEdit(vr.index, ci)}
                         className={cx(
-                          "shrink-0 truncate border-r border-b border-line/60 px-2 leading-[25px]",
+                          "shrink-0 truncate border-r border-b border-line/60 px-2",
                           numeric[ci] && "text-right tabular-nums",
                           (v === null || v === undefined) && "text-subtle italic",
                           !deleted && typeof v === "boolean" && (v ? "text-success" : "text-muted"),
@@ -518,7 +520,7 @@ export function ResultsGrid({
                           ranged && "bg-accent-soft/70",
                           selected && "bg-accent-soft ring-1 ring-accent ring-inset",
                         )}
-                        style={{ width: widths[ci] }}
+                        style={{ width: widths[ci], lineHeight: `${ROW_H - 1}px` }}
                       >
                         {display(v)}
                       </div>

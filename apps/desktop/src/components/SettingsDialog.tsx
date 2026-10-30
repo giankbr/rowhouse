@@ -2,6 +2,7 @@ import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type AiSettings } from "../lib/api";
 import { Button, Field, Input, Modal, Segmented, Switch, cx } from "./ui";
+import { saveAppearance, useAppearance, type Appearance, type Density, type MonoFont, type UiFont } from "../lib/appearance";
 
 const PRESETS: { id: string; label: string; provider: AiSettings["provider"]; baseUrl: string; needsKey: boolean }[] = [
   { id: "openai", label: "OpenAI", provider: "openai", baseUrl: "https://api.openai.com/v1", needsKey: true },
@@ -63,7 +64,7 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
       open={open}
       onClose={onClose}
       width={520}
-      title="Settings · AI"
+      title="Settings"
       footer={
         <>
           {status.state !== "idle" && (
@@ -93,6 +94,9 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
       }
     >
       <div className="flex flex-col gap-3">
+        <AppearanceSection />
+        <div className="h-px bg-line" />
+        <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">AI</h3>
         <Switch checked={s.enabled} onChange={(v) => set({ enabled: v })} label="Enable AI features (Ask AI, Fix with AI, Explain)" />
         <div className={cx("flex flex-col gap-3 transition-opacity", !s.enabled && "pointer-events-none opacity-45")}>
           <div className="flex flex-wrap gap-1">
@@ -184,5 +188,52 @@ export function SettingsDialog({ open, onClose, onSaved }: { open: boolean; onCl
         </div>
       </div>
     </Modal>
+  );
+}
+
+function AppearanceSection() {
+  const a = useAppearance();
+  const set = (patch: Partial<Appearance>) => saveAppearance({ ...a, ...patch });
+  const row = "flex items-center gap-3";
+  const label = "w-24 shrink-0 text-xs text-muted";
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-2xs font-medium tracking-wide text-subtle uppercase">Appearance</h3>
+      <div className={row}>
+        <span className={label}>Interface font</span>
+        <Segmented<UiFont>
+          value={a.uiFont}
+          onChange={(uiFont) => set({ uiFont })}
+          options={[
+            { value: "inter", label: <span style={{ fontFamily: "Inter Variable" }}>Inter</span> },
+            { value: "geist", label: <span style={{ fontFamily: "Geist Variable" }}>Geist</span> },
+            { value: "system", label: <span style={{ fontFamily: "-apple-system, system-ui" }}>System</span> },
+          ]}
+        />
+      </div>
+      <div className={row}>
+        <span className={label}>Code font</span>
+        <Segmented<MonoFont>
+          value={a.monoFont}
+          onChange={(monoFont) => set({ monoFont })}
+          options={[
+            { value: "jetbrains", label: <span style={{ fontFamily: "JetBrains Mono Variable" }}>JetBrains Mono</span> },
+            { value: "geist", label: <span style={{ fontFamily: "Geist Mono Variable" }}>Geist Mono</span> },
+            { value: "system", label: <span style={{ fontFamily: "ui-monospace, SF Mono, Menlo" }}>SF Mono</span> },
+          ]}
+        />
+      </div>
+      <div className={row}>
+        <span className={label}>Density</span>
+        <Segmented<Density>
+          value={a.density}
+          onChange={(density) => set({ density })}
+          options={[
+            { value: "compact", label: "Compact" },
+            { value: "comfortable", label: "Comfortable" },
+          ]}
+        />
+      </div>
+    </div>
   );
 }

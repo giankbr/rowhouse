@@ -137,7 +137,7 @@ Profiles file location (override with `ROWHOUSE_CONFIG_DIR`):
 ## Design
 
 Tokens live in `apps/desktop/src/styles.css` (one set, light + dark): neutral surfaces,
-1px borders instead of shadows, a single indigo accent, Geist + Geist Mono, 24–28px controls,
+1px borders instead of shadows, a single indigo accent, Inter + JetBrains Mono by default (Geist / system fonts and a compact or comfortable density in Settings → Appearance), 22–26px controls,
 motion ≤160ms. Small primitives are in `src/components/ui.tsx`; components from shadcn-style
 libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 
