@@ -159,7 +159,7 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] Production safety rails, ERD, split panes, connection import
 - [x] Query plan viewer, schema compare, saved queries
 - [x] Data compare (PK-matched rows + sync script)
-- [ ] Scheduled queries
+- [x] Scheduled queries (interval / daily / weekly, export to CSV/JSON, notify on failure or change)
 - [x] ERD view, table structure editor
 - [x] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [x] Auto-update and code-signing pipeline (see [RELEASING.md](RELEASING.md); needs your keys/certificates)

@@ -2,11 +2,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use rowhouse_core::schedules::{self, Run, Schedule, ScheduleStore};
 use rowhouse_core::{
     history::NewEntry, ChangeSet, ColumnInfo, Connection, ConnectionConfig, ConnectionStore, Error,
     ExportFormat, History, HistoryEntry, ImportOptions, QueryOutput, TableInfo,
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 type CmdResult<T> = Result<T, Error>;
@@ -412,6 +413,94 @@ async fn list_snippets(
     }
 }
 
+// ---------------------------------------------------------------- scheduled queries
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleRunEvent {
+    schedule: Schedule,
+    run: Run,
+}
+
+/// Schedules currently running (so a slow one isn't started twice).
+static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+async fn run_schedule(app: &tauri::AppHandle, s: Schedule) -> Option<Run> {
+    if !RUNNING.lock().ok()?.insert(s.id.clone()) {
+        return None;
+    }
+    let state = app.state::<AppState>();
+    let run = schedules::run_with_store(&state.store, &s).await;
+    RUNNING.lock().ok()?.remove(&s.id);
+    if let Some(h) = &state.history {
+        let _ = h
+            .record(NewEntry {
+                connection_id: &s.connection_id,
+                sql: &s.sql,
+                source: "schedule",
+                error: run.error.as_deref(),
+                rows: run.rows as i64,
+                elapsed_ms: run.elapsed_ms as i64,
+            })
+            .await;
+    }
+    let saved = ScheduleStore::open_default()
+        .record(&s.id, run.clone())
+        .ok()
+        .flatten()
+        .unwrap_or(s);
+    if saved.should_notify(&run) {
+        use tauri_plugin_notification::NotificationExt;
+        let body = match (&run.error, run.changed) {
+            (Some(e), _) => format!("Failed: {}", e.lines().next().unwrap_or(e)),
+            (None, true) => format!("Result changed · {} rows", run.rows),
+            (None, false) => format!("{} rows in {} ms", run.rows, run.elapsed_ms),
+        };
+        let _ = app
+            .notification()
+            .builder()
+            .title(format!("Rowhouse · {}", saved.name))
+            .body(body)
+            .show();
+    }
+    let _ = app.emit(
+        "schedule-run",
+        ScheduleRunEvent {
+            schedule: saved,
+            run: run.clone(),
+        },
+    );
+    Some(run)
+}
+
+#[tauri::command]
+fn schedules_list() -> CmdResult<Vec<Schedule>> {
+    ScheduleStore::open_default().list()
+}
+
+#[tauri::command]
+fn schedule_save(schedule: Schedule) -> CmdResult<Schedule> {
+    ScheduleStore::open_default().save(schedule)
+}
+
+#[tauri::command]
+fn schedule_delete(schedule_id: String) -> CmdResult<()> {
+    ScheduleStore::open_default().delete(&schedule_id)
+}
+
+#[tauri::command]
+async fn schedule_run_now(app: tauri::AppHandle, schedule_id: String) -> CmdResult<Run> {
+    let s = ScheduleStore::open_default()
+        .list()?
+        .into_iter()
+        .find(|s| s.id == schedule_id)
+        .ok_or_else(|| Error::NotFound(schedule_id.clone()))?;
+    run_schedule(&app, s)
+        .await
+        .ok_or_else(|| Error::Other("this schedule is already running".into()))
+}
+
 #[tauri::command]
 async fn save_snippet(
     state: State<'_, AppState>,
@@ -624,6 +713,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let history = tauri::async_runtime::block_on(History::open_default())
                 .map_err(|e| eprintln!("history disabled: {e}"))
@@ -649,6 +739,23 @@ pub fn run() {
                     loop {
                         let _ = a.heartbeat();
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
+            });
+            // Scheduled queries: check every 20 s while the app is open.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                    let now = schedules::now();
+                    let Ok(due) = ScheduleStore::open_default().list() else {
+                        continue;
+                    };
+                    for s in due.into_iter().filter(|s| s.is_due(now)) {
+                        let h = handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            run_schedule(&h, s).await;
+                        });
                     }
                 }
             });
@@ -704,6 +811,10 @@ pub fn run() {
             ai_fix,
             ai_explain,
             ai_complete_inline,
+            schedules_list,
+            schedule_save,
+            schedule_delete,
+            schedule_run_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Rowhouse");

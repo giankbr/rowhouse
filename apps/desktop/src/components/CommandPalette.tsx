@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Bot, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Bot, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -27,6 +27,7 @@ export function CommandPalette({
     selectConnection: (id: string) => void;
     toggleTheme: () => void;
     showMcp: () => void;
+    showSchedules: () => void;
   };
 }) {
   if (!open) return null;
@@ -93,6 +94,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.showHistory)} className={item}>
               <History size={13} className="text-subtle" /> Query history
+            </Command.Item>
+            <Command.Item onSelect={run(actions.showSchedules)} className={item}>
+              <CalendarClock size={13} className="text-subtle" /> Scheduled queries
             </Command.Item>
             <Command.Item onSelect={run(actions.newConnection)} className={item}>
               <Plus size={13} className="text-subtle" /> New connection

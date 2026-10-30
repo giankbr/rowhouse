@@ -1,4 +1,4 @@
-import { AlertCircle, Bookmark, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
@@ -20,6 +20,7 @@ export function Workspace({
   onView,
   onToast,
   onHistory,
+  onSchedule,
   aiEnabled,
   inlineAi = false,
   onOpenSettings,
@@ -34,6 +35,7 @@ export function Workspace({
   onView: (v: "data" | "structure") => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onHistory: () => void;
+  onSchedule?: (sql: string) => void;
   aiEnabled: boolean;
   /** ghost-text suggestions in the editor (AI settings) */
   inlineAi?: boolean;
@@ -286,6 +288,11 @@ export function Workspace({
             >
               <Bookmark size={11} className={cx(tab.snippetId && "fill-current text-accent")} /> Save
             </Button>
+            {onSchedule && (
+              <Button variant="ghost" size="xs" onClick={() => onSchedule(tab.sql)} disabled={!tab.sql.trim()} title="Run this query on a schedule">
+                <CalendarClock size={11} /> Schedule
+              </Button>
+            )}
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
             <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
             <Button variant="ghost" size="xs" onClick={onHistory} title={`Query history (${mod}+Y)`}>

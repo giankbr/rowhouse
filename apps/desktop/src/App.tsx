@@ -10,6 +10,7 @@ import { ImportDialog } from "./components/ImportDialog";
 import { Launcher, touchRecent } from "./components/Launcher";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
+import { SchedulesDialog } from "./components/SchedulesDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -37,6 +38,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [schedules, setSchedules] = useState<{ draft: { connectionId: string; sql: string; name?: string } | null } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -419,6 +421,7 @@ export default function App() {
               onView={(v) => setView(t, v)}
               onToast={setToast}
               onHistory={() => setHistoryOpen((h) => !h)}
+              onSchedule={(sql) => setSchedules({ draft: { connectionId: t.connId, sql, name: t.snippetId ? t.title : "" } })}
               aiEnabled={aiEnabled}
               inlineAi={inlineAi}
               onOpenSettings={() => setSettingsOpen(true)}
@@ -539,6 +542,7 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <SchedulesDialog open={!!schedules} draft={schedules?.draft} onClose={() => setSchedules(null)} connections={connections} />
       <ApprovalCenter connections={connections} />
       <UpdateBanner />
       <ImportDialog
@@ -582,6 +586,7 @@ export default function App() {
           selectConnection,
           toggleTheme: () => setDark((d) => !d),
           showMcp: () => setMcpOpen(true),
+          showSchedules: () => setSchedules({ draft: null }),
         }}
       />
 

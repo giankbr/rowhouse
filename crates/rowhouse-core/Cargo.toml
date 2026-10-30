@@ -23,7 +23,7 @@ csv = "1"
 url = "2"
 plist = "1"
 roxmltree = "0.21"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream", "json"] }
