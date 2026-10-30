@@ -3,8 +3,8 @@
 //! Profiles (everything except the password) live in `connections.json` inside the
 //! platform config dir, so the desktop app and `rowhouse-mcp` share the same list:
 //!
-//! * macOS:   ~/Library/Application Support/id.morfotech.rowhouse/connections.json
-//! * Windows: %APPDATA%\morfotech\rowhouse\config\connections.json
+//! * macOS:   ~/Library/Application Support/id.novagen.rowhouse/connections.json
+//! * Windows: %APPDATA%\novagen\rowhouse\config\connections.json
 //! * Linux:   ~/.config/rowhouse/connections.json
 //!
 //! Override with the `ROWHOUSE_CONFIG_DIR` env var. Passwords go to the OS keychain
@@ -311,7 +311,7 @@ impl ConnectionStore {
         if let Ok(dir) = std::env::var("ROWHOUSE_CONFIG_DIR") {
             return PathBuf::from(dir);
         }
-        directories::ProjectDirs::from("id", "morfotech", "rowhouse")
+        directories::ProjectDirs::from("id", "novagen", "rowhouse")
             .map(|d| d.config_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from(".rowhouse"))
     }

@@ -123,8 +123,8 @@ Claude Desktop (`claude_desktop_config.json`) / Cursor / any MCP client:
 
 Profiles file location (override with `ROWHOUSE_CONFIG_DIR`):
 
-- macOS: `~/Library/Application Support/id.morfotech.rowhouse/connections.json`
-- Windows: `%APPDATA%\morfotech\rowhouse\config\connections.json`
+- macOS: `~/Library/Application Support/id.novagen.rowhouse/connections.json`
+- Windows: `%APPDATA%\novagen\rowhouse\config\connections.json`
 - Linux: `~/.config/rowhouse/connections.json`
 
 ## Design
