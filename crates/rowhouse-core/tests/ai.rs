@@ -267,3 +267,47 @@ async fn inline_completion_request() {
         .unwrap()
         .contains("orders("));
 }
+
+#[tokio::test]
+async fn inline_edit_sends_selection_and_context() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(|req: &Request| {
+            let b = body(req);
+            let user = b["messages"][1]["content"].as_str().unwrap().to_string();
+            assert!(user.contains("Rewrite the selected SQL: only big orders"), "{user}");
+            assert!(user.contains("SELECT * FROM orders"), "{user}");
+            assert!(user.contains("-- header"), "context before is sent");
+            ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"content": "```sql\nSELECT * FROM orders WHERE total > 100\n```\nAdded a filter."}}]
+            }))
+        })
+        .mount(&server)
+        .await;
+    let (_d, c) = db().await;
+    let ai = AiClient::new(
+        AiSettings {
+            enabled: true,
+            provider: Provider::Openai,
+            base_url: format!("{}/v1", server.uri()),
+            model: "m".into(),
+            inline_completions: false,
+        },
+        Some("k".into()),
+    )
+    .unwrap();
+    let a = ai
+        .edit(
+            &c,
+            "only big orders",
+            "SELECT * FROM orders",
+            "-- header\n",
+            ";",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(a.sql, "SELECT * FROM orders WHERE total > 100");
+    assert_eq!(a.explanation, "Added a filter.");
+}

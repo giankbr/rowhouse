@@ -459,6 +459,8 @@ export const api = {
       call<AiAnswer>("ai_fix", { id, sql, error, onDelta: await channel(onDelta) }),
     explain: async (id: string, sql: string, onDelta?: (s: string) => void) =>
       call<AiAnswer>("ai_explain", { id, sql, onDelta: await channel(onDelta) }),
+    edit: async (id: string, instruction: string, selection: string, before: string, after: string, onDelta?: (s: string) => void) =>
+      call<AiAnswer>("ai_edit", { id, instruction, selection, before, after, onDelta: await channel(onDelta) }),
     completeInline: (id: string, before: string, after: string) => call<string>("ai_complete_inline", { id, before, after }),
   },
 };
@@ -722,6 +724,20 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
         sql: "SELECT u.id, u.full_name, SUM(o.total) AS revenue\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE o.status = 'paid'\nGROUP BY u.id, u.full_name\nORDER BY revenue DESC\nLIMIT 10;",
         explanation: "Top 10 customers by paid order revenue.",
       } satisfies AiAnswer;
+    case "ai_edit": {
+      const sel = String(a.selection);
+      const ins = String(a.instruction).toLowerCase();
+      let sql = sel
+        ? ins.includes("upper")
+          ? sel.toUpperCase()
+          : `${sel.replace(/;\s*$/, "")}\nORDER BY created_at DESC\nLIMIT 50;`
+        : "SELECT u.id, u.email, count(o.id) AS orders\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nGROUP BY u.id, u.email;";
+      for (const piece of ["```sql\n", sql.slice(0, 20), sql.slice(20), "\n```"]) {
+        await sleep(150);
+        (a.onDelta as ((s: string) => void) | undefined)?.(piece);
+      }
+      return { sql, explanation: sel ? "Added ordering and a limit." : "" } satisfies AiAnswer;
+    }
     case "ai_fix":
       await sleep(500);
       return {

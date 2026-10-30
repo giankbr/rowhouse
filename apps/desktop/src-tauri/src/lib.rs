@@ -342,6 +342,31 @@ async fn ai_generate(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn ai_edit(
+    state: State<'_, AppState>,
+    id: String,
+    instruction: String,
+    selection: String,
+    before: String,
+    after: String,
+    on_delta: tauri::ipc::Channel<String>,
+) -> CmdResult<rowhouse_core::ai::AiAnswer> {
+    let c = state.conn(&id).await?;
+    let mut sink = delta_sink(&on_delta);
+    rowhouse_core::ai::AiClient::from_saved()?
+        .edit(
+            &c,
+            &instruction,
+            &selection,
+            &before,
+            &after,
+            sink.as_mut().map(|f| f as &mut (dyn FnMut(&str) + Send)),
+        )
+        .await
+}
+
+#[tauri::command]
 async fn ai_fix(
     state: State<'_, AppState>,
     id: String,
@@ -809,6 +834,7 @@ pub fn run() {
             ai_test,
             ai_generate,
             ai_fix,
+            ai_edit,
             ai_explain,
             ai_complete_inline,
             schedules_list,

@@ -592,6 +592,42 @@ impl AiClient {
         Ok(extract_sql(&reply))
     }
 
+    /// Inline edit: rewrite `selection` (or write new SQL at the cursor when it's
+    /// empty) following `instruction`. `before` / `after` are the surrounding text.
+    pub async fn edit(
+        &self,
+        conn: &Connection,
+        instruction: &str,
+        selection: &str,
+        before: &str,
+        after: &str,
+        on_delta: Delta<'_>,
+    ) -> Result<AiAnswer> {
+        let tail = |s: &str, n: usize| -> String {
+            let v: Vec<char> = s.chars().collect();
+            v[v.len().saturating_sub(n)..].iter().collect()
+        };
+        let before = tail(before, 1500);
+        let after: String = after.chars().take(800).collect();
+        let schema = schema_context(conn, &format!("{instruction} {selection} {before}")).await?;
+        let user = if selection.trim().is_empty() {
+            format!(
+                "Write SQL to insert at <CURSOR>: {instruction}\n\nEditor:\n```sql\n{before}<CURSOR>{after}\n```\n\n\
+                 Reply with only the SQL to insert in one ```sql block (no surrounding text from the editor)."
+            )
+        } else {
+            format!(
+                "Rewrite the selected SQL: {instruction}\n\nSelected:\n```sql\n{selection}\n```\n\n\
+                 Context before:\n```sql\n{before}\n```\nContext after:\n```sql\n{after}\n```\n\n\
+                 Reply with only the replacement for the selected text in one ```sql block, then at most one sentence on what changed."
+            )
+        };
+        let reply = self
+            .ask(&system_prompt(conn.kind(), &schema), &user, on_delta)
+            .await?;
+        Ok(extract_sql(&reply))
+    }
+
     /// Propose a corrected query for an error.
     pub async fn fix(
         &self,
