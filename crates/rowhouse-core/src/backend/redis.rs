@@ -5,7 +5,27 @@
 use redis::{aio::MultiplexedConnection, Value as RV};
 use serde_json::{Number, Value};
 
-use crate::{QueryResult, Result, ResultColumn, TableInfo};
+use crate::{
+    config::{TlsConfig, TlsMode},
+    QueryResult, Result, ResultColumn, TableInfo,
+};
+
+/// Put the keychain password into a pasted URL that doesn't carry one.
+fn redis_url_with_password(url: &str, password: Option<&str>) -> String {
+    let Some(p) = password.filter(|p| !p.is_empty()) else {
+        return url.to_string();
+    };
+    let Ok(mut u) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if u.password().is_none() {
+        let _ = u.set_password(Some(p));
+        if u.username().is_empty() {
+            let _ = u.set_username("default");
+        }
+    }
+    u.to_string()
+}
 
 #[derive(Clone)]
 pub struct Client {
@@ -244,6 +264,7 @@ impl Client {
         user: Option<&str>,
         password: Option<&str>,
         database: Option<&str>,
+        tls: Option<&TlsConfig>,
     ) -> Result<Self> {
         let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
         let auth = match (
@@ -258,8 +279,54 @@ impl Client {
         let db = database
             .and_then(|d| d.trim().parse::<u32>().ok())
             .unwrap_or(0);
-        let client =
-            redis::Client::open(format!("redis://{auth}{host}:{port}/{db}")).map_err(err)?;
+        // a full redis:// / rediss:// URL in the host field (Upstash, Redis Cloud…)
+        let url = if host.starts_with("redis://") || host.starts_with("rediss://") {
+            redis_url_with_password(host, password)
+        } else {
+            let tls_on =
+                tls.is_some_and(|t| t.mode != TlsMode::Disable && t.mode != TlsMode::Prefer);
+            let scheme = if tls_on { "rediss" } else { "redis" };
+            format!("{scheme}://{auth}{host}:{port}/{db}")
+        };
+        let secure = url.starts_with("rediss://");
+        let verify = tls.is_none_or(|t| matches!(t.mode, TlsMode::VerifyCa | TlsMode::VerifyFull))
+            || !secure;
+        let url = if secure && !verify && !url.contains("#insecure") {
+            format!("{url}#insecure")
+        } else {
+            url
+        };
+        let read = |p: &Option<String>| -> Result<Option<Vec<u8>>> {
+            match p.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(path) => Ok(Some(std::fs::read(path)?)),
+                None => Ok(None),
+            }
+        };
+        let custom = tls.filter(|t| {
+            [&t.ca_cert, &t.client_cert, &t.client_key]
+                .iter()
+                .any(|p| p.as_deref().is_some_and(|s| !s.trim().is_empty()))
+        });
+        let client = match (secure, custom) {
+            (true, Some(t)) => {
+                let client_tls = match (read(&t.client_cert)?, read(&t.client_key)?) {
+                    (Some(client_cert), Some(client_key)) => Some(redis::ClientTlsConfig {
+                        client_cert,
+                        client_key,
+                    }),
+                    _ => None,
+                };
+                redis::Client::build_with_tls(
+                    url.as_str(),
+                    redis::TlsCertificates {
+                        client_tls,
+                        root_cert: read(&t.ca_cert)?,
+                    },
+                )
+            }
+            _ => redis::Client::open(url.as_str()),
+        }
+        .map_err(err)?;
         let mut conn = client
             .get_multiplexed_async_connection()
             .await

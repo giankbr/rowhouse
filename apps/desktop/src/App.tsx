@@ -18,6 +18,7 @@ import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
 import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type Destructive, type Snippet, type TableInfo } from "./lib/api";
+import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 
 export default function App() {
@@ -219,7 +220,7 @@ export default function App() {
       if (!activeConn) return;
       if (sql === undefined) {
         const k = connections.find((c) => c.id === activeConn)?.kind;
-        sql = k === "redis" ? "PING" : k === "mongodb" ? "show collections" : "SELECT 1;";
+        sql = k && kindInfo(k).dialect === "redis" ? "PING" : k === "mongodb" ? "show collections" : "SELECT 1;";
       }
       const n = tabs.filter((t) => t.kind === "query" && t.connId === activeConn).length + 1;
       addTab({ id: uid(), kind: "query", title: `Query ${n}`, connId: activeConn, sql });

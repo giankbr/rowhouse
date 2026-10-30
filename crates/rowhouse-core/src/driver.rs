@@ -284,9 +284,17 @@ impl Connection {
                 )
                 .await?,
             ),
-            Driver::Redis => {
-                Pool::Redis(backend::redis::Client::connect(&host, port, user, password, db).await?)
-            }
+            Driver::Redis => Pool::Redis(
+                backend::redis::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.tls.as_ref(),
+                )
+                .await?,
+            ),
             Driver::Mongo => Pool::Mongo(
                 backend::mongo::Client::connect(
                     &host,

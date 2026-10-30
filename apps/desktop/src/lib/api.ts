@@ -17,6 +17,7 @@ export type DbKind =
   | "mssql"
   | "clickhouse"
   | "redis"
+  | "upstash"
   | "mongodb";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb";
@@ -48,6 +49,7 @@ export const KINDS: KindInfo[] = [
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
   { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
+  { kind: "upstash", label: "Upstash", abbr: "Up", color: "#00c98d", dialect: "redis", port: 6379, user: "default", tls: true },
   { kind: "mongodb", label: "MongoDB", abbr: "Mo", color: "#00684a", dialect: "mongodb", port: 27017, user: null, beta: true },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },

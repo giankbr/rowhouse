@@ -208,8 +208,8 @@ export function ConnectionDialog({
                 />
               </Field>
             </div>
-            <Field label={c.kind === "redis" ? "Database number" : "Database"}>
-              <Input value={c.database ?? ""} placeholder={c.kind === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
+            <Field label={kindInfo(c.kind).dialect === "redis" ? "Database number" : "Database"}>
+              <Input value={c.database ?? ""} placeholder={kindInfo(c.kind).dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
             </Field>
           </>
         )}

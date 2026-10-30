@@ -211,7 +211,7 @@ impl Rowhouse {
         let c = self.conn(&a.connection).await?;
         let schema = self.default_schema(&c, a.schema, &a.table).await?;
         let limit = a.limit.unwrap_or(20).min(MAX_LIMIT);
-        if c.config.kind == rowhouse_core::DbKind::Redis {
+        if c.config.kind.driver() == rowhouse_core::config::Driver::Redis {
             // a "table" is a key: show its value page
             let page = c
                 .table_page(&rowhouse_core::browse::PageRequest {

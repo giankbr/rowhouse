@@ -37,6 +37,7 @@ pub enum DbKind {
     Mssql,
     Clickhouse,
     Redis,
+    Upstash,
     Mongodb,
 }
 
@@ -54,7 +55,7 @@ pub enum Driver {
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 16] = [
+    pub const ALL: [DbKind; 17] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -70,6 +71,7 @@ impl DbKind {
         DbKind::Mssql,
         DbKind::Clickhouse,
         DbKind::Redis,
+        DbKind::Upstash,
         DbKind::Mongodb,
     ];
 
@@ -82,7 +84,7 @@ impl DbKind {
             Duckdb => Driver::Duckdb,
             Mssql => Driver::Mssql,
             Clickhouse => Driver::Clickhouse,
-            Redis => Driver::Redis,
+            Redis | Upstash => Driver::Redis,
             Mongodb => Driver::Mongo,
         }
     }
@@ -102,7 +104,7 @@ impl DbKind {
             Tidb => Some(4000),
             Mssql => Some(1433),
             Clickhouse => Some(8123),
-            Redis => Some(6379),
+            Redis | Upstash => Some(6379),
             Mongodb => Some(27017),
             Sqlite | Duckdb => None,
         }
