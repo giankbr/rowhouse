@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "pnpm --filter rowhouse-desktop tauri dev",
     "dev:ui": "pnpm --filter rowhouse-desktop dev",
-    "build": "cargo build --release -p rowhouse-mcp && pnpm --filter rowhouse-desktop tauri build",
+    "build": "pnpm --filter rowhouse-desktop tauri build",
     "typecheck": "pnpm --filter rowhouse-desktop exec tsc --noEmit",
     "test": "cargo test --workspace",
-    "prepare": "husky"
+    "prepare": "husky",
+    "sidecar": "node scripts/sidecar.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",

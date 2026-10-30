@@ -44,8 +44,9 @@ export function McpDialog({ open, onClose }: { open: boolean; onClose: () => voi
           </Button>
         </div>
         <ul className="flex flex-col gap-1 text-2xs text-muted">
-          <li>• Tools: list_connections, list_tables, describe_table, sample_rows, run_query</li>
-          <li>• Writes are rejected (keyword guard + read-only transaction)</li>
+          <li>• Tools: list_connections, list_tables, describe_table, sample_rows, run_query, execute_sql</li>
+          <li>• Reads are read-only (keyword guard + read-only transaction)</li>
+          <li>• execute_sql: writes only on connections with “Allow AI to request writes”, and each one waits for your approval here</li>
           <li className="truncate">
             • Profiles file: <span className="selectable font-mono">{info?.configPath}</span>
           </li>

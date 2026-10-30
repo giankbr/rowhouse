@@ -449,6 +449,48 @@ async fn compare_data(
         .await
 }
 
+// ---- structure editor ---------------------------------------------------------
+
+#[tauri::command]
+async fn structure_preview(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    ops: Vec<rowhouse_core::structure::ColumnOp>,
+) -> CmdResult<Vec<String>> {
+    state.conn(&id).await?.structure_sql(&schema, &table, &ops)
+}
+
+#[tauri::command]
+async fn apply_structure(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    ops: Vec<rowhouse_core::structure::ColumnOp>,
+) -> CmdResult<Vec<String>> {
+    state
+        .conn(&id)
+        .await?
+        .apply_structure(&schema, &table, &ops)
+        .await
+}
+
+// ---- MCP write approvals ----------------------------------------------------
+
+use rowhouse_core::approvals::{ApprovalAnswer, ApprovalRequest, Approvals};
+
+#[tauri::command]
+fn approvals_pending() -> CmdResult<Vec<ApprovalRequest>> {
+    Approvals::open_default()?.pending()
+}
+
+#[tauri::command]
+fn approvals_answer(id: String, approved: bool, reason: Option<String>) -> CmdResult<()> {
+    Approvals::open_default()?.answer(&id, &ApprovalAnswer { approved, reason })
+}
+
 /// Write a text file chosen by the user in a save dialog (ERD export).
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> CmdResult<()> {
@@ -532,6 +574,15 @@ pub fn run() {
             let history = tauri::async_runtime::block_on(History::open_default())
                 .map_err(|e| eprintln!("history disabled: {e}"))
                 .ok();
+            // Tell rowhouse-mcp the app is open, so write requests can be approved.
+            tauri::async_runtime::spawn(async {
+                if let Ok(a) = Approvals::open_default() {
+                    loop {
+                        let _ = a.heartbeat();
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
+            });
             app.manage(AppState {
                 store: ConnectionStore::open_default(),
                 history,
@@ -559,6 +610,10 @@ pub fn run() {
             import_csv,
             mcp_info,
             write_text_file,
+            approvals_pending,
+            structure_preview,
+            apply_structure,
+            approvals_answer,
             parse_connection_url,
             table_page,
             compare_data,

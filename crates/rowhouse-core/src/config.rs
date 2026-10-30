@@ -36,6 +36,7 @@ pub enum DbKind {
     Duckdb,
     Mssql,
     Clickhouse,
+    Redis,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -47,10 +48,11 @@ pub enum Driver {
     Duckdb,
     Mssql,
     Clickhouse,
+    Redis,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 14] = [
+    pub const ALL: [DbKind; 15] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -65,6 +67,7 @@ impl DbKind {
         DbKind::Duckdb,
         DbKind::Mssql,
         DbKind::Clickhouse,
+        DbKind::Redis,
     ];
 
     pub fn driver(self) -> Driver {
@@ -76,6 +79,7 @@ impl DbKind {
             Duckdb => Driver::Duckdb,
             Mssql => Driver::Mssql,
             Clickhouse => Driver::Clickhouse,
+            Redis => Driver::Redis,
         }
     }
 
@@ -94,6 +98,7 @@ impl DbKind {
             Tidb => Some(4000),
             Mssql => Some(1433),
             Clickhouse => Some(8123),
+            Redis => Some(6379),
             Sqlite | Duckdb => None,
         }
     }
@@ -122,6 +127,9 @@ pub struct ConnectionConfig {
     /// Allow the MCP server to see / use this profile at all.
     #[serde(default = "yes")]
     pub mcp_enabled: bool,
+    /// Let MCP clients request writes; each one still needs approval in the app.
+    #[serde(default)]
+    pub mcp_writes: bool,
     /// Tag color shown in the sidebar (e.g. "red" for production).
     #[serde(default)]
     pub color: Option<String>,
@@ -226,6 +234,7 @@ impl ConnectionConfig {
             file: None,
             read_only: false,
             mcp_enabled: true,
+            mcp_writes: false,
             color: None,
             env: Environment::None,
             tls: match kind {

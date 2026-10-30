@@ -5,3 +5,4 @@ apps/desktop/src-tauri/gen
 .DS_Store
 *.log
 .env
+apps/desktop/src-tauri/binaries
