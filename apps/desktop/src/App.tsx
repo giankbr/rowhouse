@@ -16,6 +16,11 @@ import { loadSession, saveSession } from "./lib/session";
 import { loadAppearance } from "./lib/appearance";
 import { QueryBuilder } from "./components/QueryBuilder";
 import { ActivityDialog } from "./components/ActivityDialog";
+import { RolesDialog } from "./components/RolesDialog";
+import { ExtensionsDialog } from "./components/ExtensionsDialog";
+import { ExtensionPanel } from "./components/ExtensionPanel";
+import { RunFileDialog } from "./components/RunFileDialog";
+import { FakeDataDialog } from "./components/FakeDataDialog";
 import { BackupDialog } from "./components/BackupDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar, type TableMenuAction } from "./components/Sidebar";
@@ -25,7 +30,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type DbObject, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 import { findVars, type VarRef } from "./lib/vars";
@@ -36,6 +41,7 @@ export default function App() {
   const [activeConn, setActiveConn] = useState<string | null>(null);
   const [connected, setConnected] = useState<Record<string, boolean>>({});
   const [tables, setTables] = useState<Record<string, TableInfo[]>>({});
+  const [objects, setObjects] = useState<Record<string, DbObject[]>>({});
   const [loadingTables, setLoadingTables] = useState(false);
   const [session] = useState(loadSession);
   const [tabs, setTabs] = useState<Tab[]>(session.tabs);
@@ -54,6 +60,17 @@ export default function App() {
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
+  const [extensionsOpen, setExtensionsOpen] = useState(false);
+  const [exts, setExts] = useState<ExtensionInfo[]>([]);
+  useEffect(() => {
+    api.ext
+      .list()
+      .then(setExts)
+      .catch(() => {});
+  }, []);
+  const [runFileOpen, setRunFileOpen] = useState(false);
+  const [fakeTable, setFakeTable] = useState<TableInfo | null>(null);
   const [backup, setBackup] = useState<"backup" | "restore" | null>(null);
   const [schedules, setSchedules] = useState<{ draft: { connectionId: string; sql: string; name?: string } | null } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -182,6 +199,10 @@ export default function App() {
       setTables((t) => ({ ...t, [id]: [] }));
       const list = await api.listTables(id);
       setTables((t) => ({ ...t, [id]: list }));
+      api
+        .listObjects(id)
+        .then((o) => setObjects((m) => ({ ...m, [id]: o })))
+        .catch(() => setObjects((m) => ({ ...m, [id]: [] })));
     } catch (e) {
       setConnected((c) => ({ ...c, [id]: false }));
       setToast(String(e));
@@ -383,13 +404,18 @@ export default function App() {
   );
 
   const openTable = useCallback(
-    async (info: TableInfo, view: "data" | "structure" = "data") => {
+    async (info: TableInfo, view: "data" | "structure" = "data", filters?: Filter[]) => {
       if (!activeConn) return;
       const existing = tabs.find(
         (t) => t.kind === "table" && t.connId === activeConn && t.schema === info.schema && t.table === info.name,
       );
       if (existing) {
         if (view === "structure") patchTab(existing.id, { view });
+        if (filters) {
+          const next = { ...existing, filters, offset: 0, view: "data" as const };
+          patchTab(existing.id, { filters, offset: 0, view: "data" });
+          execTab(next);
+        }
         return selectTab(existing.id);
       }
       const sql = await api.tableSql(activeConn, info.schema, info.name);
@@ -402,6 +428,7 @@ export default function App() {
         schema: info.schema,
         table: info.name,
         view,
+        filters,
       };
       addTab(t);
       runTab(t);
@@ -411,7 +438,7 @@ export default function App() {
         .then((columns) => patchTab(t.id, { columns }))
         .catch((e) => setToast(String(e)));
     },
-    [activeConn, tabs, runTab, patchTab, addTab, selectTab, setToast],
+    [activeConn, tabs, runTab, patchTab, addTab, selectTab, setToast, execTab],
   );
 
   // restored table tabs load their data the first time they're shown
@@ -447,6 +474,8 @@ export default function App() {
           return openTable(t, "structure");
         case "ddl":
           return setDdlTable(t);
+        case "generate":
+          return setFakeTable(t);
         case "query": {
           const sql = await api.tableSql(activeConn, t.schema, t.name).catch(() => "");
           return openQuery(activeConn, sql, false);
@@ -494,6 +523,21 @@ export default function App() {
       else if (d.kind === "truncate") tabs.filter(match).forEach((x) => execTab(x));
     },
     [tableDlg, activeConn, loadTables, tabs, setToast, closeTab, execTab],
+  );
+
+  /** Open (or focus) an extension panel tab, optionally delivering an event to it. */
+  const openExtPanel = useCallback(
+    (x: ExtensionInfo, panel: string, event?: { event: string; data: unknown }) => {
+      const ev = event ? { ...event, nonce: uid() } : undefined;
+      const existing = tabs.find((t) => t.kind === "extension" && t.ext === x.manifest.id && t.panel === panel);
+      if (existing) {
+        if (ev) patchTab(existing.id, { extEvent: ev, connId: activeConn ?? existing.connId });
+        return selectTab(existing.id);
+      }
+      const title = x.manifest.contributes.panels.find((p) => p.id === panel)?.title ?? x.manifest.name;
+      addTab({ id: uid(), kind: "extension", title, connId: activeConn ?? "", sql: "", ext: x.manifest.id, panel, extEvent: ev });
+    },
+    [tabs, activeConn, patchTab, selectTab, addTab],
   );
 
   const splitRight = useCallback(() => {
@@ -579,6 +623,16 @@ export default function App() {
               onRunSql={(sql) => openQuery(t.connId, sql, true)}
               onToast={setToast}
             />
+          ) : t.kind === "extension" ? (
+            <ExtensionPanel
+              key={t.id}
+              ext={exts.find((x) => x.manifest.id === t.ext && x.enabled)}
+              conn={connections.find((c) => c.id === (activeConn ?? t.connId))}
+              event={t.extEvent}
+              onToast={setToast}
+              onOpenQuery={(sql) => activeConn && openQuery(activeConn, sql, false)}
+              onOpenTable={(info) => openTable(info)}
+            />
           ) : t.kind === "erd" ? (
             <ErdView
               key={t.id}
@@ -606,6 +660,15 @@ export default function App() {
                 execTab(next);
               }}
               onView={(v) => setView(t, v)}
+              onFollow={(target, filters) => openTable({ ...target, kind: "table" }, "data", filters)}
+              resultActions={exts
+                .filter((x) => x.enabled && x.granted.includes("result"))
+                .flatMap((x) => x.manifest.contributes.resultActions.map((a) => ({ ext: x.manifest.id, id: a.id, title: a.title })))}
+              onResultAction={(extId, action, result) => {
+                const x = exts.find((e) => e.manifest.id === extId);
+                const panel = x?.manifest.contributes.panels[0]?.id;
+                if (x && panel) openExtPanel(x, panel, { event: "result", data: { action, result, sql: t.sql } });
+              }}
               onToast={setToast}
               onHistory={() => setHistoryOpen((h) => !h)}
               onSchedule={(sql) => setSchedules({ draft: { connectionId: t.connId, sql, name: t.snippetId ? t.title : "" } })}
@@ -663,7 +726,13 @@ export default function App() {
                   ? setSchedules({ draft: null })
                   : t === "activity"
                     ? setActivityOpen(true)
-                    : setBackup(t)
+                    : t === "roles"
+                      ? setRolesOpen(true)
+                      : t === "runfile"
+                        ? setRunFileOpen(true)
+                        : t === "extensions"
+                          ? setExtensionsOpen(true)
+                          : setBackup(t)
         }
       />
       )}
@@ -686,6 +755,18 @@ export default function App() {
               onErd={openErd}
               onCompare={openCompare}
               onTableMenu={onTableMenu}
+              objects={(activeConn && objects[activeConn]) || []}
+              onOpenObject={async (o) => {
+                if (!activeConn) return;
+                if (o.kind === "matview") return openTable({ schema: o.schema, name: o.name, kind: "view" });
+                try {
+                  const sql = await api.objectDefinition(activeConn, o);
+                  const t: Tab = { id: uid(), kind: "query", title: o.name, connId: activeConn, sql };
+                  addTab(t);
+                } catch (e) {
+                  setToast(String(e));
+                }
+              }}
               onNewTable={() => setNewTableOpen(true)}
               canEdit={!!conn && kindInfo(conn.kind).dialect !== "redis"}
             />
@@ -782,6 +863,36 @@ export default function App() {
           />
         </>
       )}
+      <RunFileDialog
+        conn={conn}
+        open={runFileOpen}
+        onClose={() => setRunFileOpen(false)}
+        onDone={(p) => {
+          if (conn && p.done > 0) loadTables(conn.id);
+          setToast(p.failed ? `Finished with ${p.failed} error${p.failed === 1 ? "" : "s"}` : `Ran ${p.done.toLocaleString()} statements`, p.failed ? "err" : "ok");
+        }}
+      />
+      {conn && fakeTable && (
+        <FakeDataDialog
+          conn={conn}
+          table={fakeTable}
+          onClose={() => setFakeTable(null)}
+          onToast={setToast}
+          onDone={(t, n) => {
+            setFakeTable(null);
+            setToast(`Inserted ${n.toLocaleString()} rows into ${t.name}`, "ok");
+            tabs.filter((x) => x.kind === "table" && x.connId === conn.id && x.schema === t.schema && x.table === t.name).forEach((x) => execTab(x));
+          }}
+        />
+      )}
+      <ExtensionsDialog
+        open={extensionsOpen}
+        onClose={() => setExtensionsOpen(false)}
+        onChanged={setExts}
+        onOpenPanel={(x, panel) => openExtPanel(x, panel)}
+        onToast={setToast}
+      />
+      <RolesDialog conn={conn} open={rolesOpen} tables={connTables} onClose={() => setRolesOpen(false)} onToast={setToast} />
       <ActivityDialog conn={conn} open={activityOpen} onClose={() => setActivityOpen(false)} onToast={setToast} />
       <BackupDialog mode={backup} conn={conn} tables={connTables} onClose={() => setBackup(null)} onRestored={() => activeConn && loadTables(activeConn)} />
       <SchedulesDialog open={!!schedules} draft={schedules?.draft} onClose={() => setSchedules(null)} connections={connections} />
@@ -816,6 +927,9 @@ export default function App() {
         onClose={() => setPalette(false)}
         connections={connections}
         tables={connTables}
+        extensions={exts
+          .filter((x) => x.enabled)
+          .flatMap((x) => x.manifest.contributes.panels.map((p) => ({ label: `${x.manifest.name}: ${p.title}`, run: () => openExtPanel(x, p.id) })))}
         actions={{
           newQuery: () => newQuery(),
           openErd,
@@ -832,6 +946,9 @@ export default function App() {
           showMcp: () => setMcpOpen(true),
           showSchedules: () => setSchedules({ draft: null }),
           showActivity: () => setActivityOpen(true),
+          showRoles: () => setRolesOpen(true),
+          runFile: () => setRunFileOpen(true),
+          showExtensions: () => setExtensionsOpen(true),
           backup: () => setBackup("backup"),
           restore: () => setBackup("restore"),
         }}

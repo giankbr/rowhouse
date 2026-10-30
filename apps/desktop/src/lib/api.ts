@@ -201,6 +201,80 @@ export interface ForeignKey {
   ref_table: string;
   ref_columns: string[];
 }
+export interface DbObject {
+  schema: string;
+  name: string;
+  kind: "function" | "procedure" | "trigger" | "sequence" | "type" | "matview" | "macro";
+  detail: string | null;
+}
+export interface RoleInfo {
+  id: string;
+  name: string;
+  host: string | null;
+  login: boolean;
+  superuser: boolean;
+  attributes: string[];
+  memberOf: string[];
+}
+export interface RoleGrant {
+  schema: string;
+  object: string;
+  privileges: string[];
+  statement: string | null;
+}
+export type RoleOp =
+  | { op: "create"; name: string; host: string | null; password: string | null; login: boolean; superuser: boolean; createDb: boolean }
+  | { op: "drop"; id: string }
+  | { op: "password"; id: string; password: string }
+  | { op: "grant" | "revoke"; id: string; privileges: string[]; schema: string; table: string | null }
+  | { op: "addMember"; id: string; role: string };
+export interface ScriptProgress {
+  total: number;
+  done: number;
+  failed: number;
+  rowsAffected: number;
+  elapsedMs: number;
+  finished: boolean;
+  cancelled: boolean;
+  errors: { index: number; line: number; statement: string; message: string }[];
+  current: string | null;
+}
+export type Gen =
+  | { kind: "skip" | "null" | "bool" | "firstName" | "lastName" | "fullName" | "email" | "phone" | "city" | "country" | "company" | "url" | "uuid" | "json" }
+  | { kind: "fixed"; value: string }
+  | { kind: "sequence"; start: number }
+  | { kind: "int"; min: number; max: number }
+  | { kind: "float"; min: number; max: number; decimals: number }
+  | { kind: "date" | "timestamp"; from: string; to: string }
+  | { kind: "words"; min: number; max: number }
+  | { kind: "pick"; values: string[] }
+  | { kind: "reference"; schema: string; table: string; column: string }
+  | { kind: "nullable"; percent: number; inner: Gen };
+export interface ColumnGen {
+  column: string;
+  dataType: string;
+  gen: Gen;
+}
+export interface ExtensionManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  entry: string;
+  contributes: { panels: { id: string; title: string }[]; commands: { id: string; title: string }[]; resultActions: { id: string; title: string }[] };
+  permissions: string[];
+}
+export interface ExtensionInfo {
+  manifest: ExtensionManifest;
+  dir: string;
+  enabled: boolean;
+  granted: string[];
+}
+export interface Relations {
+  outgoing: ForeignKey[];
+  incoming: ForeignKey[];
+}
 export interface Erd {
   tables: ErdTable[];
   foreign_keys: ForeignKey[];
@@ -455,6 +529,15 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   return mock(cmd, args ?? {}) as Promise<T>;
 }
 
+/** A Tauri IPC channel for typed progress messages. */
+async function channelOf<T>(fn: (v: T) => void): Promise<unknown> {
+  if (!isTauri) return fn;
+  const { Channel } = await import("@tauri-apps/api/core");
+  const ch = new Channel<T>();
+  ch.onmessage = fn;
+  return ch;
+}
+
 /** A Tauri IPC channel that forwards streamed text to `fn` (a plain callback in the browser mock). */
 async function channel(fn?: (s: string) => void): Promise<unknown> {
   if (!isTauri) return fn;
@@ -538,6 +621,27 @@ export const api = {
     call<string[]>("structure_preview", { id, schema, table, ops }),
   applyStructure: (id: string, schema: string, table: string, ops: ColumnOp[]) =>
     call<string[]>("apply_structure", { id, schema, table, ops }),
+  runSqlFile: async (id: string, path: string, continueOnError: boolean, runId: string, onProgress: (p: ScriptProgress) => void) =>
+    call<ScriptProgress>("run_sql_file", { id, path, options: { continueOnError }, runId, onProgress: await channelOf(onProgress) }),
+  cancelSqlFile: (runId: string) => call<void>("cancel_sql_file", { runId }),
+  fakePlan: (id: string, schema: string, table: string) => call<ColumnGen[]>("fake_plan", { id, schema, table }),
+  fakePreview: (id: string, plan: ColumnGen[], seed: number) => call<QueryResult>("fake_preview", { id, plan, seed }),
+  fakeInsert: async (id: string, schema: string, table: string, plan: ColumnGen[], count: number, seed: number, onProgress: (n: number) => void) =>
+    call<number>("fake_insert", { id, schema, table, plan, count, seed, onProgress: await channelOf(onProgress) }),
+  ext: {
+    list: () => call<ExtensionInfo[]>("ext_list"),
+    install: (path: string) => call<ExtensionInfo>("ext_install", { path }),
+    uninstall: (ext: string) => call<void>("ext_uninstall", { ext }),
+    setEnabled: (ext: string, enabled: boolean) => call<ExtensionInfo>("ext_set_enabled", { ext, enabled }),
+    entry: (ext: string) => call<string>("ext_entry", { ext }),
+    query: (ext: string, id: string, sql: string, limit?: number) => call<QueryOutput>("ext_query", { ext, id, sql, limit }),
+  },
+  listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
+  roleGrants: (id: string, role: string) => call<RoleGrant[]>("role_grants", { id, role }),
+  roleAction: (id: string, op: RoleOp, preview: boolean) => call<string[]>("role_action", { id, op, preview }),
+  listObjects: (id: string) => call<DbObject[]>("list_objects", { id }),
+  objectDefinition: (id: string, object: DbObject) => call<string>("object_definition", { id, object }),
+  tableRelations: (id: string, schema: string, table: string) => call<Relations>("table_relations", { id, schema, table }),
   tableDdl: (id: string, schema: string, table: string) => call<string>("table_ddl", { id, schema, table }),
   tableAction: (id: string, schema: string, table: string, isView: boolean, action: TableAction, preview: boolean) =>
     call<string[]>("table_action", { id, schema, table, isView, action, preview }),
@@ -634,6 +738,48 @@ export function newConnection(kind: DbKind = "postgres"): ConnectionConfig {
 // ---------------------------------------------------------------------------
 
 const mockCancelled = new Set<string>();
+const mockManifest = (m: Partial<ExtensionManifest> & Pick<ExtensionManifest, "id" | "name">): ExtensionManifest => ({
+  version: "1.0.0",
+  description: "",
+  author: "Rowhouse",
+  entry: "index.html",
+  contributes: { panels: [], commands: [], resultActions: [] },
+  permissions: [],
+  ...m,
+});
+const mockExts: ExtensionInfo[] = [
+  {
+    manifest: mockManifest({ id: "table-stats", name: "Table stats", description: "Row counts for every table in the open connection, largest first.", contributes: { panels: [{ id: "main", title: "Table stats" }], commands: [], resultActions: [] }, permissions: ["schema", "query:read"] }),
+    dir: "~/Library/Application Support/id.novagen.rowhouse/extensions/table-stats",
+    enabled: true,
+    granted: ["schema", "query:read"],
+  },
+  {
+    manifest: mockManifest({ id: "result-to-markdown", name: "Result to Markdown", description: "Turns a query result into a Markdown table you can paste into docs, PRs or chat.", contributes: { panels: [{ id: "main", title: "Markdown" }], commands: [], resultActions: [{ id: "send", title: "Send to Markdown" }] }, permissions: ["result", "clipboard"] }),
+    dir: "~/Library/Application Support/id.novagen.rowhouse/extensions/result-to-markdown",
+    enabled: false,
+    granted: [],
+  },
+];
+const mockRoles: RoleInfo[] = [
+  { id: "postgres", name: "postgres", host: null, login: true, superuser: true, attributes: ["CREATEDB", "CREATEROLE", "REPLICATION"], memberOf: [] },
+  { id: "app", name: "app", host: null, login: true, superuser: false, attributes: ["connection limit 50"], memberOf: ["readwrite"] },
+  { id: "metabase", name: "metabase", host: null, login: true, superuser: false, attributes: [], memberOf: ["readonly"] },
+  { id: "readonly", name: "readonly", host: null, login: false, superuser: false, attributes: [], memberOf: [] },
+  { id: "readwrite", name: "readwrite", host: null, login: false, superuser: false, attributes: [], memberOf: [] },
+];
+const mockGrants: Record<string, RoleGrant[]> = {
+  app: [
+    { schema: "public", object: "", privileges: ["USAGE"], statement: null },
+    { schema: "public", object: "orders", privileges: ["DELETE", "INSERT", "SELECT", "UPDATE"], statement: null },
+    { schema: "public", object: "users", privileges: ["INSERT", "SELECT", "UPDATE"], statement: null },
+    { schema: "billing", object: "subscriptions", privileges: ["SELECT"], statement: null },
+  ],
+  metabase: [
+    { schema: "public", object: "", privileges: ["USAGE"], statement: null },
+    { schema: "public", object: "orders", privileges: ["SELECT"], statement: null },
+  ],
+};
 let mockSync: SyncStatus = {
   state: { folder: null, includeSecrets: false, lastSync: null, lastError: null, remoteDevice: null, remoteAt: null },
   hasPassphrase: false,
@@ -797,6 +943,168 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       if (pk.length) lines.push(`  PRIMARY KEY (${pk.join(", ")})`);
       if (!a.preview) mockTables.push({ schema: a.schema as string, name: a.table as string, kind: "table" });
       return `CREATE TABLE "${a.schema}"."${a.table}" (\n${lines.join(",\n")}\n);`;
+    }
+    case "run_sql_file": {
+      const send = a.onProgress as (p: ScriptProgress) => void;
+      const total = 240;
+      const p: ScriptProgress = { total, done: 0, failed: 0, rowsAffected: 0, elapsedMs: 0, finished: false, cancelled: false, errors: [], current: null };
+      mockCancelled.delete(String(a.runId));
+      for (let i = 0; i < total; i++) {
+        if (mockCancelled.has(String(a.runId))) {
+          p.cancelled = true;
+          break;
+        }
+        await sleep(12);
+        p.done = i + 1;
+        p.rowsAffected += 3;
+        p.elapsedMs += 12;
+        p.current = i % 2 ? `INSERT INTO order_items (order_id, product_id, quantity) VALUES (${i}, ${i % 17}, 2), …` : `INSERT INTO orders (user_id, total, status) VALUES (${i}, 42.50, 'paid'), …`;
+        if (i === 97) {
+          p.failed++;
+          p.errors.push({ index: i, line: 1204, statement: "INSERT INTO orders (user_id, total) VALUES (99999, 10)", message: 'database error: insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"' });
+          if (!(a.options as { continueOnError: boolean }).continueOnError) break;
+        }
+        if (i % 8 === 0) send({ ...p, errors: [...p.errors] });
+      }
+      p.finished = true;
+      p.current = null;
+      send({ ...p, errors: [...p.errors] });
+      return p;
+    }
+    case "cancel_sql_file":
+      mockCancelled.add(String(a.runId));
+      return null;
+    case "fake_plan":
+      return [
+        { column: "id", dataType: "bigint", gen: { kind: "skip" } },
+        { column: "full_name", dataType: "text", gen: { kind: "fullName" } },
+        { column: "email", dataType: "citext", gen: { kind: "email" } },
+        { column: "city", dataType: "varchar(64)", gen: { kind: "nullable", percent: 10, inner: { kind: "city" } } },
+        { column: "balance", dataType: "numeric(12,2)", gen: { kind: "nullable", percent: 10, inner: { kind: "float", min: 1, max: 1000, decimals: 2 } } },
+        { column: "active", dataType: "boolean", gen: { kind: "bool" } },
+        { column: "meta", dataType: "jsonb", gen: { kind: "nullable", percent: 10, inner: { kind: "json" } } },
+        { column: "created_at", dataType: "timestamptz", gen: { kind: "timestamp", from: "2024-01-01", to: "2026-12-31" } },
+      ] satisfies ColumnGen[];
+    case "fake_preview": {
+      const plan = (a.plan as ColumnGen[]).filter((c) => c.gen.kind !== "skip");
+      let seed = Number(a.seed) || 1;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const val = (g: Gen, i: number): Cell => {
+        switch (g.kind) {
+          case "nullable": return rnd() * 100 < g.percent ? null : val(g.inner, i);
+          case "fullName": return `${first[Math.floor(rnd() * first.length)]} ${["Santoso", "Wijaya", "Smith", "Tanaka", "Garcia"][Math.floor(rnd() * 5)]}`;
+          case "firstName": return first[Math.floor(rnd() * first.length)];
+          case "email": return `${first[Math.floor(rnd() * first.length)].toLowerCase()}${i}@example.com`;
+          case "city": return cities[Math.floor(rnd() * cities.length)];
+          case "float": return (g.min + rnd() * (g.max - g.min)).toFixed(g.decimals);
+          case "int": return Math.round(g.min + rnd() * (g.max - g.min));
+          case "sequence": return g.start + i;
+          case "bool": return rnd() > 0.5;
+          case "json": return { source: "rowhouse", score: Math.round(rnd() * 100) };
+          case "timestamp": case "date": return `2025-${String(1 + Math.floor(rnd() * 12)).padStart(2, "0")}-${String(1 + Math.floor(rnd() * 28)).padStart(2, "0")}${g.kind === "timestamp" ? " 10:24:00" : ""}`;
+          case "fixed": return g.value;
+          case "pick": return g.values[Math.floor(rnd() * g.values.length)] ?? null;
+          case "uuid": return crypto.randomUUID();
+          case "words": return "Lorem ipsum dolor";
+          case "null": return null;
+          default: return "…";
+        }
+      };
+      return { columns: plan.map((c) => ({ name: c.column, data_type: c.dataType })), rows: Array.from({ length: 8 }, (_, i) => plan.map((c) => val(c.gen, i))), rows_affected: 0, truncated: false } satisfies QueryResult;
+    }
+    case "fake_insert": {
+      const send = a.onProgress as (n: number) => void;
+      const n = Number(a.count);
+      for (let d = 0; d < n; d += 500) {
+        await sleep(120);
+        send(Math.min(n, d + 500));
+      }
+      return n;
+    }
+    case "ext_list":
+      return mockExts.map((x) => ({ ...x }));
+    case "ext_install": {
+      throw "Pick a folder with a manifest.json (or a .rhext file) — the browser preview can't read files";
+    }
+    case "ext_uninstall":
+      mockExts.splice(mockExts.findIndex((x) => x.manifest.id === a.ext), 1);
+      return null;
+    case "ext_set_enabled": {
+      const x = mockExts.find((x) => x.manifest.id === a.ext)!;
+      x.enabled = !!a.enabled;
+      x.granted = x.enabled ? [...x.manifest.permissions] : [];
+      return { ...x };
+    }
+    case "ext_entry": {
+      if (a.ext === "table-stats") {
+        const [html, js, css] = await Promise.all([
+          import("../../../../extensions/examples/table-stats/index.html?raw"),
+          import("../../../../extensions/examples/table-stats/main.js?raw"),
+          import("../../../../extensions/examples/table-stats/style.css?raw"),
+        ]);
+        return html.default.replace('<link rel="stylesheet" href="style.css" />', `<style>${css.default}</style>`).replace('<script src="main.js"></script>', `<script>${js.default}</script>`);
+      }
+      return (await import("../../../../extensions/examples/result-to-markdown/index.html?raw")).default;
+    }
+    case "ext_query": {
+      const sql = String(a.sql);
+      if (/^\s*select\s+count\(\*\)/i.test(sql)) {
+        const n = (sql.length * 7919) % 250000;
+        return { elapsed_ms: 3, results: [{ columns: [{ name: "count", data_type: "INT8" }], rows: [[n]], rows_affected: 0, truncated: false }] } satisfies QueryOutput;
+      }
+      return mock("run_query", { sql });
+    }
+    case "list_roles":
+      return mockRoles;
+    case "role_grants":
+      return (mockGrants[String(a.role)] ?? []) satisfies RoleGrant[];
+    case "role_action": {
+      const op = a.op as RoleOp;
+      const q = (x: string) => `"${x}"`;
+      const on = (o: { schema: string; table: string | null }) => (o.table ? `TABLE ${q(o.schema)}.${q(o.table)}` : `ALL TABLES IN SCHEMA ${q(o.schema)}`);
+      let sql: string[];
+      if (op.op === "create") {
+        if (!op.name.trim()) throw "enter a name";
+        sql = [`CREATE ROLE ${q(op.name)} WITH ${op.login ? "LOGIN" : "NOLOGIN"}${op.superuser ? " SUPERUSER" : ""}${op.createDb ? " CREATEDB" : ""}${op.password ? " PASSWORD '••••••'" : ""}`];
+      } else if (op.op === "drop") sql = [`DROP ROLE ${q(op.id)}`];
+      else if (op.op === "password") sql = [`ALTER ROLE ${q(op.id)} WITH PASSWORD '••••••'`];
+      else if (op.op === "grant") sql = [`GRANT USAGE ON SCHEMA ${q(op.schema)} TO ${q(op.id)}`, `GRANT ${op.privileges.join(", ")} ON ${on(op)} TO ${q(op.id)}`];
+      else if (op.op === "revoke") sql = [`REVOKE ${op.privileges.join(", ")} ON ${on(op)} FROM ${q(op.id)}`];
+      else sql = [`GRANT ${q((op as { role: string }).role)} TO ${q(op.id)}`];
+      if (!a.preview) {
+        if (op.op === "create") mockRoles.push({ id: op.name, name: op.name, host: null, login: op.login, superuser: op.superuser, attributes: op.createDb ? ["CREATEDB"] : [], memberOf: [] });
+        if (op.op === "drop") mockRoles.splice(mockRoles.findIndex((r) => r.id === op.id), 1);
+        if (op.op === "grant") (mockGrants[op.id] ??= []).push({ schema: op.schema, object: op.table ?? "", privileges: op.privileges, statement: null });
+        if (op.op === "revoke") mockGrants[op.id] = (mockGrants[op.id] ?? []).filter((g) => !(g.schema === op.schema && g.object === (op.table ?? "")));
+      }
+      return sql;
+    }
+    case "list_objects":
+      return [
+        { schema: "public", name: "order_total", kind: "function", detail: "order_id bigint" },
+        { schema: "public", name: "set_updated_at", kind: "function", detail: "" },
+        { schema: "public", name: "refresh_rollups", kind: "procedure", detail: "" },
+        { schema: "public", name: "orders_set_updated_at", kind: "trigger", detail: "orders" },
+        { schema: "public", name: "users_set_updated_at", kind: "trigger", detail: "users" },
+        { schema: "public", name: "invoice_number_seq", kind: "sequence", detail: null },
+        { schema: "public", name: "order_status", kind: "type", detail: null },
+        { schema: "public", name: "daily_revenue", kind: "matview", detail: null },
+      ] satisfies DbObject[];
+    case "object_definition": {
+      const o = a.object as DbObject;
+      if (o.kind === "function")
+        return `CREATE OR REPLACE FUNCTION public.${o.name}(${o.detail ?? ""})\n RETURNS numeric\n LANGUAGE sql\n STABLE\nAS $function$\n  SELECT coalesce(sum(quantity * unit_price), 0)\n  FROM order_items WHERE order_items.order_id = $1\n$function$;`;
+      if (o.kind === "trigger") return `CREATE TRIGGER ${o.name} BEFORE UPDATE ON public.${o.detail} FOR EACH ROW EXECUTE FUNCTION set_updated_at();`;
+      if (o.kind === "type") return `CREATE TYPE public.${o.name} AS ENUM ('pending', 'paid', 'shipped', 'refunded');`;
+      if (o.kind === "sequence") return `CREATE SEQUENCE public.${o.name} AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1000 CACHE 1;`;
+      return `CREATE MATERIALIZED VIEW public.${o.name} AS\n SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue\n FROM orders GROUP BY 1;`;
+    }
+    case "table_relations": {
+      const fk = (name: string, table: string, columns: string[], refTable: string, refColumns: string[]): ForeignKey => ({ name, schema: "public", table, columns, ref_schema: "public", ref_table: refTable, ref_columns: refColumns });
+      if (a.table === "users")
+        return { outgoing: [fk("users_city_fkey", "users", ["city"], "cities", ["name"])], incoming: [fk("orders_user_id_fkey", "orders", ["user_id"], "users", ["id"]), fk("sessions_user_id_fkey", "sessions", ["user_id"], "users", ["id"])] } satisfies Relations;
+      if (a.table === "orders") return { outgoing: [fk("orders_user_id_fkey", "orders", ["user_id"], "users", ["id"])], incoming: [fk("order_items_order_id_fkey", "order_items", ["order_id"], "orders", ["id"])] };
+      return { outgoing: [], incoming: [] };
     }
     case "table_foreign_keys":
       return a.table === "orders"

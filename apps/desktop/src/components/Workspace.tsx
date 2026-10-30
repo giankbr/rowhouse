@@ -1,7 +1,7 @@
-import { AlertCircle, AlignLeft, BarChart3, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { AlertCircle, AlignLeft, BarChart3, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { canFormat, formatSql } from "../lib/format";
-import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
+import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type Filter, type Relations, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { AiPanel, type AiState } from "./AiPanel";
@@ -29,7 +29,13 @@ export function Workspace({
   onOpenSettings,
   active = true,
   onBrowse,
+  onFollow,
+  resultActions = [],
+  onResultAction,
 }: {
+  /** "Send to …" actions contributed by extensions */
+  resultActions?: { ext: string; id: string; title: string }[];
+  onResultAction?: (ext: string, action: string, result: import("../lib/api").QueryResult) => void;
   tab: Tab;
   conn: ConnectionConfig | undefined;
   tables: TableInfo[];
@@ -49,7 +55,21 @@ export function Workspace({
   active?: boolean;
   /** table tabs: change filters / sort / page and reload from the server */
   onBrowse?: (patch: Pick<Tab, "filters" | "sort" | "offset">) => void;
+  /** open another table filtered to the linked rows (foreign keys) */
+  onFollow?: (target: { schema: string; name: string }, filters: Filter[]) => void;
 }) {
+  const [relations, setRelations] = useState<Relations | null>(null);
+  useEffect(() => {
+    if (tab.kind !== "table" || !tab.schema || !tab.table) return;
+    let live = true;
+    api
+      .tableRelations(tab.connId, tab.schema, tab.table)
+      .then((r) => live && setRelations(r))
+      .catch(() => live && setRelations(null));
+    return () => {
+      live = false;
+    };
+  }, [tab.kind, tab.connId, tab.schema, tab.table]);
   const [showFilters, setShowFilters] = useState((tab.filters?.length ?? 0) > 0);
   const [editorH, setEditorH] = useState(220);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -335,7 +355,19 @@ export function Workspace({
               </Button>
             )}
             <ResultSwitcher count={results.length} idx={idx} onPick={(i) => onChange({ resultIndex: i })} />
-            <span className={cx(results.length < 2 && "ml-auto")}>{exportMenu}</span>
+            {resultActions.length > 0 && result && onResultAction && (
+              <span className={cx(results.length < 2 && "ml-auto")}>
+                <Menu
+                  label={
+                    <>
+                      <Puzzle size={11} /> Extensions
+                    </>
+                  }
+                  items={resultActions.map((a) => ({ label: a.title, onSelect: () => onResultAction(a.ext, a.id, result) }))}
+                />
+              </span>
+            )}
+            <span className={cx(results.length < 2 && !(resultActions.length > 0 && result && onResultAction) && "ml-auto")}>{exportMenu}</span>
             <Button variant="ghost" size="xs" onClick={onHistory} title={`Query history (${mod}+Y)`}>
               <History size={11} /> History
             </Button>
@@ -462,6 +494,8 @@ export function Workspace({
               .filter((i) => i >= 0)}
             serverSort={tab.kind === "table" ? (tab.sort ?? null) : undefined}
             onServerSort={tab.kind === "table" && onBrowse ? (sort) => onBrowse({ sort, offset: 0 }) : undefined}
+            relations={tab.kind === "table" && relations ? relations : undefined}
+            onFollow={onFollow}
             edit={editable ? { pending: tab.pending ?? { edits: {}, deletes: [], inserts: [] }, onChange: (p) => onChange({ pending: p }) } : undefined}
           />
         ) : (

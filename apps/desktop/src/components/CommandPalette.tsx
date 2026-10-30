@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Activity, Blocks, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Activity, Blocks, FileCode2, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -9,7 +9,10 @@ export function CommandPalette({
   connections,
   tables,
   actions,
+  extensions = [],
 }: {
+  /** panels of enabled extensions */
+  extensions?: { label: string; run: () => void }[];
   open: boolean;
   onClose: () => void;
   connections: ConnectionConfig[];
@@ -30,6 +33,9 @@ export function CommandPalette({
     showSchedules: () => void;
     openBuilder: () => void;
     showActivity: () => void;
+    showRoles: () => void;
+    runFile: () => void;
+    showExtensions: () => void;
     backup: () => void;
     restore: () => void;
   };
@@ -105,6 +111,12 @@ export function CommandPalette({
             <Command.Item onSelect={run(actions.showActivity)} className={item}>
               <Activity size={13} className="text-subtle" /> Server activity (processes)
             </Command.Item>
+            <Command.Item onSelect={run(actions.showRoles)} className={item}>
+              <UsersRound size={13} className="text-subtle" /> Users & roles (privileges)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.runFile)} className={item}>
+              <FileCode2 size={13} className="text-subtle" /> Run SQL file…
+            </Command.Item>
             <Command.Item onSelect={run(actions.backup)} className={item}>
               <HardDriveDownload size={13} className="text-subtle" /> Back up database…
             </Command.Item>
@@ -123,6 +135,14 @@ export function CommandPalette({
             <Command.Item onSelect={run(actions.showSettings)} className={item}>
               <Settings size={13} className="text-subtle" /> Settings · AI model
             </Command.Item>
+            <Command.Item onSelect={run(actions.showExtensions)} className={item}>
+              <Puzzle size={13} className="text-subtle" /> Extensions…
+            </Command.Item>
+            {extensions.map((x) => (
+              <Command.Item key={x.label} onSelect={run(x.run)} className={item}>
+                <Puzzle size={13} className="text-accent" /> {x.label}
+              </Command.Item>
+            ))}
             <Command.Item onSelect={run(actions.toggleTheme)} className={item}>
               <Moon size={13} className="text-subtle" /> Toggle light / dark
             </Command.Item>

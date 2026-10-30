@@ -1,10 +1,21 @@
-import { ChevronRight, Database, Eye, FileInput, GitCompareArrows, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
+import { Braces, ChevronRight, Database, Eye, FileInput, Hash, Layers, ListOrdered, SquareFunction, Zap, GitCompareArrows, Lock, Network, Plus, RefreshCw, Search, Settings2, Table2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import type { ConnectionConfig, TableInfo } from "../lib/api";
+import type { ConnectionConfig, DbObject, TableInfo } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { ContextMenu, type MenuItem } from "./TableActions";
 import { Button, Dot, cx } from "./ui";
 
+
+const OBJECT_GROUP: Record<string, { label: string; icon: typeof Braces }> = {
+  matview: { label: "Materialized views", icon: Layers },
+  function: { label: "Functions", icon: SquareFunction },
+  procedure: { label: "Functions", icon: SquareFunction },
+  macro: { label: "Macros", icon: SquareFunction },
+  trigger: { label: "Triggers", icon: Zap },
+  sequence: { label: "Sequences", icon: ListOrdered },
+  type: { label: "Types", icon: Hash },
+};
+const GROUP_ORDER = ["Materialized views", "Functions", "Macros", "Triggers", "Sequences", "Types"];
 
 export type TableMenuAction =
   | "open"
@@ -14,6 +25,7 @@ export type TableMenuAction =
   | "copy-name"
   | "copy-select"
   | "export"
+  | "generate"
   | "rename"
   | "duplicate"
   | "truncate"
@@ -35,6 +47,8 @@ export function Sidebar({
   onTableMenu,
   onNewTable,
   canEdit = true,
+  objects = [],
+  onOpenObject,
 }: {
   connections: ConnectionConfig[];
   activeId: string | null;
@@ -52,8 +66,11 @@ export function Sidebar({
   onNewTable?: () => void;
   /** SQL database with DDL (not Redis) */
   canEdit?: boolean;
+  objects?: DbObject[];
+  onOpenObject?: (o: DbObject) => void;
 }) {
   const [filter, setFilter] = useState("");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; t: TableInfo } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -69,6 +86,7 @@ export function Sidebar({
       { label: "Copy name", onSelect: go("copy-name") },
       { label: "Copy SELECT", onSelect: go("copy-select") },
       { label: "Export…", onSelect: go("export") },
+      { label: "Generate data…", disabled: !canEdit || view, onSelect: go("generate") },
       "separator",
       { label: "Rename…", disabled: !canEdit, onSelect: go("rename") },
       { label: "Duplicate…", disabled: !canEdit || view, onSelect: go("duplicate") },
@@ -85,8 +103,19 @@ export function Sidebar({
       if (f && !t.name.toLowerCase().includes(f)) continue;
       g.set(t.schema, [...(g.get(t.schema) ?? []), t]);
     }
+    for (const o of objects) if (!g.has(o.schema) && (!f || o.name.toLowerCase().includes(f))) g.set(o.schema, []);
     return [...g.entries()];
-  }, [tables, filter]);
+  }, [tables, objects, filter]);
+  const objectsIn = (schema: string) => {
+    const f = filter.toLowerCase();
+    const m = new Map<string, DbObject[]>();
+    for (const o of objects) {
+      if (o.schema !== schema || (f && !o.name.toLowerCase().includes(f))) continue;
+      const k = OBJECT_GROUP[o.kind]?.label ?? o.kind;
+      m.set(k, [...(m.get(k) ?? []), o]);
+    }
+    return [...m.entries()].sort((a, b) => GROUP_ORDER.indexOf(a[0]) - GROUP_ORDER.indexOf(b[0]));
+  };
 
   return (
     <aside className="flex h-full w-full flex-col bg-panel">
@@ -213,6 +242,38 @@ export function Sidebar({
                       <span className="truncate">{t.name}</span>
                     </button>
                   ))}
+                {!collapsed[schema] &&
+                  objectsIn(schema).map(([group, list]) => {
+                    const key = `${schema}\u0000${group}`;
+                    const Icon = Object.values(OBJECT_GROUP).find((g) => g.label === group)?.icon ?? Braces;
+                    const open = !!openGroups[key] || !!filter;
+                    return (
+                      <div key={key}>
+                        <button
+                          onClick={() => setOpenGroups((s) => ({ ...s, [key]: !s[key] }))}
+                          className="flex h-6 w-full items-center gap-1.5 rounded-md pr-2 pl-3 text-2xs text-muted hover:bg-hover hover:text-fg"
+                        >
+                          <ChevronRight size={11} className={cx("transition-transform", open && "rotate-90")} />
+                          <Icon size={11} className="text-subtle" />
+                          {group}
+                          <span className="ml-auto pr-1 text-subtle">{list.length}</span>
+                        </button>
+                        {open &&
+                          list.map((o) => (
+                            <button
+                              key={o.kind + o.name + (o.detail ?? "")}
+                              onClick={() => onOpenObject?.(o)}
+                              title={o.kind === "trigger" ? `${o.name} on ${o.detail ?? ""}` : o.detail ? `${o.name}(${o.detail})` : o.name}
+                              className="flex h-6 w-full items-center gap-2 rounded-md pr-2 pl-8 text-xs text-fg/85 hover:bg-hover"
+                            >
+                              <span className="truncate">{o.name}</span>
+                              {o.kind === "trigger" && o.detail && <span className="ml-auto truncate text-2xs text-subtle">{o.detail}</span>}
+                              {o.kind === "procedure" && <span className="ml-auto text-2xs text-subtle">proc</span>}
+                            </button>
+                          ))}
+                      </div>
+                    );
+                  })}
               </div>
             ))}
           </div>

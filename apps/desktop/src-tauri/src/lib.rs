@@ -225,6 +225,214 @@ async fn table_foreign_keys(
 }
 
 #[tauri::command]
+async fn list_objects(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<rowhouse_core::objects::DbObject>> {
+    state.conn(&id).await?.list_objects().await
+}
+
+#[tauri::command]
+async fn object_definition(
+    state: State<'_, AppState>,
+    id: String,
+    object: rowhouse_core::objects::DbObject,
+) -> CmdResult<String> {
+    state.conn(&id).await?.object_definition(&object).await
+}
+
+#[tauri::command]
+async fn list_roles(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<rowhouse_core::roles::RoleInfo>> {
+    state.conn(&id).await?.list_roles().await
+}
+
+#[tauri::command]
+async fn role_grants(
+    state: State<'_, AppState>,
+    id: String,
+    role: String,
+) -> CmdResult<Vec<rowhouse_core::roles::Grant>> {
+    state.conn(&id).await?.role_grants(&role).await
+}
+
+#[tauri::command]
+async fn role_action(
+    state: State<'_, AppState>,
+    id: String,
+    op: rowhouse_core::roles::RoleOp,
+    preview: bool,
+) -> CmdResult<Vec<String>> {
+    let c = state.conn(&id).await?;
+    if preview {
+        c.role_sql(&op, true)
+    } else {
+        c.apply_role(&op).await
+    }
+}
+
+// ---- SQL files & dummy data -------------------------------------------------
+
+static SCRIPT_CANCEL: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[tauri::command]
+async fn run_sql_file(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    options: rowhouse_core::script::RunOptions,
+    run_id: String,
+    on_progress: tauri::ipc::Channel<rowhouse_core::script::ScriptProgress>,
+) -> CmdResult<rowhouse_core::script::ScriptProgress> {
+    let c = state.conn(&id).await?;
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    SCRIPT_CANCEL
+        .lock()
+        .unwrap()
+        .insert(run_id.clone(), flag.clone());
+    let r = c
+        .run_sql_file(std::path::Path::new(&path), &options, &flag, |p| {
+            let _ = on_progress.send(p.clone());
+        })
+        .await;
+    SCRIPT_CANCEL.lock().unwrap().remove(&run_id);
+    r
+}
+
+#[tauri::command]
+fn cancel_sql_file(run_id: String) {
+    if let Some(f) = SCRIPT_CANCEL.lock().unwrap().get(&run_id) {
+        f.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[tauri::command]
+async fn fake_plan(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<Vec<rowhouse_core::fakegen::ColumnGen>> {
+    state.conn(&id).await?.fake_plan(&schema, &table).await
+}
+
+#[tauri::command]
+async fn fake_preview(
+    state: State<'_, AppState>,
+    id: String,
+    plan: Vec<rowhouse_core::fakegen::ColumnGen>,
+    seed: u64,
+) -> CmdResult<rowhouse_core::QueryResult> {
+    state.conn(&id).await?.fake_preview(&plan, 8, seed).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn fake_insert(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+    plan: Vec<rowhouse_core::fakegen::ColumnGen>,
+    count: usize,
+    seed: u64,
+    on_progress: tauri::ipc::Channel<usize>,
+) -> CmdResult<usize> {
+    state
+        .conn(&id)
+        .await?
+        .fake_insert(&schema, &table, &plan, count, seed, |n| {
+            let _ = on_progress.send(n);
+        })
+        .await
+}
+
+// ---- extensions ---------------------------------------------------------------
+
+use rowhouse_core::extensions::{Installed, Registry};
+
+#[tauri::command]
+fn ext_list() -> CmdResult<Vec<Installed>> {
+    Registry::default().list()
+}
+
+#[tauri::command]
+fn ext_install(path: String) -> CmdResult<Installed> {
+    Registry::default().install(std::path::Path::new(&path))
+}
+
+#[tauri::command]
+fn ext_uninstall(ext: String) -> CmdResult<()> {
+    Registry::default().uninstall(&ext)
+}
+
+#[tauri::command]
+fn ext_set_enabled(ext: String, enabled: bool) -> CmdResult<Installed> {
+    Registry::default().set_enabled(&ext, enabled)
+}
+
+#[tauri::command]
+fn ext_entry(ext: String) -> CmdResult<String> {
+    Registry::default().entry_html(&ext)
+}
+
+/// A query on behalf of an extension: read-only unless it was granted `query:write`.
+#[tauri::command]
+async fn ext_query(
+    state: State<'_, AppState>,
+    ext: String,
+    id: String,
+    sql: String,
+    limit: Option<usize>,
+) -> CmdResult<QueryOutput> {
+    let x = Registry::default().get(&ext)?;
+    let can = |p: &str| x.enabled && x.granted.iter().any(|g| g == p);
+    let c = state.conn(&id).await?;
+    let limit = limit.unwrap_or(1000).min(100_000);
+    if can("query:write") {
+        c.query(&sql, limit).await
+    } else if can("query:read") {
+        c.query_read_only(&sql, limit).await
+    } else {
+        Err(Error::Other(format!(
+            "{} isn't allowed to run queries",
+            x.manifest.name
+        )))
+    }
+}
+
+#[derive(serde::Serialize)]
+struct Relations {
+    outgoing: Vec<rowhouse_core::erd::ForeignKey>,
+    incoming: Vec<rowhouse_core::erd::ForeignKey>,
+}
+
+/// Foreign keys from this table and into it (for following links in the grid).
+#[tauri::command]
+async fn table_relations(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<Relations> {
+    let all = state.conn(&id).await?.foreign_keys().await?;
+    let (mut outgoing, mut incoming) = (vec![], vec![]);
+    for f in all {
+        if f.schema == schema && f.table == table {
+            outgoing.push(f.clone());
+        }
+        if f.ref_schema == schema && f.ref_table == table {
+            incoming.push(f);
+        }
+    }
+    Ok(Relations { outgoing, incoming })
+}
+
+#[tauri::command]
 async fn list_databases(state: State<'_, AppState>, id: String) -> CmdResult<Vec<String>> {
     state.conn(&id).await?.list_databases().await
 }
@@ -1181,6 +1389,23 @@ pub fn run() {
             kill_session,
             list_indexes,
             table_ddl,
+            table_relations,
+            list_objects,
+            ext_list,
+            ext_install,
+            ext_uninstall,
+            ext_set_enabled,
+            ext_entry,
+            ext_query,
+            run_sql_file,
+            cancel_sql_file,
+            fake_plan,
+            fake_preview,
+            fake_insert,
+            list_roles,
+            role_grants,
+            role_action,
+            object_definition,
             table_action,
             create_table,
             table_foreign_keys,

@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, CopyPlus, PanelRight, PenLine, Plus, Search, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUpRight, Copy, CopyPlus, CornerDownRight, PanelRight, PenLine, Plus, Search, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Cell, QueryResult } from "../lib/api";
+import type { Cell, Filter, ForeignKey, QueryResult, Relations } from "../lib/api";
 import { formatCells, parseClipboard, type CopyFormat } from "../lib/gridcopy";
 import { countPending, emptyPending, type Pending } from "../lib/pending";
 import { mod } from "../lib/types";
@@ -53,6 +53,8 @@ export function ResultsGrid({
   onServerSort,
   table,
   pkColumns = [],
+  relations,
+  onFollow,
 }: {
   result: QueryResult;
   /** table name for "Copy as INSERT" */
@@ -63,6 +65,9 @@ export function ResultsGrid({
   /** when set, header clicks sort on the server instead of in memory */
   serverSort?: { column: string; desc: boolean } | null;
   onServerSort?: (s: { column: string; desc: boolean } | null) => void;
+  /** foreign keys from / into this table (table tabs) */
+  relations?: Relations;
+  onFollow?: (target: { schema: string; name: string }, filters: Filter[]) => void;
 }) {
   const ROW_H = rowHeight(useAppearance().density);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -138,6 +143,36 @@ export function ResultsGrid({
     if (row.kind === "new") return pending.inserts[row.i][c];
     const e = pending.edits[row.i];
     return e && c in e ? e[c] : result.rows[row.i][c];
+  };
+
+  // ---- foreign keys --------------------------------------------------------
+  const colIndex = (name: string) => result.columns.findIndex((c) => c.name === name);
+  const fkByCol = useMemo(() => {
+    const m = new Map<number, ForeignKey>();
+    if (!onFollow) return m;
+    for (const fk of relations?.outgoing ?? []) for (const c of fk.columns) if (colIndex(c) >= 0 && !m.has(colIndex(c))) m.set(colIndex(c), fk);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relations, result, onFollow]);
+  const linkFilters = (row: DRow, from: string[], to: string[]): Filter[] | null => {
+    const out: Filter[] = [];
+    for (let k = 0; k < from.length; k++) {
+      const ci = colIndex(from[k]);
+      const v = ci >= 0 ? valueAt(row, ci) : undefined;
+      if (v === null || v === undefined) return null;
+      out.push({ column: to[k], op: "eq", value: typeof v === "object" ? JSON.stringify(v) : String(v), numeric: typeof v === "number" });
+    }
+    return out;
+  };
+  /** this row → the row it points at */
+  const followOut = (row: DRow, fk: ForeignKey) => {
+    const f = linkFilters(row, fk.columns, fk.ref_columns);
+    if (f) onFollow?.({ schema: fk.ref_schema, name: fk.ref_table }, f);
+  };
+  /** rows elsewhere that point at this row */
+  const followIn = (row: DRow, fk: ForeignKey) => {
+    const f = linkFilters(row, fk.ref_columns, fk.columns);
+    if (f) onFollow?.({ schema: fk.schema, name: fk.table }, f);
   };
   const isEdited = (row: DRow, c: number) => row.kind === "orig" && !!pending.edits[row.i] && c in pending.edits[row.i];
   const isDeleted = (row: DRow) => row.kind === "orig" && pending.deletes.includes(row.i);
@@ -558,6 +593,7 @@ export function ResultsGrid({
                         onDoubleClick={() => startEdit(vr.index, ci)}
                         className={cx(
                           "shrink-0 truncate border-r border-b border-line/60 px-2",
+                          fkByCol.has(ci) && "group/cell relative underline decoration-line-strong decoration-dotted underline-offset-2",
                           numeric[ci] && "text-right tabular-nums",
                           (v === null || v === undefined) && "text-subtle italic",
                           !deleted && typeof v === "boolean" && (v ? "text-success" : "text-muted"),
@@ -568,6 +604,19 @@ export function ResultsGrid({
                         style={{ width: widths[ci], lineHeight: `${ROW_H - 1}px` }}
                       >
                         {display(v)}
+                        {fkByCol.has(ci) && v !== null && v !== undefined && !isNew && (
+                          <button
+                            title={`Open ${fkByCol.get(ci)!.ref_table} where ${fkByCol.get(ci)!.ref_columns.join(", ")} = ${display(v)}`}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => (e.stopPropagation(), followOut(row, fkByCol.get(ci)!))}
+                            className={cx(
+                              "absolute top-1/2 right-1 -translate-y-1/2 rounded bg-elevated p-0.5 text-accent shadow-sm ring-1 ring-line",
+                              selected ? "block" : "hidden group-hover/cell:block",
+                            )}
+                          >
+                            <ArrowUpRight size={11} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -587,6 +636,30 @@ export function ResultsGrid({
           focus={sel?.c}
           onEdit={edit && selRow && !isDeleted(selRow) ? (c, v) => setCell(sel!.r, c, v) : undefined}
           onClose={toggleDetails}
+          links={
+            selRow && onFollow && relations && (relations.outgoing.length > 0 || relations.incoming.length > 0) ? (
+              <div className="border-t border-line px-3 py-2">
+                <div className="mb-1 text-2xs font-medium text-subtle">Relations</div>
+                {relations.outgoing.map((fk) => {
+                  const f = linkFilters(selRow, fk.columns, fk.ref_columns);
+                  return (
+                    <button key={"o" + fk.name} disabled={!f} onClick={() => followOut(selRow, fk)} className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left text-xs hover:bg-hover disabled:opacity-40">
+                      <ArrowUpRight size={12} className="shrink-0 text-accent" />
+                      <span className="truncate">{fk.ref_table}</span>
+                      <span className="ml-auto truncate font-mono text-2xs text-subtle">{fk.columns.join(", ")}</span>
+                    </button>
+                  );
+                })}
+                {relations.incoming.map((fk) => (
+                  <button key={"i" + fk.name} onClick={() => followIn(selRow, fk)} className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left text-xs hover:bg-hover">
+                    <CornerDownRight size={12} className="shrink-0 text-subtle" />
+                    <span className="truncate">{fk.table}</span>
+                    <span className="ml-auto truncate font-mono text-2xs text-subtle">{fk.columns.join(", ")}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null
+          }
         />
       )}
       </div>
@@ -614,6 +687,23 @@ export function ResultsGrid({
               {hint && <span className="ml-auto text-2xs text-subtle">{hint}</span>}
             </button>
           ))}
+          {selRow && sel && fkByCol.has(sel.c) && (
+            <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (followOut(selRow, fkByCol.get(sel.c)!), setCtx(null))}>
+              <ArrowUpRight size={12} className="text-accent" /> Open {fkByCol.get(sel.c)!.ref_table} row
+            </button>
+          )}
+          {selRow && onFollow && (relations?.incoming.length ?? 0) > 0 && (
+            <>
+              <div className="my-1 h-px bg-line" />
+              <div className="px-2 py-0.5 text-2xs text-subtle">Referenced by</div>
+              {relations!.incoming.slice(0, 8).map((fk) => (
+                <button key={fk.name} className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (followIn(selRow, fk), setCtx(null))}>
+                  <CornerDownRight size={12} className="text-subtle" /> {fk.table}
+                  <span className="ml-auto text-2xs text-subtle">{fk.columns.join(", ")}</span>
+                </button>
+              ))}
+            </>
+          )}
           {edit && (
             <>
               <div className="my-1 h-px bg-line" />
@@ -718,7 +808,9 @@ function RowDetails({
   focus,
   onEdit,
   onClose,
+  links,
 }: {
+  links?: React.ReactNode;
   columns: { name: string; data_type: string }[];
   row: DRow | undefined;
   values: (Cell | undefined)[];
@@ -758,6 +850,7 @@ function RowDetails({
           ))}
         </div>
       )}
+      {row && links}
     </div>
   );
 }
