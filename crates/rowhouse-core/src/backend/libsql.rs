@@ -309,7 +309,7 @@ fn stmt_result(r: &Value, limit: usize) -> QueryResult {
 }
 
 /// Small standard base64 decoder (no extra dependency for one blob format).
-pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
+pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
         Some(match c {
             b'A'..=b'Z' => c - b'A',

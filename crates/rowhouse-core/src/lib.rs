@@ -26,6 +26,8 @@ pub mod model;
 pub mod plan;
 pub mod schedules;
 pub mod structure;
+pub mod sync;
+pub mod table_ops;
 pub mod tunnel;
 
 pub use changes::{ChangeSet, RowUpdate};
