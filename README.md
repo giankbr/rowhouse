@@ -63,6 +63,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 - **Inline edit** (`Mod+I` in the editor) rewrites the selection or generates at the cursor; **streaming** responses and **inline completions** as you type.
 - Proposals are shown as a **diff** and only applied when you accept.
 - Works with OpenAI-compatible APIs (OpenAI, OpenRouter, Ollama, LM Studio, …) and Anthropic.
+- **Uses what's already on your machine** — Claude Code, Codex, OpenCode, Gemini CLI, Cursor Agent and Copilot CLI are detected and run headless with your existing login (no API key), and Ollama / LM Studio are found on their default ports.
 - Only the schema (names / types) and your SQL are sent — **never rows**.
 
 ### Visualize & compare
@@ -109,12 +110,18 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 | `list_tables` | Tables & views |
 | `describe_table` | Columns, types, nullability, defaults, PK |
 | `sample_rows` | First N rows of a table |
+| `search_schema` | Find tables / columns by name on large databases |
+| `get_relations` · `get_ddl` | Foreign keys in and out of a table; its CREATE statement |
+| `list_objects` · `get_object_definition` | Functions, procedures, triggers, sequences, enum types, materialized views |
+| `explain_query` | Query plan as a tree (`analyze` only for reads) |
+| `table_stats` | Approximate row counts and sizes from the database's statistics |
+| `list_saved_queries` · `run_saved_query` · `recent_queries` | The user's saved queries and history |
 | `run_query` | Read-only SQL (SELECT / WITH / SHOW / EXPLAIN); read commands for Redis, find/aggregate for MongoDB |
 | `execute_sql` | A write — only after you approve it in Rowhouse (connections with “Allow AI to request writes”) |
 
 Every MCP query passes a keyword guard **and** runs inside a read-only transaction (`BEGIN READ ONLY` on Postgres, `START TRANSACTION READ ONLY` on MySQL, `PRAGMA query_only` on SQLite). Writes always wait for your approval in the app; destructive ones need the table name typed.
 
-Point any MCP client (Claude Desktop, Cursor, …) at the bundled binary:
+**One click:** *Connect an AI assistant* in the app adds Rowhouse to Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Codex, OpenCode and Gemini CLI (keeps your other servers, leaves a `.bak`). Or point any MCP client at the bundled binary:
 
 ```json
 { "mcpServers": { "rowhouse": { "command": "/absolute/path/to/target/release/rowhouse-mcp" } } }
