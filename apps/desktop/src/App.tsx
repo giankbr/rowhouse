@@ -215,6 +215,22 @@ export default function App() {
     [patchTab, loadTables],
   );
 
+  const [dbOverride, setDbOverride] = useState<Record<string, string>>({});
+  const switchDb = useCallback(
+    async (db: string) => {
+      if (!activeConn) return;
+      try {
+        await api.switchDatabase(activeConn, db);
+        setDbOverride((m) => ({ ...m, [activeConn]: db }));
+        loadTables(activeConn);
+        setToast(`Switched to ${db}`, "ok");
+      } catch (e) {
+        setToast(String(e));
+      }
+    },
+    [activeConn, loadTables, setToast],
+  );
+
   const cancelTab = useCallback(
     (t: Tab) => {
       if (t.running && t.runId) api.cancelQuery(t.connId, t.runId).catch((e) => setToast(String(e)));
@@ -539,6 +555,8 @@ export default function App() {
         onMcp={() => setMcpOpen(true)}
         onSettings={() => setSettingsOpen(true)}
         onHome={() => setActiveConn(null)}
+        database={conn ? dbOverride[conn.id] : null}
+        onSwitchDb={switchDb}
       />
       )}
 

@@ -406,6 +406,8 @@ export const api = {
   runQuery: (id: string, sql: string, limit?: number, runId?: string, timeoutMs?: number) =>
     call<QueryOutput>("run_query", { id, sql, limit, runId, timeoutMs }),
   cancelQuery: (id: string, runId: string) => call<void>("cancel_query", { id, runId }),
+  listDatabases: (id: string) => call<string[]>("list_databases", { id }),
+  switchDatabase: (id: string, database: string) => call<void>("switch_database", { id, database }),
   previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
   applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
   exportQuery: (id: string, sql: string, format: ExportFormat, path: string, schema?: string, table?: string) =>
@@ -648,6 +650,12 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return mockCols;
     case "table_sql":
       return `SELECT * FROM "${a.schema}"."${a.table}" LIMIT ${a.limit}`;
+    case "list_databases":
+      await sleep(150);
+      return ["app_dev", "app_test", "analytics", "billing", "postgres"];
+    case "switch_database":
+      await sleep(250);
+      return null;
     case "cancel_query":
       mockCancelled.add(String(a.runId));
       return null;

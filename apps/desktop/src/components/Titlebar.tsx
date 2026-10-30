@@ -1,5 +1,6 @@
-import { Bot, Command, Moon, PanelLeft, Settings, Sun } from "lucide-react";
-import { ENVIRONMENTS, kindInfo, type ConnectionConfig } from "../lib/api";
+import { Bot, Check, ChevronDown, Command, Database, Moon, PanelLeft, Search, Settings, Sun } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { api, ENVIRONMENTS, kindInfo, type ConnectionConfig } from "../lib/api";
 import { isMac, mod } from "../lib/types";
 import { Button, Dot, Kbd, cx } from "./ui";
 
@@ -12,7 +13,12 @@ export function Titlebar({
   onMcp,
   onSettings,
   onHome,
+  database,
+  onSwitchDb,
 }: {
+  /** database picked this session (overrides the profile's) */
+  database?: string | null;
+  onSwitchDb: (db: string) => void;
   conn: ConnectionConfig | null;
   dark: boolean;
   onToggleTheme: () => void;
@@ -43,8 +49,11 @@ export function Titlebar({
             <Dot color={conn.color} />
             <span className="truncate font-medium">{conn.name}</span>
             <span className="truncate text-muted">
-              {kindInfo(conn.kind).file ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}${conn.database ? "/" + conn.database : ""}`}
+              {kindInfo(conn.kind).file ? conn.file : `${conn.user ?? ""}@${conn.host ?? ""}`}
             </span>
+            {!kindInfo(conn.kind).file && !kindInfo(conn.kind).api && (
+              <DatabasePicker connId={conn.id} current={database ?? conn.database ?? null} onSwitch={onSwitchDb} />
+            )}
             {conn.env && conn.env !== "none" && (
               <span
                 className={cx(
@@ -81,5 +90,70 @@ export function Titlebar({
         {dark ? <Sun size={14} /> : <Moon size={14} />}
       </Button>
     </header>
+  );
+}
+
+/** Current database with a dropdown of the others on the same server. */
+function DatabasePicker({ connId, current, onSwitch }: { connId: string; current: string | null; onSwitch: (db: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<string[] | null>(null);
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    setQ("");
+    setErr(null);
+    api.listDatabases(connId).then(setList).catch((e) => (setErr(String(e)), setList([])));
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open, connId]);
+  const shown = (list ?? []).filter((d) => d.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Switch database"
+        className="flex h-6 items-center gap-1 rounded-md px-1.5 text-muted hover:bg-hover hover:text-fg"
+      >
+        <Database size={11} />
+        <span className="max-w-40 truncate">{current || "default"}</span>
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="animate-pop absolute top-7 left-0 z-50 w-60 rounded-lg border border-line bg-elevated p-1 shadow-pop">
+          <div className="relative mb-1">
+            <Search size={11} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-subtle" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Enter" && shown[0]) (onSwitch(shown[0]), setOpen(false));
+              }}
+              placeholder="Find database…"
+              className="h-7 w-full rounded-md bg-panel pr-2 pl-6 text-xs outline-none placeholder:text-subtle"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {list === null && <div className="px-2 py-1.5 text-2xs text-subtle">Loading…</div>}
+            {err && <div className="px-2 py-1.5 text-2xs text-danger">{err}</div>}
+            {list && !err && shown.length === 0 && <div className="px-2 py-1.5 text-2xs text-subtle">No database matches</div>}
+            {shown.map((d) => (
+              <button
+                key={d}
+                onClick={() => (d !== current && onSwitch(d), setOpen(false))}
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-hover"
+              >
+                <Check size={11} className={cx("text-accent", d !== current && "invisible")} />
+                <span className="truncate font-mono text-[11.5px]">{d}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

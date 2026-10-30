@@ -18,6 +18,8 @@ struct AppState {
     open: Mutex<HashMap<String, Arc<Connection>>>,
     /// running queries by run id, so they can be cancelled
     runs: std::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    /// database picked in the titlebar for this session (profile stays unchanged)
+    db_override: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -27,7 +29,17 @@ impl AppState {
             return Ok(c.clone());
         }
         let mut cfg = self.store.get(id)?;
+        let saved_db = cfg.database.clone();
+        if let Some(db) = self
+            .db_override
+            .lock()
+            .ok()
+            .and_then(|m| m.get(id).cloned())
+        {
+            cfg.database = Some(db);
+        }
         let c = Connection::connect(&cfg).await?;
+        cfg.database = saved_db;
         // Trust-on-first-use: pin the SSH host key the first time we see it.
         if let (Some(ssh), Some(fp)) = (cfg.ssh.as_mut(), c.ssh_host_key()) {
             if ssh.host_key.is_none() && !fp.is_empty() {
@@ -105,6 +117,25 @@ async fn connect(state: State<'_, AppState>, id: String) -> CmdResult<()> {
 async fn disconnect(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.drop_conn(&id).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn list_databases(state: State<'_, AppState>, id: String) -> CmdResult<Vec<String>> {
+    state.conn(&id).await?.list_databases().await
+}
+
+/// Reconnect to another database on the same server (this session only).
+#[tauri::command]
+async fn switch_database(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+) -> CmdResult<()> {
+    if let Ok(mut m) = state.db_override.lock() {
+        m.insert(id.clone(), database);
+    }
+    state.drop_conn(&id).await;
+    state.conn(&id).await?.ping().await
 }
 
 #[tauri::command]
@@ -834,6 +865,7 @@ pub fn run() {
                 history,
                 open: Mutex::new(HashMap::new()),
                 runs: Default::default(),
+                db_override: Default::default(),
             });
             Ok(())
         })
@@ -848,6 +880,8 @@ pub fn run() {
             describe_table,
             table_sql,
             run_query,
+            list_databases,
+            switch_database,
             cancel_query,
             list_history,
             clear_history,

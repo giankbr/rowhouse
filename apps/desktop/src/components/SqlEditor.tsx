@@ -11,6 +11,7 @@ import { Sparkles } from "lucide-react";
 import { isMac } from "../lib/types";
 import { kindInfo, type DbKind, type TableInfo } from "../lib/api";
 import { ghostText } from "../lib/ghost";
+import { canFormat, formatSql } from "../lib/format";
 
 const theme = EditorView.theme({
   "&": { color: "var(--fg)" },
@@ -95,10 +96,24 @@ export function SqlEditor({
   const runRef = useRef(onRun);
   runRef.current = onRun;
   const viewRef = useRef<EditorView | null>(null);
+  const kindRef = useRef(kind);
+  kindRef.current = kind;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [edit, setEdit] = useState<InlineEditState | null>(null);
   const inlineEditRef = useRef(inlineEdit);
   inlineEditRef.current = inlineEdit;
+
+  const formatView = (view: EditorView) => {
+    const d = kindInfo(kindRef.current).dialect;
+    if (!canFormat(d)) return false;
+    const s = view.state.selection.main;
+    const from = s.empty ? 0 : s.from;
+    const to = s.empty ? view.state.doc.length : s.to;
+    formatSql(view.state.sliceDoc(from, to), d)
+      .then((out) => view.dispatch({ changes: { from, to, insert: out }, userEvent: "input.format" }))
+      .catch(() => {});
+    return true;
+  };
 
   const openEdit = (view: EditorView) => {
     if (!inlineEditRef.current) return false;
@@ -178,6 +193,15 @@ export function SqlEditor({
       ...(suggest ? [ghostText((b, a) => suggestRef.current?.(b, a) ?? Promise.resolve(""))] : []),
       Prec.highest(
         keymap.of([
+          {
+            // "Mod-F" is what CodeMirror sees for Mod+Shift+F with a letter key
+            key: "Mod-F",
+            run: (view) => formatView(view),
+          },
+          {
+            key: "Shift-Mod-f",
+            run: (view) => formatView(view),
+          },
           {
             key: "Mod-i",
             run: (view) => openEdit(view),

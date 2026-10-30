@@ -651,6 +651,42 @@ impl Connection {
         }
     }
 
+    /// Databases on the server this connection can switch to (empty when the
+    /// engine has a single database per connection, e.g. SQLite).
+    pub async fn list_databases(&self) -> Result<Vec<String>> {
+        if let Pool::Mongo(c) = &self.pool {
+            return c.databases().await;
+        }
+        if self.redis().is_some() {
+            return Ok((0..16).map(|i| i.to_string()).collect());
+        }
+        let sql = match self.driver() {
+            Driver::Postgres => {
+                "SELECT datname FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY 1"
+            }
+            Driver::Mysql => "SELECT schema_name FROM information_schema.schemata \
+                 WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys') ORDER BY 1",
+            Driver::Mssql => "SELECT name FROM sys.databases WHERE state = 0 ORDER BY 1",
+            Driver::Clickhouse => "SELECT name FROM system.databases \
+                 WHERE name NOT IN ('system','INFORMATION_SCHEMA','information_schema') ORDER BY 1",
+            Driver::Cassandra => "SELECT keyspace_name FROM system_schema.keyspaces",
+            _ => return Ok(vec![]),
+        };
+        let mut out: Vec<String> = self
+            .meta(sql)
+            .await?
+            .rows
+            .into_iter()
+            .filter_map(|r| r.first().map(text))
+            .filter(|n| !n.is_empty())
+            .collect();
+        if self.driver() == Driver::Cassandra {
+            out.retain(|k| !k.starts_with("system"));
+            out.sort();
+        }
+        Ok(out)
+    }
+
     pub async fn list_tables(&self) -> Result<Vec<TableInfo>> {
         if let Pool::Redis(c) = &self.pool {
             return c.keys(2_000).await;

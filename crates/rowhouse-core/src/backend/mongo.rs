@@ -139,6 +139,12 @@ impl Client {
         self.client.database(&self.db)
     }
 
+    pub async fn databases(&self) -> Result<Vec<String>> {
+        let mut v = self.client.list_database_names().await.map_err(merr)?;
+        v.retain(|d| !matches!(d.as_str(), "admin" | "local" | "config"));
+        Ok(v)
+    }
+
     pub fn db_name(&self) -> &str {
         &self.db
     }

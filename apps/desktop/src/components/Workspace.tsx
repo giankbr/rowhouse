@@ -1,5 +1,6 @@
-import { AlertCircle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { AlertCircle, AlignLeft, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { canFormat, formatSql } from "../lib/format";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
@@ -279,6 +280,17 @@ export function Workspace({
             ) : (
               <Button variant="primary" size="xs" onClick={() => onRun()} disabled={tab.running} title={`Run selection or all (${mod}+Enter)`}>
                 <Play size={11} fill="currentColor" /> Run
+              </Button>
+            )}
+            {conn && canFormat(kindInfo(conn.kind).dialect) && (
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={!tab.sql.trim()}
+                title={`Format SQL (${mod}+Shift+F)`}
+                onClick={() => formatSql(tab.sql, kindInfo(conn.kind).dialect).then((sql) => onChange({ sql })).catch((e) => onToast(String(e)))}
+              >
+                <AlignLeft size={11} /> Format
               </Button>
             )}
             <Button variant="ghost" size="xs" onClick={askAi} title={`Ask AI (${mod}+I)`}>
