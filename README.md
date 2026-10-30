@@ -27,21 +27,29 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 - Paste a connection URL (`postgresql://…`, `mysql://…`, `mongodb+srv://…`); Neon and Supabase are recognised and use TLS by default.
 - Import connections from **DBeaver, TablePlus and Navicat** (auto-detected; passwords re-entered once).
 - Auto-reconnect after the machine wakes from sleep.
+- **Folder sync** (Pro) — connections and saved queries follow you across machines through a folder you already sync (iCloud Drive, Dropbox, OneDrive, Syncthing). One file, encrypted with your passphrase (PBKDF2 + AES-256-GCM); no Rowhouse server.
 
 ### Browse & edit
 
 - Schema tree with filter; table **Data** / **Structure** views.
+- Functions, procedures, triggers, sequences, enum types and materialized views in the tree — click one to open its definition in a query tab.
+- Right-click a table: **Show DDL**, rename, duplicate (with or without rows), truncate, drop (typed confirmation), export, generate data. A **new-table designer** previews the CREATE TABLE as you go.
+- **Foreign keys are links** — open the referenced row from a cell, or jump to the rows that reference this one.
 - Virtualized result grid — sort, resize columns, keyboard navigation, `⌘/Ctrl+C` copies a cell.
 - **Inline editing** for tables with a primary key — edit / NULL / add / delete rows, review the generated SQL, commit atomically (`⌘/Ctrl+S`). Every UPDATE/DELETE must hit exactly one row or the transaction rolls back.
 - **Range selection + bulk ops** — set value / NULL, duplicate, delete, paste from a spreadsheet, copy as CSV / JSON / Markdown / INSERT.
 - **Row details** panel with a JSON editor, and **find in results**.
 - Table structure editor (add / rename / change / drop columns, DDL previewed first) and **index / foreign-key editing**.
 - Export query or table results to **CSV, JSON or SQL INSERTs** (streamed, no row limit); import CSV into a table in one transaction.
+- **Dummy data** — realistic rows per column (names, emails, dates, numbers, JSON…), guessed from names and types; foreign-key columns pick values that exist.
 
 ### Query
 
 - SQL editor (CodeMirror 6) — dialect-aware highlighting, table autocomplete, `⌘/Ctrl+↵` runs the selection or whole script; multi-statement scripts return multiple result sets.
 - **SQL formatter** and a **database switcher** to jump between databases on a connection.
+- **Charts** — bar, line, area or scatter from any result, with hover tooltips; copy or save as PNG / SVG.
+- **Query variables** — `:name` (quoted for you) and `{{name}}` (pasted as typed) are asked for before the query runs.
+- **Run SQL files** — big seed files and migrations run statement by statement with progress, stop or keep going at errors (MySQL `DELIMITER` and Postgres `$$` bodies handled).
 - **Visual query builder** — drop tables on a canvas, foreign keys join themselves, drag to join, add filters and aggregates, live SQL beside it.
 - **Query plan viewer** — EXPLAIN as a tree with cost/time bars and hints (full scans, bad estimates, disk sorts); `ANALYZE` on Postgres runs read-only.
 - **Saved queries** and **query history** (`⌘/Ctrl+Y`), per connection or global — shared with the MCP server, so queries an assistant runs show up tagged “AI”.
@@ -64,11 +72,17 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 - **Data compare** — PK-matched rows with a sync script.
 - **Backup / restore** — `pg_dump` / `pg_restore` / `psql`, `mysqldump` / `mysql`, SQLite `VACUUM INTO`.
 - **Server activity** — see what's running, cancel a runaway query or kill a stuck session.
+- **Users & roles** — see who can do what, create users, grant / revoke, change passwords (PostgreSQL, MySQL/MariaDB, SQL Server); every change shows its SQL first.
 
 ### Safety
 
 - Tag connections **Local / Dev / Staging / Production** — production starts read-only, gets a red window frame, and every DROP / TRUNCATE / DELETE or UPDATE without a WHERE asks you to type the table name first.
 - Command palette (`⌘/Ctrl+K`), light / dark theme, and a compact or comfortable density (Settings › Appearance).
+
+### Extensions
+
+- Small web apps that run in a sandboxed panel and use the `window.rowhouse` API — schema, queries (read-only unless granted), results, toasts. Users approve each extension's permissions; network access is limited to the hosts it declares.
+- Install from a folder or a `.rhext` file (Tools › Extensions). Guide and examples: [docs/EXTENSIONS.md](docs/EXTENSIONS.md), [extensions/examples](extensions/examples).
 
 ## Databases
 
