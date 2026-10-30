@@ -136,6 +136,8 @@ export function Workspace({
     if (tab.kind !== "query" || !active) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
+        // inside the editor, Mod+I is the inline edit box (handled by SqlEditor)
+        if (aiEnabled && (e.target as HTMLElement | null)?.closest?.(".cm-editor")) return;
         e.preventDefault();
         askAi();
       }
@@ -245,6 +247,7 @@ export function Workspace({
               kind={conn?.kind ?? "postgres"}
               tables={tables}
               suggest={inlineAi ? (before, after) => api.ai.completeInline(tab.connId, before, after) : undefined}
+              inlineEdit={aiEnabled ? (ins, sel, before, after, onDelta) => api.ai.edit(tab.connId, ins, sel, before, after, onDelta) : undefined}
             />
           </div>
           <div onMouseDown={startDrag} className="group relative h-px shrink-0 cursor-row-resize bg-line">
@@ -410,6 +413,11 @@ export function Workspace({
         ) : result ? (
           <ResultsGrid
             result={result}
+            table={tab.kind === "table" && tab.table ? (tab.schema && tab.schema !== "main" ? `${tab.schema}.${tab.table}` : tab.table) : undefined}
+            pkColumns={(tab.columns ?? [])
+              .filter((c) => c.primary_key)
+              .map((c) => result.columns.findIndex((x) => x.name === c.name))
+              .filter((i) => i >= 0)}
             serverSort={tab.kind === "table" ? (tab.sort ?? null) : undefined}
             onServerSort={tab.kind === "table" && onBrowse ? (sort) => onBrowse({ sort, offset: 0 }) : undefined}
             edit={editable ? { pending: tab.pending ?? { edits: {}, deletes: [], inserts: [] }, onChange: (p) => onChange({ pending: p }) } : undefined}

@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Plus, Trash2, Undo2 } from "lucide-react";
+import { Copy, CopyPlus, PenLine, Plus, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Cell, QueryResult } from "../lib/api";
+import { formatCells, parseClipboard, type CopyFormat } from "../lib/gridcopy";
 import { countPending, emptyPending, type Pending } from "../lib/pending";
 import { mod } from "../lib/types";
 import { Button, Kbd, cx } from "./ui";
@@ -34,6 +35,8 @@ function parseDraft(draft: string, original: Cell | undefined): Cell {
   return draft;
 }
 
+const SKIP = Symbol("skip");
+
 function same(a: Cell | undefined, b: Cell | undefined) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -48,8 +51,14 @@ export function ResultsGrid({
   edit,
   serverSort,
   onServerSort,
+  table,
+  pkColumns = [],
 }: {
   result: QueryResult;
+  /** table name for "Copy as INSERT" */
+  table?: string;
+  /** result-column indexes of the primary key (left out when duplicating rows) */
+  pkColumns?: number[];
   edit?: { pending: Pending; onChange: (p: Pending) => void };
   /** when set, header clicks sort on the server instead of in memory */
   serverSort?: { column: string; desc: boolean } | null;
@@ -57,6 +66,10 @@ export function ResultsGrid({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
+  /** other corner of a range selection (shift-click / shift-arrows); null = single cell */
+  const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
+  const [bulk, setBulk] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ r: number; c: number; draft: string } | null>(null);
   const [widths, setWidths] = useState<number[]>([]);
   const [sort, setSort] = useState<{ c: number; dir: 1 | -1 } | null>(null);
@@ -65,6 +78,7 @@ export function ResultsGrid({
   // Initial column widths from header + first rows.
   useEffect(() => {
     setSel(null);
+    setAnchor(null);
     setEditing(null);
     setSort(null);
     setWidths(
@@ -117,6 +131,138 @@ export function ResultsGrid({
 
   const total = INDEX_W + widths.reduce((a, b) => a + b, 0);
   const numeric = result.columns.map((c) => isNumericType(c.data_type));
+
+  // ---- selection range -----------------------------------------------------
+  const range = sel
+    ? {
+        r0: Math.min(sel.r, anchor?.r ?? sel.r),
+        r1: Math.max(sel.r, anchor?.r ?? sel.r),
+        c0: Math.min(sel.c, anchor?.c ?? sel.c),
+        c1: Math.max(sel.c, anchor?.c ?? sel.c),
+      }
+    : null;
+  const inRange = (r: number, c: number) => !!range && r >= range.r0 && r <= range.r1 && c >= range.c0 && c <= range.c1;
+  const rangeRows = range ? range.r1 - range.r0 + 1 : 0;
+  const rangeCells = range ? rangeRows * (range.c1 - range.c0 + 1) : 0;
+
+  const pick = (r: number, c: number, extend: boolean) => {
+    if (extend && sel) {
+      setAnchor((a) => a ?? sel);
+      setSel({ r, c });
+    } else {
+      setAnchor(null);
+      setSel({ r, c });
+    }
+  };
+  /** whole rows (click on the row number) */
+  const pickRow = (r: number, extend: boolean) => {
+    const last = result.columns.length - 1;
+    if (extend && sel) {
+      setAnchor({ r: anchor?.r ?? sel.r, c: 0 });
+      setSel({ r, c: last });
+    } else {
+      setAnchor({ r, c: 0 });
+      setSel({ r, c: last });
+    }
+  };
+
+  const copyRange = (format: CopyFormat) => {
+    if (!range) return;
+    const cols = result.columns.slice(range.c0, range.c1 + 1).map((c) => c.name);
+    const block: (Cell | undefined)[][] = [];
+    for (let r = range.r0; r <= range.r1; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const vals: (Cell | undefined)[] = [];
+      for (let c = range.c0; c <= range.c1; c++) vals.push(valueAt(row, c));
+      block.push(vals);
+    }
+    navigator.clipboard.writeText(formatCells(format, cols, block, table));
+  };
+
+  /** Apply `fn` to every editable cell in the range in one pending update. */
+  const mapRange = (fn: (row: DRow, c: number) => Cell | typeof SKIP) => {
+    if (!edit || !range) return;
+    let next = pending;
+    for (let r = range.r0; r <= range.r1; r++) {
+      const row = rows[r];
+      if (!row || (row.kind === "orig" && next.deletes.includes(row.i))) continue;
+      for (let c = range.c0; c <= range.c1; c++) {
+        const v = fn(row, c);
+        if (v === SKIP) continue;
+        next = applyCell(next, row, c, v);
+      }
+    }
+    edit.onChange(next);
+  };
+
+  const applyCell = (p: typeof pending, row: DRow, c: number, value: Cell) => {
+    if (row.kind === "new") return { ...p, inserts: p.inserts.map((x, i) => (i === row.i ? { ...x, [c]: value } : x)) };
+    const rowEdits = { ...(p.edits[row.i] ?? {}) };
+    if (same(value, result.rows[row.i][c])) delete rowEdits[c];
+    else rowEdits[c] = value;
+    const edits = { ...p.edits };
+    if (Object.keys(rowEdits).length) edits[row.i] = rowEdits;
+    else delete edits[row.i];
+    return { ...p, edits };
+  };
+
+  const deleteRange = () => {
+    if (!edit || !range) return;
+    const picked = rows.slice(range.r0, range.r1 + 1);
+    const orig = picked.filter((r) => r.kind === "orig").map((r) => r.i);
+    const newIdx = new Set(picked.filter((r) => r.kind === "new").map((r) => r.i));
+    // toggle: if every picked row is already deleted, restore them
+    const allDeleted = orig.length > 0 && orig.every((i) => pending.deletes.includes(i));
+    const deletes = allDeleted ? pending.deletes.filter((i) => !orig.includes(i)) : [...new Set([...pending.deletes, ...orig])];
+    edit.onChange({ ...pending, deletes, inserts: pending.inserts.filter((_, i) => !newIdx.has(i)) });
+    if (newIdx.size) (setSel(null), setAnchor(null));
+  };
+
+  const duplicateRange = () => {
+    if (!edit || !range) return;
+    const copies = rows.slice(range.r0, range.r1 + 1).map((row) => {
+      const out: Record<number, Cell> = {};
+      result.columns.forEach((_, c) => {
+        const v = valueAt(row, c);
+        if (!pkColumns.includes(c) && v !== undefined) out[c] = v;
+      });
+      return out;
+    });
+    edit.onChange({ ...pending, inserts: [...pending.inserts, ...copies] });
+    const r = rows.length;
+    setAnchor(null);
+    setSel({ r, c: 0 });
+    requestAnimationFrame(() => virt.scrollToIndex(r + copies.length - 1));
+  };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (!edit || !sel || editing) return;
+    const block = parseClipboard(e.clipboardData.getData("text/plain"));
+    if (!block.length) return;
+    e.preventDefault();
+    let next = pending;
+    // one value pasted into a range fills the range; otherwise paste the block at the cursor
+    if (block.length === 1 && block[0].length === 1 && range && rangeCells > 1) {
+      for (let r = range.r0; r <= range.r1; r++)
+        for (let c = range.c0; c <= range.c1; c++) {
+          const row = rows[r];
+          if (row && !(row.kind === "orig" && next.deletes.includes(row.i)))
+            next = applyCell(next, row, c, parseDraft(block[0][0], row.kind === "orig" ? result.rows[row.i][c] : undefined));
+        }
+    } else {
+      const r0 = range?.r0 ?? sel.r, c0 = range?.c0 ?? sel.c;
+      block.forEach((vals, dr) =>
+        vals.forEach((v, dc) => {
+          const row = rows[r0 + dr];
+          const c = c0 + dc;
+          if (!row || c >= result.columns.length || (row.kind === "orig" && next.deletes.includes(row.i))) return;
+          next = applyCell(next, row, c, parseDraft(v, row.kind === "orig" ? result.rows[row.i][c] : undefined));
+        }),
+      );
+    }
+    edit.onChange(next);
+  };
 
   // ---- edit operations -----------------------------------------------------
   const setCell = (r: number, c: number, value: Cell) => {
@@ -181,9 +327,11 @@ export function ResultsGrid({
     if (row?.kind === "orig") setCell(sel.r, sel.c, result.rows[row.i][sel.c]);
   };
 
-  function moveSel(r: number, c: number) {
+  function moveSel(r: number, c: number, extend = false) {
     const nr = Math.max(0, Math.min(rows.length - 1, r));
     const nc = Math.max(0, Math.min(result.columns.length - 1, c));
+    if (extend && sel) setAnchor((a) => a ?? sel);
+    else setAnchor(null);
     setSel({ r: nr, c: nc });
     virt.scrollToIndex(nr);
   }
@@ -193,18 +341,29 @@ export function ResultsGrid({
     if (editing || !sel) return;
     const m = e.metaKey || e.ctrlKey;
     const handled = () => e.preventDefault();
-    if (e.key === "ArrowDown") (moveSel(sel.r + 1, sel.c), handled());
-    else if (e.key === "ArrowUp") (moveSel(sel.r - 1, sel.c), handled());
-    else if (e.key === "ArrowLeft") (moveSel(sel.r, sel.c - 1), handled());
-    else if (e.key === "ArrowRight" || e.key === "Tab") (moveSel(sel.r, sel.c + 1), handled());
-    else if (m && e.key === "c") {
-      const v = valueAt(rows[sel.r], sel.c);
-      navigator.clipboard.writeText(v === null || v === undefined ? "" : display(v));
+    const x = e.shiftKey;
+    if (e.key === "ArrowDown") (moveSel(sel.r + 1, sel.c, x), handled());
+    else if (e.key === "ArrowUp") (moveSel(sel.r - 1, sel.c, x), handled());
+    else if (e.key === "ArrowLeft") (moveSel(sel.r, sel.c - 1, x), handled());
+    else if (e.key === "ArrowRight") (moveSel(sel.r, sel.c + 1, x), handled());
+    else if (e.key === "Tab") (moveSel(sel.r, sel.c + 1), handled());
+    else if (e.key === "Escape") (setAnchor(null), setCtx(null), handled());
+    else if (m && e.key.toLowerCase() === "a") {
+      setAnchor({ r: 0, c: 0 });
+      setSel({ r: rows.length - 1, c: result.columns.length - 1 });
+      handled();
+    } else if (m && e.key.toLowerCase() === "c") {
+      if (rangeCells > 1) copyRange(e.shiftKey ? "csv" : "tsv");
+      else {
+        const v = valueAt(rows[sel.r], sel.c);
+        navigator.clipboard.writeText(v === null || v === undefined ? "" : display(v));
+      }
       handled();
     } else if (!edit) return;
     else if (e.key === "Enter" || e.key === "F2") (startEdit(sel.r, sel.c), handled());
-    else if (m && e.shiftKey && e.key === "Backspace") (toggleDelete(), handled());
-    else if (m && e.key === "Backspace") (setCell(sel.r, sel.c, null), handled());
+    else if (m && e.shiftKey && e.key === "Backspace") (deleteRange(), handled());
+    else if (m && e.key.toLowerCase() === "d") (duplicateRange(), handled());
+    else if (m && e.key === "Backspace") (rangeCells > 1 ? mapRange(() => null) : setCell(sel.r, sel.c, null), handled());
     else if (m && e.key === "z") (revertCell(), handled());
     else if (e.key.length === 1 && !m && !e.altKey) {
       // start typing replaces the value, like a spreadsheet
@@ -239,11 +398,13 @@ export function ResultsGrid({
   const selRow = sel ? rows[sel.r] : undefined;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <div
         ref={scrollRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        onMouseDown={() => setCtx(null)}
         className="relative min-h-0 flex-1 overflow-auto font-mono text-xs outline-none"
       >
         <div style={{ width: total, minWidth: "100%" }}>
@@ -304,12 +465,14 @@ export function ResultsGrid({
                       deleted ? "text-danger" : isNew ? "text-success" : "text-subtle",
                     )}
                     style={{ width: INDEX_W }}
+                    onMouseDown={(e) => (e.preventDefault(), scrollRef.current?.focus(), pickRow(vr.index, e.shiftKey))}
                   >
                     {isNew ? "+" : deleted ? "−" : row.i + 1}
                   </div>
                   {result.columns.map((_, ci) => {
                     const v = valueAt(row, ci);
                     const selected = sel?.r === vr.index && sel?.c === ci;
+                    const ranged = rangeCells > 1 && inRange(vr.index, ci);
                     const isEditingCell = editing?.r === vr.index && editing?.c === ci;
                     const edited = isEdited(row, ci) || (isNew && v !== undefined);
                     if (isEditingCell) {
@@ -335,7 +498,16 @@ export function ResultsGrid({
                     return (
                       <div
                         key={ci}
-                        onMouseDown={() => setSel({ r: vr.index, c: ci })}
+                        onMouseDown={(e) => {
+                          if (e.button === 2 && inRange(vr.index, ci)) return; // keep the range for the context menu
+                          pick(vr.index, ci, e.shiftKey);
+                        }}
+                        onMouseEnter={(e) => e.buttons === 1 && sel && !editing && (setAnchor((a) => a ?? sel), setSel({ r: vr.index, c: ci }))}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          const box = scrollRef.current!.parentElement!.getBoundingClientRect();
+                          setCtx({ x: e.clientX - box.left, y: e.clientY - box.top });
+                        }}
                         onDoubleClick={() => startEdit(vr.index, ci)}
                         className={cx(
                           "shrink-0 truncate border-r border-b border-line/60 px-2 leading-[25px]",
@@ -343,6 +515,7 @@ export function ResultsGrid({
                           (v === null || v === undefined) && "text-subtle italic",
                           !deleted && typeof v === "boolean" && (v ? "text-success" : "text-muted"),
                           edited && !deleted && "bg-warning/15 text-fg",
+                          ranged && "bg-accent-soft/70",
                           selected && "bg-accent-soft ring-1 ring-accent ring-inset",
                         )}
                         style={{ width: widths[ci] }}
@@ -358,15 +531,97 @@ export function ResultsGrid({
         </div>
       </div>
 
+      {ctx && range && (
+        <div
+          className="animate-pop absolute z-40 min-w-52 rounded-lg border border-line bg-elevated p-1 font-sans text-xs shadow-pop"
+          style={{ left: ctx.x, top: ctx.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 py-1 text-2xs text-subtle">
+            {rangeRows} row{rangeRows === 1 ? "" : "s"} · {rangeCells} cell{rangeCells === 1 ? "" : "s"}
+          </div>
+          {(
+            [
+              ["tsv", "Copy", `${mod}C`],
+              ["csv", "Copy as CSV", `${mod}⇧C`],
+              ["json", "Copy as JSON", ""],
+              ["markdown", "Copy as Markdown", ""],
+              ["insert", "Copy as INSERT", ""],
+            ] as const
+          ).map(([f, label, hint]) => (
+            <button key={f} className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (copyRange(f), setCtx(null))}>
+              <Copy size={12} className="text-subtle" /> {label}
+              {hint && <span className="ml-auto text-2xs text-subtle">{hint}</span>}
+            </button>
+          ))}
+          {edit && (
+            <>
+              <div className="my-1 h-px bg-line" />
+              <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (setBulk(""), setCtx(null))}>
+                <PenLine size={12} className="text-subtle" /> Set value…
+              </button>
+              <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (mapRange(() => null), setCtx(null))}>
+                <span className="w-3 text-center text-[10px] text-subtle">∅</span> Set NULL
+                <span className="ml-auto text-2xs text-subtle">{mod}⌫</span>
+              </button>
+              <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover" onClick={() => (duplicateRange(), setCtx(null))}>
+                <CopyPlus size={12} className="text-subtle" /> Duplicate row{rangeRows === 1 ? "" : "s"}
+                <span className="ml-auto text-2xs text-subtle">{mod}D</span>
+              </button>
+              <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-danger hover:bg-danger/10" onClick={() => (deleteRange(), setCtx(null))}>
+                <Trash2 size={12} /> Delete row{rangeRows === 1 ? "" : "s"}
+                <span className="ml-auto text-2xs opacity-70">{mod}⇧⌫</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {bulk !== null && range && (
+        <form
+          className="flex h-9 shrink-0 items-center gap-2 border-t border-line bg-accent-soft/40 px-2 font-sans text-xs"
+          onSubmit={(e) => {
+            e.preventDefault();
+            mapRange((row, c) => parseDraft(bulk, row.kind === "orig" ? result.rows[row.i][c] : undefined));
+            setBulk(null);
+            scrollRef.current?.focus();
+          }}
+        >
+          <PenLine size={12} className="text-accent" />
+          <span className="whitespace-nowrap text-muted">
+            Set {rangeCells} cell{rangeCells === 1 ? "" : "s"} to
+          </span>
+          <input
+            autoFocus
+            value={bulk}
+            onChange={(e) => setBulk(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && (setBulk(null), scrollRef.current?.focus())}
+            className="h-6 flex-1 rounded-md border border-line bg-elevated px-2 font-mono text-xs outline-none focus:border-accent"
+          />
+          <Button size="xs" variant="primary" type="submit">
+            Apply
+          </Button>
+          <Button size="xs" variant="ghost" type="button" onClick={() => setBulk(null)}>
+            Cancel
+          </Button>
+        </form>
+      )}
+
       {edit && (
         <div className="flex h-8 shrink-0 items-center gap-1 border-t border-line bg-panel px-2 text-2xs text-muted">
           <Button variant="ghost" size="xs" onClick={addRow}>
             <Plus size={12} /> Row
           </Button>
-          <Button variant="ghost" size="xs" onClick={toggleDelete} disabled={!selRow}>
-            <Trash2 size={12} /> {selRow && isDeleted(selRow) ? "Restore" : "Delete"}
+          <Button variant="ghost" size="xs" onClick={rangeRows > 1 ? deleteRange : toggleDelete} disabled={!selRow}>
+            <Trash2 size={12} /> {rangeRows <= 1 && selRow && isDeleted(selRow) ? "Restore" : rangeRows > 1 ? `Delete ${rangeRows}` : "Delete"}
           </Button>
-          <Button variant="ghost" size="xs" onClick={() => sel && setCell(sel.r, sel.c, null)} disabled={!sel}>
+          <Button variant="ghost" size="xs" onClick={duplicateRange} disabled={!selRow} title={`Duplicate (${mod}D)`}>
+            <CopyPlus size={12} /> Duplicate
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setBulk("")} disabled={!sel} title="Set every selected cell to one value">
+            <PenLine size={12} /> Set{rangeCells > 1 ? ` ${rangeCells}` : ""}
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => (rangeCells > 1 ? mapRange(() => null) : sel && setCell(sel.r, sel.c, null))} disabled={!sel}>
             NULL
           </Button>
           <Button variant="ghost" size="xs" onClick={revertCell} disabled={!sel || !selRow || !isEdited(selRow, sel.c)}>
