@@ -1,4 +1,4 @@
-import { Columns2, GitCompareArrows, Network, Plus, SquareTerminal, Table2, X } from "lucide-react";
+import { Blocks, Columns2, GitCompareArrows, Network, Plus, SquareTerminal, Table2, X } from "lucide-react";
 import { useState } from "react";
 import { countPending } from "../lib/pending";
 import type { Tab } from "../lib/types";
@@ -6,7 +6,7 @@ import { Button, cx } from "./ui";
 
 export const TAB_MIME = "application/x-rowhouse-tab";
 
-const ICON = { table: Table2, query: SquareTerminal, erd: Network, compare: GitCompareArrows } as const;
+const ICON = { table: Table2, query: SquareTerminal, erd: Network, compare: GitCompareArrows, builder: Blocks } as const;
 
 /**
  * Tabs for one pane. Tabs can be dragged to reorder, or dropped on the other

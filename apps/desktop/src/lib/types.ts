@@ -3,7 +3,7 @@ import type { Pending } from "./pending";
 
 export interface Tab {
   id: string;
-  kind: "query" | "table" | "erd" | "compare";
+  kind: "query" | "table" | "erd" | "compare" | "builder";
   /** split pane the tab lives in */
   pane?: 0 | 1;
   title: string;
@@ -31,6 +31,8 @@ export interface Tab {
   planLoading?: boolean;
   /** saved-query id this tab was opened from / saved as */
   snippetId?: number;
+  /** visual query builder state (builder tabs) */
+  qb?: import("./qb").QbState;
   /** unsaved grid edits (table tabs only) */
   pending?: Pending;
 }

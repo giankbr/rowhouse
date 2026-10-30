@@ -182,3 +182,10 @@ textarea,
     animation: none;
   }
 }
+
+/* query builder canvas: dotted grid */
+.qb-canvas {
+  background-color: var(--bg);
+  background-image: radial-gradient(color-mix(in srgb, var(--border-strong) 70%, transparent) 1px, transparent 1px);
+  background-size: 16px 16px;
+}

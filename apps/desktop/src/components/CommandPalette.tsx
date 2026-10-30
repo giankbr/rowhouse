@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Bot, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Blocks, Bot, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -28,6 +28,7 @@ export function CommandPalette({
     toggleTheme: () => void;
     showMcp: () => void;
     showSchedules: () => void;
+    openBuilder: () => void;
   };
 }) {
   if (!open) return null;
@@ -94,6 +95,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.showHistory)} className={item}>
               <History size={13} className="text-subtle" /> Query history
+            </Command.Item>
+            <Command.Item onSelect={run(actions.openBuilder)} className={item}>
+              <Blocks size={13} className="text-subtle" /> Visual query builder
             </Command.Item>
             <Command.Item onSelect={run(actions.showSchedules)} className={item}>
               <CalendarClock size={13} className="text-subtle" /> Scheduled queries

@@ -159,6 +159,7 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [x] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import
+- [x] Visual query builder (tables on a canvas, FK auto-joins, drag-to-join, filters, aggregates, live SQL)
 - [x] Query plan viewer, schema compare, saved queries
 - [x] Data compare (PK-matched rows + sync script)
 - [x] Scheduled queries (interval / daily / weekly, export to CSV/JSON, notify on failure or change)

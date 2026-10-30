@@ -11,6 +11,7 @@ import { Launcher, touchRecent } from "./components/Launcher";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { McpDialog } from "./components/McpDialog";
 import { SchedulesDialog } from "./components/SchedulesDialog";
+import { QueryBuilder } from "./components/QueryBuilder";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -237,6 +238,26 @@ export default function App() {
     addTab({ id: uid(), kind: "erd", title: "Diagram", connId: activeConn, sql: "" });
   }, [activeConn, tabs, addTab, selectTab]);
 
+  const openBuilder = useCallback(() => {
+    if (!activeConn) return;
+    const d = kindInfo(connections.find((c) => c.id === activeConn)?.kind ?? "postgres").dialect;
+    if (d === "redis" || d === "mongodb" || d === "cql") return setToast("The query builder works with SQL databases");
+    const existing = tabs.find((t) => t.kind === "builder" && t.connId === activeConn);
+    if (existing) return selectTab(existing.id);
+    addTab({ id: uid(), kind: "builder", title: "Query builder", connId: activeConn, sql: "" });
+  }, [activeConn, tabs, addTab, selectTab, connections]);
+
+  /** New query tab with `sql`, optionally run right away. */
+  const openQuery = useCallback(
+    (connId: string, sql: string, run: boolean) => {
+      const n = tabs.filter((t) => t.kind === "query" && t.connId === connId).length + 1;
+      const t: Tab = { id: uid(), kind: "query", title: `Query ${n}`, connId, sql };
+      addTab(t);
+      if (run) runTab(t);
+    },
+    [tabs, addTab, runTab],
+  );
+
   const pickHistory = useCallback(
     (sql: string, snippet?: Snippet) => {
       if (snippet) {
@@ -393,6 +414,16 @@ export default function App() {
         {t ? (
           t.kind === "compare" ? (
             <CompareView key={t.id} connections={connections} currentId={t.connId} onOpenSql={openSqlOn} onToast={setToast} />
+          ) : t.kind === "builder" && connections.some((c) => c.id === t.connId) ? (
+            <QueryBuilder
+              key={t.id}
+              conn={connections.find((c) => c.id === t.connId)!}
+              state={t.qb}
+              onState={(qb) => patchTab(t.id, { qb })}
+              onOpenSql={(sql) => openQuery(t.connId, sql, false)}
+              onRunSql={(sql) => openQuery(t.connId, sql, true)}
+              onToast={setToast}
+            />
           ) : t.kind === "erd" ? (
             <ErdView
               key={t.id}
@@ -435,6 +466,7 @@ export default function App() {
                 New query
               </Button>
               <Button onClick={openErd}>Diagram</Button>
+              <Button onClick={openBuilder}>Query builder</Button>
             </div>
             <Shortcuts />
           </Empty>
@@ -576,6 +608,7 @@ export default function App() {
         actions={{
           newQuery: () => newQuery(),
           openErd,
+          openBuilder,
           openCompare,
           importConnections: () => setImportOpen(true),
           splitRight,
