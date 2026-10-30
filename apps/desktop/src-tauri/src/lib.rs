@@ -20,10 +20,33 @@ struct AppState {
     runs: std::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>,
     /// database picked in the titlebar for this session (profile stays unchanged)
     db_override: std::sync::Mutex<HashMap<String, String>>,
+    /// when each open connection last answered; idle ones are pinged before use
+    last_ok: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
 impl AppState {
     async fn conn(&self, id: &str) -> CmdResult<Arc<Connection>> {
+        // After the laptop slept or the network changed, an idle connection (or
+        // its SSH tunnel) may be dead: ping it first and reconnect transparently.
+        let cached = self.open.lock().await.get(id).cloned();
+        if let Some(c) = cached {
+            let idle = self
+                .last_ok
+                .lock()
+                .ok()
+                .and_then(|m| m.get(id).map(|t| t.elapsed()))
+                .is_none_or(|d| d > std::time::Duration::from_secs(30));
+            let alive = !idle
+                || matches!(
+                    tokio::time::timeout(std::time::Duration::from_secs(5), c.ping()).await,
+                    Ok(Ok(()))
+                );
+            if alive {
+                self.mark_ok(id);
+                return Ok(c);
+            }
+            self.drop_conn(id).await;
+        }
         let mut open = self.open.lock().await;
         if let Some(c) = open.get(id) {
             return Ok(c.clone());
@@ -49,7 +72,15 @@ impl AppState {
         }
         let c = Arc::new(c);
         open.insert(id.to_string(), c.clone());
+        drop(open);
+        self.mark_ok(id);
         Ok(c)
+    }
+
+    fn mark_ok(&self, id: &str) {
+        if let Ok(mut m) = self.last_ok.lock() {
+            m.insert(id.to_string(), std::time::Instant::now());
+        }
     }
 
     async fn drop_conn(&self, id: &str) {
@@ -117,6 +148,80 @@ async fn connect(state: State<'_, AppState>, id: String) -> CmdResult<()> {
 async fn disconnect(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.drop_conn(&id).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn backup_database(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    options: rowhouse_core::dump::DumpOptions,
+) -> CmdResult<rowhouse_core::dump::DumpReport> {
+    let c = state.conn(&id).await?;
+    let pw = state.store.get(&id)?.password()?;
+    rowhouse_core::dump::backup(&c, pw.as_deref(), &options, std::path::Path::new(&path)).await
+}
+
+#[tauri::command]
+async fn restore_database(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<rowhouse_core::dump::DumpReport> {
+    let c = state.conn(&id).await?;
+    let pw = state.store.get(&id)?.password()?;
+    rowhouse_core::dump::restore(&c, pw.as_deref(), std::path::Path::new(&path)).await
+}
+
+#[tauri::command]
+async fn dump_tools(state: State<'_, AppState>, id: String) -> CmdResult<Vec<(String, bool)>> {
+    Ok(rowhouse_core::dump::tools_for(&*state.conn(&id).await?))
+}
+
+#[tauri::command]
+async fn server_activity(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<rowhouse_core::activity::Session>> {
+    state.conn(&id).await?.activity().await
+}
+
+#[tauri::command]
+async fn kill_session(
+    state: State<'_, AppState>,
+    id: String,
+    session: String,
+    terminate: bool,
+) -> CmdResult<()> {
+    state
+        .conn(&id)
+        .await?
+        .kill_session(&session, terminate)
+        .await
+}
+
+#[tauri::command]
+async fn list_indexes(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<Vec<rowhouse_core::structure::IndexInfo>> {
+    state.conn(&id).await?.list_indexes(&schema, &table).await
+}
+
+#[tauri::command]
+async fn table_foreign_keys(
+    state: State<'_, AppState>,
+    id: String,
+    schema: String,
+    table: String,
+) -> CmdResult<Vec<rowhouse_core::erd::ForeignKey>> {
+    let all = state.conn(&id).await?.foreign_keys().await?;
+    Ok(all
+        .into_iter()
+        .filter(|f| f.schema == schema && f.table == table)
+        .collect())
 }
 
 #[tauri::command]
@@ -866,6 +971,7 @@ pub fn run() {
                 open: Mutex::new(HashMap::new()),
                 runs: Default::default(),
                 db_override: Default::default(),
+                last_ok: Default::default(),
             });
             Ok(())
         })
@@ -881,6 +987,13 @@ pub fn run() {
             table_sql,
             run_query,
             list_databases,
+            backup_database,
+            restore_database,
+            dump_tools,
+            server_activity,
+            kill_session,
+            list_indexes,
+            table_foreign_keys,
             switch_database,
             cancel_query,
             list_history,

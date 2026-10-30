@@ -1,8 +1,8 @@
-import { Bot, Check, ChevronDown, Command, Database, Moon, PanelLeft, Search, Settings, Sun } from "lucide-react";
+import { Bot, Check, ChevronDown, Command, Database, Moon, PanelLeft, Search, Settings, Sun, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ENVIRONMENTS, kindInfo, type ConnectionConfig } from "../lib/api";
 import { isMac, mod } from "../lib/types";
-import { Button, Dot, Kbd, cx } from "./ui";
+import { Button, Dot, Kbd, Menu, cx } from "./ui";
 
 export function Titlebar({
   conn,
@@ -15,10 +15,12 @@ export function Titlebar({
   onHome,
   database,
   onSwitchDb,
+  onTool,
 }: {
   /** database picked this session (overrides the profile's) */
   database?: string | null;
   onSwitchDb: (db: string) => void;
+  onTool: (tool: "builder" | "erd" | "compare" | "schedules" | "backup" | "restore" | "activity") => void;
   conn: ConnectionConfig | null;
   dark: boolean;
   onToggleTheme: () => void;
@@ -71,6 +73,24 @@ export function Titlebar({
         )}
       </div>
 
+      {conn && (
+        <Menu
+          label={
+            <>
+              <Wrench size={12} /> Tools
+            </>
+          }
+          items={[
+            { label: "Query builder", onSelect: () => onTool("builder") },
+            { label: "Diagram (ERD)", onSelect: () => onTool("erd") },
+            { label: "Compare schema / data", onSelect: () => onTool("compare") },
+            { label: "Scheduled queries", onSelect: () => onTool("schedules") },
+            { label: "Server activity", hint: "processes", onSelect: () => onTool("activity") },
+            { label: "Back up database…", onSelect: () => onTool("backup") },
+            { label: "Restore from backup…", onSelect: () => onTool("restore") },
+          ]}
+        />
+      )}
       <button
         onClick={onPalette}
         className="flex h-6 w-60 items-center gap-2 rounded-md border border-line bg-elevated px-2 text-2xs text-subtle hover:border-line-strong"

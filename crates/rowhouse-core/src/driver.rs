@@ -138,6 +138,8 @@ pub struct Connection {
     pool: Pool,
     /// Kept alive for as long as the connection; dropped = tunnel closed.
     tunnel: Option<crate::tunnel::Tunnel>,
+    /// host/port actually used (127.0.0.1:<local> when tunnelled) — for CLI tools
+    endpoint: (String, u16),
     /// Server-side session ids of running tagged queries (for cancel).
     running: std::sync::Mutex<std::collections::HashMap<String, i64>>,
 }
@@ -352,6 +354,7 @@ impl Connection {
             pool,
             tunnel,
             running: Default::default(),
+            endpoint: (host.clone(), port),
         })
     }
 
@@ -367,6 +370,11 @@ impl Connection {
     /// Fingerprint of the SSH host key accepted for this connection, if tunnelled.
     pub fn ssh_host_key(&self) -> Option<&str> {
         self.tunnel.as_ref().map(|t| t.host_key.as_str())
+    }
+
+    /// Host and port to reach the server from this machine (through the SSH tunnel if any).
+    pub fn endpoint(&self) -> (&str, u16) {
+        (&self.endpoint.0, self.endpoint.1)
     }
 
     pub fn kind(&self) -> DbKind {
@@ -393,6 +401,16 @@ impl Connection {
         }
         let started = Instant::now();
         let results = self.run(sql, limit).await?;
+        Ok(QueryOutput {
+            results,
+            elapsed_ms: started.elapsed().as_millis(),
+        })
+    }
+
+    /// Run internal/admin SQL directly (callers check read-only themselves).
+    pub(crate) async fn query_admin(&self, sql: &str) -> Result<QueryOutput> {
+        let started = Instant::now();
+        let results = self.run(sql, 10_000).await?;
         Ok(QueryOutput {
             results,
             elapsed_ms: started.elapsed().as_millis(),

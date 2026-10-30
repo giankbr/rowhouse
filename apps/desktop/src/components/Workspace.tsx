@@ -408,6 +408,7 @@ export function Workspace({
               schema={tab.schema}
               table={tab.table}
               columns={tab.columns}
+              tables={tables}
               onToast={onToast}
               onApplied={async () => {
                 onChange({ columns: await api.describeTable(tab.connId, tab.schema!, tab.table!) });

@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Blocks, Bot, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Activity, Blocks, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -29,6 +29,9 @@ export function CommandPalette({
     showMcp: () => void;
     showSchedules: () => void;
     openBuilder: () => void;
+    showActivity: () => void;
+    backup: () => void;
+    restore: () => void;
   };
 }) {
   if (!open) return null;
@@ -98,6 +101,15 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.openBuilder)} className={item}>
               <Blocks size={13} className="text-subtle" /> Visual query builder
+            </Command.Item>
+            <Command.Item onSelect={run(actions.showActivity)} className={item}>
+              <Activity size={13} className="text-subtle" /> Server activity (processes)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.backup)} className={item}>
+              <HardDriveDownload size={13} className="text-subtle" /> Back up database…
+            </Command.Item>
+            <Command.Item onSelect={run(actions.restore)} className={item}>
+              <HardDriveUpload size={13} className="text-subtle" /> Restore from backup…
             </Command.Item>
             <Command.Item onSelect={run(actions.showSchedules)} className={item}>
               <CalendarClock size={13} className="text-subtle" /> Scheduled queries

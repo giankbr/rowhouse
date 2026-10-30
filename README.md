@@ -164,6 +164,10 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] Visual query builder (tables on a canvas, FK auto-joins, drag-to-join, filters, aggregates, live SQL)
 - [x] Query plan viewer, schema compare, saved queries
 - [x] Data compare (PK-matched rows + sync script)
+- [x] Cancel running queries (server-side on Postgres/MySQL), query timeout, tabs restored after restart
+- [x] Row details panel with JSON editor, find in results, SQL formatter, database switcher
+- [x] Backup / restore (pg_dump, pg_restore, psql, mysqldump, mysql, SQLite VACUUM INTO), server activity with cancel/kill
+- [x] Index and foreign key editing, auto-reconnect after sleep
 - [x] Scheduled queries (interval / daily / weekly, export to CSV/JSON, notify on failure or change)
 - [x] ERD view, table structure editor
 - [x] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval

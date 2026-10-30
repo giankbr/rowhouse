@@ -15,6 +15,8 @@ import { setWindowMode } from "./lib/windowSize";
 import { loadSession, saveSession } from "./lib/session";
 import { loadAppearance } from "./lib/appearance";
 import { QueryBuilder } from "./components/QueryBuilder";
+import { ActivityDialog } from "./components/ActivityDialog";
+import { BackupDialog } from "./components/BackupDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -48,6 +50,8 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [backup, setBackup] = useState<"backup" | "restore" | null>(null);
   const [schedules, setSchedules] = useState<{ draft: { connectionId: string; sql: string; name?: string } | null } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -557,6 +561,19 @@ export default function App() {
         onHome={() => setActiveConn(null)}
         database={conn ? dbOverride[conn.id] : null}
         onSwitchDb={switchDb}
+        onTool={(t) =>
+          t === "builder"
+            ? openBuilder()
+            : t === "erd"
+              ? openErd()
+              : t === "compare"
+                ? openCompare()
+                : t === "schedules"
+                  ? setSchedules({ draft: null })
+                  : t === "activity"
+                    ? setActivityOpen(true)
+                    : setBackup(t)
+        }
       />
       )}
 
@@ -640,6 +657,8 @@ export default function App() {
         }}
       />
       <McpDialog open={mcpOpen} onClose={() => setMcpOpen(false)} />
+      <ActivityDialog conn={conn} open={activityOpen} onClose={() => setActivityOpen(false)} onToast={setToast} />
+      <BackupDialog mode={backup} conn={conn} tables={connTables} onClose={() => setBackup(null)} onRestored={() => activeConn && loadTables(activeConn)} />
       <SchedulesDialog open={!!schedules} draft={schedules?.draft} onClose={() => setSchedules(null)} connections={connections} />
       <ApprovalCenter connections={connections} />
       <UpdateBanner />
@@ -687,6 +706,9 @@ export default function App() {
           toggleTheme: () => setDark((d) => !d),
           showMcp: () => setMcpOpen(true),
           showSchedules: () => setSchedules({ draft: null }),
+          showActivity: () => setActivityOpen(true),
+          backup: () => setBackup("backup"),
+          restore: () => setBackup("restore"),
         }}
       />
 

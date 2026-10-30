@@ -4,6 +4,7 @@
 //! * [`driver`]  — one `Connection` type over Postgres / MySQL / SQLite
 //! * [`guard`]   — read-only SQL classifier (used by MCP + read-only profiles)
 
+pub mod activity;
 pub mod ai;
 pub mod approvals;
 pub mod backend;
@@ -13,6 +14,7 @@ pub mod compare;
 pub mod config;
 pub mod conn_url;
 pub mod driver;
+pub mod dump;
 pub mod erd;
 pub mod error;
 pub mod guard;

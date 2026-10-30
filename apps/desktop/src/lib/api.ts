@@ -260,7 +260,42 @@ export type ColumnOp =
   | { op: "add"; column: ColumnInfo }
   | { op: "drop"; name: string }
   | { op: "rename"; from: string; to: string }
-  | { op: "alter"; from: ColumnInfo; to: ColumnInfo };
+  | { op: "alter"; from: ColumnInfo; to: ColumnInfo }
+  | { op: "addIndex"; name: string; columns: string[]; unique: boolean }
+  | { op: "dropIndex"; name: string }
+  | { op: "addForeignKey"; name: string; columns: string[]; refSchema: string; refTable: string; refColumns: string[]; onDelete?: string | null }
+  | { op: "dropForeignKey"; name: string };
+
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  primary: boolean;
+  definition?: string | null;
+}
+
+export interface DumpOptions {
+  format: "sql" | "custom";
+  content: "all" | "schema-only" | "data-only";
+  tables: string[];
+}
+export interface DumpReport {
+  path: string;
+  bytes: number;
+  tool: string;
+  elapsedMs: number;
+  log: string;
+}
+export interface ServerSession {
+  id: string;
+  user: string;
+  database: string;
+  client: string;
+  state: string;
+  seconds: number | null;
+  query: string;
+  own: boolean;
+}
 
 export interface Snippet {
   id: number;
@@ -407,6 +442,13 @@ export const api = {
     call<QueryOutput>("run_query", { id, sql, limit, runId, timeoutMs }),
   cancelQuery: (id: string, runId: string) => call<void>("cancel_query", { id, runId }),
   listDatabases: (id: string) => call<string[]>("list_databases", { id }),
+  listIndexes: (id: string, schema: string, table: string) => call<IndexInfo[]>("list_indexes", { id, schema, table }),
+  tableForeignKeys: (id: string, schema: string, table: string) => call<ForeignKey[]>("table_foreign_keys", { id, schema, table }),
+  backupDatabase: (id: string, path: string, options: DumpOptions) => call<DumpReport>("backup_database", { id, path, options }),
+  restoreDatabase: (id: string, path: string) => call<DumpReport>("restore_database", { id, path }),
+  dumpTools: (id: string) => call<[string, boolean][]>("dump_tools", { id }),
+  serverActivity: (id: string) => call<ServerSession[]>("server_activity", { id }),
+  killSession: (id: string, session: string, terminate: boolean) => call<void>("kill_session", { id, session, terminate }),
   switchDatabase: (id: string, database: string) => call<void>("switch_database", { id, database }),
   previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
   applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
@@ -650,6 +692,32 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       return mockCols;
     case "table_sql":
       return `SELECT * FROM "${a.schema}"."${a.table}" LIMIT ${a.limit}`;
+    case "list_indexes":
+      return [
+        { name: `${a.table}_pkey`, columns: ["id"], unique: true, primary: true },
+        { name: `${a.table}_created_at_idx`, columns: ["created_at"], unique: false, primary: false },
+      ] satisfies IndexInfo[];
+    case "table_foreign_keys":
+      return a.table === "orders"
+        ? [{ name: "orders_user_id_fkey", schema: "public", table: "orders", columns: ["user_id"], ref_schema: "public", ref_table: "users", ref_columns: ["id"] }]
+        : [];
+    case "dump_tools":
+      return [["pg_dump", true], ["pg_restore", true], ["psql", true]];
+    case "backup_database":
+      await sleep(900);
+      return { path: String(a.path), bytes: 1_482_113, tool: "pg_dump", elapsedMs: 870, log: "" } satisfies DumpReport;
+    case "restore_database":
+      await sleep(900);
+      return { path: String(a.path), bytes: 1_482_113, tool: "pg_restore", elapsedMs: 910, log: "" } satisfies DumpReport;
+    case "server_activity":
+      return [
+        { id: "4121", user: "app", database: "app_dev", client: "10.0.3.14", state: "active", seconds: 42.7, query: "SELECT o.*, u.email FROM orders o JOIN users u ON u.id = o.user_id WHERE o.created_at > now() - interval '90 days' ORDER BY o.total DESC", own: false },
+        { id: "4170", user: "worker", database: "app_dev", client: "10.0.3.22", state: "idle in transaction", seconds: 311, query: "UPDATE invoices SET status = 'sent' WHERE id = 9912", own: false },
+        { id: "4188", user: "postgres", database: "app_dev", client: "local", state: "active", seconds: 0.01, query: "SELECT pid::text, … FROM pg_stat_activity", own: true },
+        { id: "4102", user: "app", database: "app_dev", client: "10.0.3.14", state: "idle", seconds: 4.2, query: "COMMIT", own: false },
+      ] satisfies ServerSession[];
+    case "kill_session":
+      return null;
     case "list_databases":
       await sleep(150);
       return ["app_dev", "app_test", "analytics", "billing", "postgres"];
@@ -960,6 +1028,11 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
         if (o.op === "add") return [`ALTER TABLE ${t} ADD COLUMN "${o.column.name}" ${o.column.data_type}${o.column.nullable ? "" : " NOT NULL"}${o.column.default ? ` DEFAULT ${o.column.default}` : ""}`];
         if (o.op === "drop") return [`ALTER TABLE ${t} DROP COLUMN "${o.name}"`];
         if (o.op === "rename") return [`ALTER TABLE ${t} RENAME COLUMN "${o.from}" TO "${o.to}"`];
+        if (o.op === "addIndex") return [`CREATE ${o.unique ? "UNIQUE " : ""}INDEX "${o.name}" ON ${t} (${o.columns.map((c) => `"${c}"`).join(", ")})`];
+        if (o.op === "dropIndex") return [`DROP INDEX "${a.schema}"."${o.name}"`];
+        if (o.op === "addForeignKey")
+          return [`ALTER TABLE ${t} ADD CONSTRAINT "${o.name}" FOREIGN KEY (${o.columns.map((c) => `"${c}"`).join(", ")}) REFERENCES "${o.refSchema}"."${o.refTable}" (${o.refColumns.map((c) => `"${c}"`).join(", ")})${o.onDelete ? ` ON DELETE ${o.onDelete.toUpperCase()}` : ""}`];
+        if (o.op === "dropForeignKey") return [`ALTER TABLE ${t} DROP CONSTRAINT "${o.name}"`];
         const out: string[] = [];
         if (o.from.data_type !== o.to.data_type) out.push(`ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" TYPE ${o.to.data_type} USING "${o.to.name}"::${o.to.data_type}`);
         if (o.from.nullable !== o.to.nullable) out.push(`ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" ${o.to.nullable ? "DROP" : "SET"} NOT NULL`);
