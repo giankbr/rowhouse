@@ -264,6 +264,7 @@ impl Connection {
                                 out.push(format!("-- default of {col} differs ({:?}); SQL Server defaults are named constraints — change by hand", to.default));
                             }
                         }
+                        Driver::Redis => out.push("-- Redis has no column schema".into()),
                         Driver::Sqlite => out.push(format!(
                             "-- SQLite can't alter {col} in place ({}); recreate {tb} with the new definition",
                             aspects.join(", ")

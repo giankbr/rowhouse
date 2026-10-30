@@ -118,6 +118,7 @@ enum Pool {
     Duck(backend::duck::Client),
     Mssql(backend::mssql::Client),
     Ch(backend::clickhouse::Client),
+    Redis(backend::redis::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -282,6 +283,9 @@ impl Connection {
                 )
                 .await?,
             ),
+            Driver::Redis => {
+                Pool::Redis(backend::redis::Client::connect(&host, port, user, password, db).await?)
+            }
             Driver::Clickhouse => Pool::Ch(
                 backend::clickhouse::Client::connect(
                     &host,
@@ -353,14 +357,23 @@ impl Connection {
             Pool::Duck(c) => c.run(sql, limit, false).await?,
             Pool::Mssql(c) => c.run(sql, limit, false).await?,
             Pool::Ch(c) => c.run(sql, limit, false).await?,
+            Pool::Redis(c) => c.run(sql, limit, false).await?,
         })
     }
 
     /// Run a script that must not modify anything. Two layers:
     /// the [`guard`] classifier, then a read-only transaction / session setting.
     pub async fn query_read_only(&self, sql: &str, limit: usize) -> Result<QueryOutput> {
-        guard::check_read_only(sql).map_err(Error::ReadOnly)?;
         let started = Instant::now();
+        if let Pool::Redis(c) = &self.pool {
+            // Redis commands, not SQL: the backend checks them against its read allowlist
+            let results = c.run(sql, limit, true).await?;
+            return Ok(QueryOutput {
+                results,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+        guard::check_read_only(sql).map_err(Error::ReadOnly)?;
         let results = match &self.pool {
             Pool::Pg(p) => {
                 let mut c = p.acquire().await?;
@@ -401,6 +414,7 @@ impl Connection {
             Pool::Duck(c) => c.run(sql, limit, true).await?,
             Pool::Mssql(c) => c.run(sql, limit, true).await?,
             Pool::Ch(c) => c.run(sql, limit, true).await?,
+            Pool::Redis(_) => unreachable!("handled above"),
         };
         Ok(QueryOutput {
             results,
@@ -438,6 +452,9 @@ impl Connection {
             Pool::Lite(p) => sqlx_tx!(p),
             Pool::Duck(c) => c.exec_tx(stmts).await,
             Pool::Mssql(c) => c.exec_tx(stmts).await,
+            Pool::Redis(_) => Err(Error::Other(
+                "editing isn't supported for Redis — use commands in a query tab".into(),
+            )),
             Pool::Ch(c) => {
                 if stmts.iter().any(|(e, _)| *e != Expect::Any) {
                     return Err(Error::Other(
@@ -452,11 +469,25 @@ impl Connection {
 
     /// Quick health check.
     pub async fn ping(&self) -> Result<()> {
+        if let Pool::Redis(c) = &self.pool {
+            return c.raw(&["PING".into()]).await.map(|_| ());
+        }
         self.meta("SELECT 1").await.map(|_| ())
     }
 
+    pub(crate) fn redis(&self) -> Option<&backend::redis::Client> {
+        match &self.pool {
+            Pool::Redis(c) => Some(c),
+            _ => None,
+        }
+    }
+
     pub async fn list_tables(&self) -> Result<Vec<TableInfo>> {
+        if let Pool::Redis(c) = &self.pool {
+            return c.keys(2_000).await;
+        }
         let sql = match self.driver() {
+            Driver::Redis => unreachable!("handled above"),
             Driver::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
                  WHERE table_schema NOT IN ('pg_catalog','information_schema','crdb_internal','pg_extension','pg_internal','gp_toolkit') \
                  AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2",
@@ -492,6 +523,22 @@ impl Connection {
     }
 
     pub async fn describe_table(&self, schema: &str, table: &str) -> Result<Vec<ColumnInfo>> {
+        if let Pool::Redis(c) = &self.pool {
+            // a key has no schema; report the value's type as a single pseudo column
+            let ty = c.raw(&["TYPE".into(), table.into()]).await?;
+            let ty = match ty {
+                redis::Value::SimpleString(s) => s,
+                other => format!("{other:?}"),
+            };
+            let _ = schema;
+            return Ok(vec![ColumnInfo {
+                name: "value".into(),
+                data_type: ty,
+                nullable: true,
+                default: None,
+                primary_key: false,
+            }]);
+        }
         let (s, t) = (self.literal(schema), self.literal(table));
         // information_schema with a portable primary-key flag (Postgres family, DuckDB, SQL Server)
         let info_schema = |type_expr: &str| {
@@ -508,6 +555,7 @@ impl Connection {
             )
         };
         let rows = match self.driver() {
+            Driver::Redis => unreachable!("handled above"),
             // Redshift's catalog is too old for this query; it uses information_schema below.
             Driver::Postgres if self.kind() != DbKind::Redshift => {
                 // pg_catalog gives full types (varchar(64), numeric(12,2), text[]) and real defaults

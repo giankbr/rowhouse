@@ -15,9 +15,10 @@ export type DbKind =
   | "sqlite"
   | "duckdb"
   | "mssql"
-  | "clickhouse";
+  | "clickhouse"
+  | "redis";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis";
 
 export interface KindInfo {
   kind: DbKind;
@@ -45,6 +46,7 @@ export const KINDS: KindInfo[] = [
   { kind: "mssql", label: "SQL Server", abbr: "Ss", color: "#a91d22", dialect: "mssql", port: 1433, user: "sa", beta: true },
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
+  { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
   { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },
@@ -95,6 +97,8 @@ export interface ConnectionConfig {
   file?: string | null;
   readOnly: boolean;
   mcpEnabled: boolean;
+  /** MCP clients may request writes (each needs approval) */
+  mcpWrites?: boolean;
   color?: string | null;
   ssh?: SshConfig | null;
   env?: Environment;
@@ -237,6 +241,12 @@ export interface DataDiff {
   sql: string;
 }
 
+export type ColumnOp =
+  | { op: "add"; column: ColumnInfo }
+  | { op: "drop"; name: string }
+  | { op: "rename"; from: string; to: string }
+  | { op: "alter"; from: ColumnInfo; to: ColumnInfo };
+
 export interface Snippet {
   id: number;
   name: string;
@@ -332,6 +342,14 @@ export const api = {
   explainPlan: (id: string, sql: string, analyze: boolean) => call<Plan>("explain_plan", { id, sql, analyze }),
   compareSchema: (sourceId: string, sourceSchema: string, targetId: string, targetSchema: string) =>
     call<SchemaDiff>("compare_schema", { sourceId, sourceSchema, targetId, targetSchema }),
+  structurePreview: (id: string, schema: string, table: string, ops: ColumnOp[]) =>
+    call<string[]>("structure_preview", { id, schema, table, ops }),
+  applyStructure: (id: string, schema: string, table: string, ops: ColumnOp[]) =>
+    call<string[]>("apply_structure", { id, schema, table, ops }),
+  approvals: {
+    pending: () => call<import("../components/ApprovalDialog").ApprovalRequest[]>("approvals_pending"),
+    answer: (id: string, approved: boolean, reason?: string) => call<void>("approvals_answer", { id, approved, reason }),
+  },
   checkDestructive: (sql: string) => call<Destructive[]>("check_destructive", { sql }),
   erd: (id: string, schema?: string) => call<Erd>("erd", { id, schema }),
   importDetect: () => call<{ source: ImportSource; path: string }[]>("import_detect"),
@@ -401,6 +419,8 @@ const mockConns: ConnectionConfig[] = [
   { ...newConnection("mysql"), id: "prod-my", name: "Production MySQL", host: "db.internal", database: "shop", readOnly: true, color: "red", env: "production" },
   { ...newConnection("sqlite"), id: "lite", name: "analytics.db", file: "~/data/analytics.db" },
   { ...newConnection("clickhouse"), id: "ch", name: "Events (ClickHouse)", database: "events", color: "yellow" },
+  { ...newConnection("redis"), id: "redis-local", name: "redis-local", host: "127.0.0.1", env: "local" },
+  { ...newConnection("postgres"), id: "staging-pg", name: "Billing (staging)", host: "staging.db.internal", database: "billing", env: "staging", ssh: { host: "bastion.internal", port: 22, user: "deploy", auth: "agent" } },
 ];
 
 const mockTables: TableInfo[] = [
@@ -713,11 +733,34 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
 -- DROP TABLE "public"."tmp_import_2024";`,
       } satisfies SchemaDiff;
     }
+    case "structure_preview":
+    case "apply_structure": {
+      const ops = a.ops as ColumnOp[];
+      const t = `"${a.schema}"."${a.table}"`;
+      return ops.flatMap((o) => {
+        if (o.op === "add") return [`ALTER TABLE ${t} ADD COLUMN "${o.column.name}" ${o.column.data_type}${o.column.nullable ? "" : " NOT NULL"}${o.column.default ? ` DEFAULT ${o.column.default}` : ""}`];
+        if (o.op === "drop") return [`ALTER TABLE ${t} DROP COLUMN "${o.name}"`];
+        if (o.op === "rename") return [`ALTER TABLE ${t} RENAME COLUMN "${o.from}" TO "${o.to}"`];
+        const out: string[] = [];
+        if (o.from.data_type !== o.to.data_type) out.push(`ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" TYPE ${o.to.data_type} USING "${o.to.name}"::${o.to.data_type}`);
+        if (o.from.nullable !== o.to.nullable) out.push(`ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" ${o.to.nullable ? "DROP" : "SET"} NOT NULL`);
+        if ((o.from.default ?? "") !== (o.to.default ?? "")) out.push(o.to.default ? `ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" SET DEFAULT ${o.to.default}` : `ALTER TABLE ${t} ALTER COLUMN "${o.to.name}" DROP DEFAULT`);
+        return out;
+      });
+    }
+    case "approvals_pending":
+      return (window as unknown as { __mockApprovals?: unknown[] }).__mockApprovals ?? [];
+    case "approvals_answer": {
+      const w = window as unknown as { __mockApprovals?: { id: string }[] };
+      w.__mockApprovals = (w.__mockApprovals ?? []).filter((x) => x.id !== a.id);
+      return null;
+    }
     case "write_text_file":
       return null;
     case "check_destructive": {
       const out: Destructive[] = [];
-      for (const st of String(a.sql).split(";").map((x) => x.trim()).filter(Boolean)) {
+      const noComments = String(a.sql).replace(/--[^\n]*/g, "");
+      for (const st of noComments.split(";").map((x) => x.trim()).filter(Boolean)) {
         const m =
           /^drop\s+\w+\s+(?:if\s+exists\s+)?([\w."]+)/i.exec(st) ??
           /^truncate\s+(?:table\s+)?([\w."]+)/i.exec(st);

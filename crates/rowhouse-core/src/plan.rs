@@ -376,6 +376,7 @@ impl Connection {
                     ..Default::default()
                 })
             }
+            Driver::Redis => Err(Error::Other("Redis has no query plans".into())),
             Driver::Mssql => Err(Error::Other(
                 "query plans for SQL Server are not supported yet".into(),
             )),

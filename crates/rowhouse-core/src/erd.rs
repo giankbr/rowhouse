@@ -95,7 +95,7 @@ impl Connection {
                  FROM duckdb_constraints() WHERE constraint_type = 'FOREIGN KEY'"
                     .to_string(),
             ),
-            Driver::Clickhouse => None, // no foreign keys
+            Driver::Clickhouse | Driver::Redis => None, // no foreign keys
         };
         let Some(sql) = sql else { return Ok(vec![]) };
         let rows = self

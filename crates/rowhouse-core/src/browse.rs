@@ -186,6 +186,15 @@ impl Connection {
 
     pub async fn table_page(&self, r: &PageRequest) -> Result<Page> {
         let started = std::time::Instant::now();
+        if let Some(redis) = self.redis() {
+            let (result, total, sql) = redis.key_page(&r.table, r.offset, r.limit).await?;
+            return Ok(Page {
+                result,
+                total,
+                sql,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
         let sql = self.page_sql(r);
         let out = self.query(&sql, r.limit).await?;
         let result = out.results.into_iter().next().unwrap_or_default();

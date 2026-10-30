@@ -141,6 +141,7 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Duckdb => "DuckDB",
         Mssql => "Microsoft SQL Server (T-SQL)",
         Clickhouse => "ClickHouse",
+        Redis => "Redis (reply with Redis commands, one per line, instead of SQL)",
     }
 }
 

@@ -259,3 +259,83 @@ async fn pg_schema_compare_roundtrip() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn pg_structure_edit() {
+    use rowhouse_core::{structure::ColumnOp, ColumnInfo};
+    let Some(c) = conn().await else { return };
+    c.query("DROP TABLE IF EXISTS rh_s; CREATE TABLE rh_s (id int PRIMARY KEY, code varchar(10), legacy int)", 10).await.unwrap();
+    let cols = c.describe_table("public", "rh_s").await.unwrap();
+    let code = cols.iter().find(|x| x.name == "code").unwrap().clone();
+    let ops = vec![
+        ColumnOp::Add {
+            column: ColumnInfo {
+                name: "status".into(),
+                data_type: "text".into(),
+                nullable: false,
+                default: Some("'new'".into()),
+                primary_key: false,
+            },
+        },
+        ColumnOp::Alter {
+            from: code.clone(),
+            to: ColumnInfo {
+                data_type: "varchar(40)".into(),
+                nullable: false,
+                default: Some("'n/a'".into()),
+                ..code
+            },
+        },
+        ColumnOp::Rename {
+            from: "legacy".into(),
+            to: "old_value".into(),
+        },
+    ];
+    c.apply_structure("public", "rh_s", &ops).await.unwrap();
+    let cols = c.describe_table("public", "rh_s").await.unwrap();
+    let get = |n: &str| cols.iter().find(|x| x.name == n).unwrap().clone();
+    assert_eq!(get("code").data_type, "character varying(40)");
+    assert!(!get("code").nullable);
+    assert!(get("code").default.unwrap().contains("n/a"));
+    assert!(!get("status").nullable);
+    assert!(cols.iter().any(|x| x.name == "old_value"));
+    c.apply_structure(
+        "public",
+        "rh_s",
+        &[ColumnOp::Drop {
+            name: "old_value".into(),
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(c.describe_table("public", "rh_s").await.unwrap().len(), 3);
+    // a failing statement rolls back the whole batch (Postgres DDL is transactional)
+    let bad = vec![
+        ColumnOp::Add {
+            column: ColumnInfo {
+                name: "a".into(),
+                data_type: "int".into(),
+                nullable: true,
+                default: None,
+                primary_key: false,
+            },
+        },
+        ColumnOp::Add {
+            column: ColumnInfo {
+                name: "b".into(),
+                data_type: "no_such_type".into(),
+                nullable: true,
+                default: None,
+                primary_key: false,
+            },
+        },
+    ];
+    assert!(c.apply_structure("public", "rh_s", &bad).await.is_err());
+    assert!(!c
+        .describe_table("public", "rh_s")
+        .await
+        .unwrap()
+        .iter()
+        .any(|x| x.name == "a"));
+    c.query("DROP TABLE rh_s", 10).await.unwrap();
+}

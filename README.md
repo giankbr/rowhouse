@@ -22,6 +22,8 @@ assistants can explore your databases safely.
 - ER diagram (`Diagram` in the sidebar): built from foreign keys, pan / zoom / drag, click to focus a table's relations, double-click to open it, export SVG
 - Split panes (`⌘/Ctrl+\\`) and drag-and-drop tabs between them
 - Import connections from DBeaver, TablePlus and Navicat (auto-detects their files; passwords are re-entered once)
+- Start screen with every connection (search, ↑/↓, Enter), environment badges, recent first; open SQLite/DuckDB files directly
+- Table structure editor: add / rename / change / drop columns, DDL previewed before it runs
 - Paste a connection URL (`postgresql://…`, `mysql://…`); Neon and Supabase are recognised and use TLS by default
 - TLS options: disable / prefer / require / verify-ca / verify-full, custom CA and client certificates (mutual TLS)
 - Table browsing pushed down to SQL: filters, server-side sort and pagination with row counts
@@ -30,7 +32,7 @@ assistants can explore your databases safely.
 - Schema compare between any two connections/schemas, with a migration script for the target (drops commented out)
 - Query history (`⌘/Ctrl+Y`) shared with the MCP server — every query an AI assistant runs shows up, tagged “AI”
 - Command palette (`⌘/Ctrl+K`), light/dark theme, compact 12–13px UI
-- `rowhouse-mcp`: stdio MCP server sharing the same connection profiles
+- `rowhouse-mcp`: stdio MCP server bundled with the app, sharing the same connection profiles. Reads are read-only; on connections where you allow it, the AI can *request* writes (`execute_sql`) and each one waits for your approval in the app (destructive ones need the table name typed)
 
 ## Layout
 
@@ -88,10 +90,10 @@ The pre-commit hook runs `cargo fmt --check` and the TypeScript type check; CI r
 
 | Status | Databases | How |
 | --- | --- | --- |
-| ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
+| ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), Redis, MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
 | 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8 | `tiberius`, Postgres protocol |
 | 🟡 beta (wire-compatible, not yet run against a live server) | Neon, Supabase (Postgres + TLS), Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
-| ⏳ planned | LibSQL/Turso, Cloudflare D1, MongoDB, Redis, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
+| ⏳ planned | LibSQL/Turso, Cloudflare D1, MongoDB, Cassandra/ScyllaDB, Elasticsearch, BigQuery, Snowflake, Oracle | — |
 
 Notes: ClickHouse has no transactions, so grid editing is disabled there (CSV import still works).
 SQL Server connections encrypt and accept self-signed certificates, like most DB GUIs.
@@ -108,6 +110,7 @@ SQL Server connections encrypt and accept self-signed certificates, like most DB
 | `describe_table` | Columns, types, nullability, defaults, PK |
 | `sample_rows` | First N rows of a table |
 | `run_query` | Read-only SQL (SELECT / WITH / SHOW / EXPLAIN) |
+| `execute_sql` | A write, only after you approve it in Rowhouse (connections with “Allow AI to request writes”) |
 
 Safety: every MCP query passes a keyword guard **and** runs inside a read-only transaction
 (`BEGIN READ ONLY` on Postgres, `START TRANSACTION READ ONLY` on MySQL, `PRAGMA query_only` on SQLite).
@@ -142,15 +145,16 @@ libraries (e.g. Pace UI) drop in since the stack is React + Tailwind.
 - [x] Export (CSV, JSON, SQL INSERTs) and CSV import
 - [ ] Saved queries / snippets
 - [x] SQL Server, DuckDB, ClickHouse, CockroachDB (+ beta: Redshift, Greenplum, TiDB, SingleStore)
-- [ ] MongoDB, Redis, LibSQL/Turso, D1, Cassandra drivers
+- [x] Redis
+- [ ] MongoDB, LibSQL/Turso, D1, Cassandra drivers
 - [x] AI: natural-language → SQL, fix, explain with your own model
 - [ ] AI: streaming responses, inline completions in the editor
 - [x] Production safety rails, ERD, split panes, connection import
 - [x] Query plan viewer, schema compare, saved queries
 - [x] Data compare (PK-matched rows + sync script)
-- [ ] Scheduled queries, MongoDB / Redis drivers
-- [ ] ERD view, table structure editor
-- [ ] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
+- [ ] Scheduled queries, MongoDB driver
+- [x] ERD view, table structure editor
+- [x] Bundle `rowhouse-mcp` as a Tauri sidecar; MCP write tools gated by in-app approval
 - [ ] Auto-update, code signing (macOS notarization, Windows signing)
 
 ## License

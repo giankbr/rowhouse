@@ -41,6 +41,9 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env: { ACCEPT_EULA: "Y", MSSQL_SA_PASSWORD: "Rowhouse!Pass1" }
         ports: ["1433:1433"]
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
         env: { CLICKHOUSE_USER: rh, CLICKHOUSE_PASSWORD: rh, CLICKHOUSE_DB: default }
@@ -64,6 +67,7 @@ jobs:
           ROWHOUSE_TEST_MYSQL: localhost:3306:root:root:rowhouse
           ROWHOUSE_TEST_MSSQL: localhost:1433:sa:Rowhouse!Pass1
           ROWHOUSE_TEST_CH: localhost:8123:rh:rh
+          ROWHOUSE_TEST_REDIS: localhost:6379
           ROWHOUSE_TEST_COCKROACH: localhost:26257:root
 
   desktop:
@@ -82,4 +86,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm --filter rowhouse-desktop exec vite build
+      - run: node scripts/sidecar.mjs debug
       - run: cargo check -p rowhouse-desktop -p rowhouse-mcp

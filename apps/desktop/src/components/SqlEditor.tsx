@@ -60,7 +60,7 @@ export function SqlEditor({
               ? StandardSQL
               : PostgreSQL;
     return [
-      sql({ dialect, schema, upperCaseKeywords: true }),
+      ...(d === "redis" ? [] : [sql({ dialect, schema, upperCaseKeywords: true })]),
       theme,
       syntaxHighlighting(highlight),
       Prec.highest(

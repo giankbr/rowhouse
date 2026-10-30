@@ -463,3 +463,53 @@ async fn data_compare_and_sync() {
         (0, 0, 1)
     );
 }
+
+#[tokio::test]
+async fn structure_edit_sqlite() {
+    use rowhouse_core::{structure::ColumnOp, ColumnInfo};
+    let (_d, c) = setup().await;
+    let col = |name: &str, t: &str| ColumnInfo {
+        name: name.into(),
+        data_type: t.into(),
+        nullable: true,
+        default: Some("'x'".into()),
+        primary_key: false,
+    };
+    let ops = vec![
+        ColumnOp::Add {
+            column: col("nick", "TEXT"),
+        },
+        ColumnOp::Rename {
+            from: "score".into(),
+            to: "points".into(),
+        },
+        ColumnOp::Drop {
+            name: "avatar".into(),
+        },
+    ];
+    let sql = c.structure_sql("main", "users", &ops).unwrap();
+    assert_eq!(
+        sql[0],
+        "ALTER TABLE \"users\" ADD COLUMN \"nick\" TEXT DEFAULT 'x'"
+    );
+    c.apply_structure("main", "users", &ops).await.unwrap();
+    let names: Vec<String> = c
+        .describe_table("main", "users")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(names, ["id", "name", "points", "nick"]);
+    // SQLite can't change a column type in place → clear refusal, nothing applied
+    let alter = ColumnOp::Alter {
+        from: col("nick", "TEXT"),
+        to: col("nick", "INTEGER"),
+    };
+    let err = c
+        .apply_structure("main", "users", &[alter])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("can't apply"), "{err}");
+}

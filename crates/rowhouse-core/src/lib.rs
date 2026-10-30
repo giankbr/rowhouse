@@ -5,6 +5,7 @@
 //! * [`guard`]   — read-only SQL classifier (used by MCP + read-only profiles)
 
 pub mod ai;
+pub mod approvals;
 pub mod backend;
 pub mod browse;
 pub mod changes;
@@ -20,6 +21,7 @@ pub mod import;
 pub mod io;
 pub mod model;
 pub mod plan;
+pub mod structure;
 pub mod tunnel;
 
 pub use changes::{ChangeSet, RowUpdate};

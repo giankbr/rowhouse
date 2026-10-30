@@ -6,6 +6,7 @@ import { mod, type Tab } from "../lib/types";
 import { AiPanel, type AiState } from "./AiPanel";
 import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
+import { StructureEditor } from "./StructureEditor";
 import { ResultsGrid } from "./ResultsGrid";
 import { SqlEditor } from "./SqlEditor";
 import { Button, Field, Input, Menu, Modal, Segmented, Switch, cx } from "./ui";
@@ -258,7 +259,7 @@ export function Workspace({
               variant="ghost"
               size="xs"
               onClick={() => (tab.showPlan ? onChange({ showPlan: false }) : explainPlan())}
-              disabled={!tab.sql.trim()}
+              disabled={!tab.sql.trim() || conn?.kind === "redis"}
               title="Show the query plan (EXPLAIN)"
               className={cx(tab.showPlan && "bg-selected text-fg")}
             >
@@ -294,7 +295,7 @@ export function Workspace({
             variant="ghost"
             size="xs"
             onClick={() => setShowFilters((f) => !f)}
-            disabled={tab.view === "structure"}
+            disabled={tab.view === "structure" || conn?.kind === "redis"}
             className={cx((showFilters || (tab.filters?.length ?? 0) > 0) && "bg-selected text-fg")}
           >
             <FilterIcon size={11} /> Filter
@@ -352,7 +353,21 @@ export function Workspace({
 
       <div className="relative min-h-0 flex-1">
         {tab.kind === "table" && tab.view === "structure" ? (
-          <Structure tab={tab} />
+          conn && !conn.readOnly && conn.kind !== "redis" && tab.columns && tab.schema && tab.table ? (
+            <StructureEditor
+              conn={conn}
+              schema={tab.schema}
+              table={tab.table}
+              columns={tab.columns}
+              onToast={onToast}
+              onApplied={async () => {
+                onChange({ columns: await api.describeTable(tab.connId, tab.schema!, tab.table!) });
+                onRun();
+              }}
+            />
+          ) : (
+            <Structure tab={tab} />
+          )
         ) : tab.kind === "query" && tab.showPlan ? (
           <PlanView
             plan={tab.plan}

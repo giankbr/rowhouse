@@ -118,7 +118,7 @@ export function ConnectionDialog({
             {urlError && <span className="text-2xs text-danger">{urlError}</span>}
           </div>
         )}
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-5 gap-1">
           {KINDS.map((k) => (
             <button
               type="button"
@@ -204,8 +204,8 @@ export function ConnectionDialog({
                 />
               </Field>
             </div>
-            <Field label="Database">
-              <Input value={c.database ?? ""} placeholder="optional" onChange={(e) => set({ database: e.target.value || null })} />
+            <Field label={c.kind === "redis" ? "Database number" : "Database"}>
+              <Input value={c.database ?? ""} placeholder={c.kind === "redis" ? "0" : "optional"} onChange={(e) => set({ database: e.target.value || null })} />
             </Field>
           </>
         )}
@@ -323,7 +323,14 @@ export function ConnectionDialog({
             onChange={(v) => set({ readOnly: v })}
             label={c.env === "production" && !c.readOnly ? "Read-only — OFF: writes to production are allowed" : "Read-only — block writes from the app"}
           />
-          <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v })} label="Expose to AI assistants via MCP (read-only)" />
+          <Switch checked={c.mcpEnabled} onChange={(v) => set({ mcpEnabled: v, ...(v ? {} : { mcpWrites: false }) })} label="Expose to AI assistants via MCP (reads)" />
+          {c.mcpEnabled && !c.readOnly && (
+            <Switch
+              checked={!!c.mcpWrites}
+              onChange={(v) => set({ mcpWrites: v })}
+              label="Allow AI to request writes — you approve each one in Rowhouse"
+            />
+          )}
         </div>
         <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>
         <button type="submit" hidden />

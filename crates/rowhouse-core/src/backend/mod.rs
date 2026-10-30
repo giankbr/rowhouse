@@ -4,6 +4,7 @@
 pub mod clickhouse;
 pub mod duck;
 pub mod mssql;
+pub mod redis;
 
 /// What a statement in `exec_tx` must affect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
