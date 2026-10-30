@@ -58,6 +58,29 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Export signing secrets as env vars ONLY when actually set. An unset secret
+      # otherwise becomes a defined-but-empty var, which makes Tauri attempt signing
+      # and fail on empty data. Absent secrets -> unsigned build.
+      - name: Configure code-signing env
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+                   APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!v}" ]; then
+              printf '%s<<__SIGN_EOF__\n%s\n__SIGN_EOF__\n' "$v" "${!v}" >> "$GITHUB_ENV"
+            fi
+          done
+
       # Windows: import a code-signing certificate (PFX, base64) when provided;
       # tauri signs with it via bundle.windows.certificateThumbprint.
       - name: Import Windows signing certificate
@@ -80,21 +103,11 @@ jobs:
           $json.bundle.windows | Add-Member -Force -NotePropertyName timestampUrl -NotePropertyValue "http://timestamp.digicert.com"
           $json | ConvertTo-Json -Depth 32 | Set-Content $conf
 
-      # Code signing is optional: every secret below may be absent, and the
-      # matching step is then skipped (unsigned build). See RELEASING.md.
+      # Signing is optional: the step above exports signing env vars only when their
+      # secrets are set, so the default is an unsigned build. See RELEASING.md.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # auto-update signatures (scripts/setup-updater.mjs)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS: Developer ID certificate + notarization
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
