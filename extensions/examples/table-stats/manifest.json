@@ -1,0 +1,12 @@
+{
+  "id": "table-stats",
+  "name": "Table stats",
+  "version": "1.0.0",
+  "description": "Row counts for every table in the open connection, largest first.",
+  "author": "Rowhouse",
+  "entry": "index.html",
+  "contributes": {
+    "panels": [{ "id": "main", "title": "Table stats" }]
+  },
+  "permissions": ["schema", "query:read"]
+}

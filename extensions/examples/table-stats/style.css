@@ -1,0 +1,15 @@
+body { padding: 16px 20px; }
+header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+h1 { font-size: 15px; margin: 0; }
+.muted { color: var(--muted); font-size: 12px; }
+button { margin-left: auto; border: 1px solid var(--line); background: var(--elevated); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button:hover { background: var(--hover); }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); padding: 4px 6px; }
+td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 110px; }
+td.bar { width: 45%; }
+.bar span { display: block; height: 8px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: var(--hover); }
+.schema { color: var(--subtle); }

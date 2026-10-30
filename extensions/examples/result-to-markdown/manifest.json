@@ -1,0 +1,13 @@
+{
+  "id": "result-to-markdown",
+  "name": "Result to Markdown",
+  "version": "1.0.0",
+  "description": "Turns a query result into a Markdown table you can paste into docs, PRs or chat.",
+  "author": "Rowhouse",
+  "entry": "index.html",
+  "contributes": {
+    "panels": [{ "id": "main", "title": "Markdown" }],
+    "resultActions": [{ "id": "send", "title": "Send to Markdown" }]
+  },
+  "permissions": ["result", "clipboard"]
+}

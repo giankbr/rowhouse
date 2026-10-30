@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      body { padding: 16px 20px; display: flex; flex-direction: column; height: 100vh; margin: 0; }
+      header { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+      h1 { font-size: 15px; margin: 0; flex: 1; }
+      button { border: 1px solid var(--line); background: var(--elevated); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+      button:hover { background: var(--hover); }
+      textarea { flex: 1; width: 100%; resize: none; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--panel); color: var(--fg); font: 12px/1.5 var(--font-mono, monospace); }
+      p { color: var(--muted); font-size: 12px; }
+      label { color: var(--muted); font-size: 12px; display: flex; gap: 4px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Result to Markdown</h1>
+      <label><input type="checkbox" id="align" checked /> align numbers right</label>
+      <button id="copy" disabled>Copy</button>
+    </header>
+    <p id="hint">Run a query, then choose <b>Extensions → Send to Markdown</b> above the results.</p>
+    <textarea id="out" readonly hidden></textarea>
+    <script>
+      let last = null;
+      const esc = (v) => (v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v)).replace(/\|/g, "\\|").replace(/\n/g, " ");
+      function render() {
+        if (!last) return;
+        const { columns, rows } = last;
+        const numeric = columns.map((_, c) => rows.length > 0 && rows.every((r) => r[c] === null || typeof r[c] === "number" || /^-?\d+(\.\d+)?$/.test(String(r[c]))));
+        const right = document.getElementById("align").checked;
+        const lines = [
+          "| " + columns.map((c) => esc(c.name)).join(" | ") + " |",
+          "| " + columns.map((_, c) => (right && numeric[c] ? "---:" : "---")).join(" | ") + " |",
+          ...rows.map((r) => "| " + r.map(esc).join(" | ") + " |"),
+        ];
+        const out = document.getElementById("out");
+        out.value = lines.join("\n");
+        out.hidden = false;
+        document.getElementById("hint").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${columns.length} columns`;
+        document.getElementById("copy").disabled = false;
+      }
+      rowhouse.onResult((r) => { last = r.result; render(); });
+      document.getElementById("align").onchange = render;
+      document.getElementById("copy").onclick = async () => {
+        await rowhouse.copy(document.getElementById("out").value);
+        rowhouse.toast("Markdown copied");
+      };
+    </script>
+  </body>
+</html>
