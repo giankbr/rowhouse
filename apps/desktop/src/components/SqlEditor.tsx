@@ -1,5 +1,5 @@
 import { javascript } from "@codemirror/lang-javascript";
-import { sql, PostgreSQL, MySQL, SQLite, MSSQL, StandardSQL, type SQLNamespace } from "@codemirror/lang-sql";
+import { sql, PostgreSQL, MySQL, SQLite, MSSQL, PLSQL, StandardSQL, type SQLNamespace } from "@codemirror/lang-sql";
 import { keymap, EditorView } from "@codemirror/view";
 import { Prec } from "@codemirror/state";
 import { autocompletion, closeCompletion, type CompletionContext } from "@codemirror/autocomplete";
@@ -179,6 +179,8 @@ export function SqlEditor({
           ? SQLite
           : d === "mssql"
             ? MSSQL
+            : d === "oracle"
+              ? PLSQL
             : d === "duckdb" || d === "cql"
               ? StandardSQL
               : PostgreSQL;

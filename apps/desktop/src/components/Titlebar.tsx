@@ -22,7 +22,7 @@ export function Titlebar({
   /** database picked this session (overrides the profile's) */
   database?: string | null;
   onSwitchDb: (db: string) => void;
-  onTool: (tool: "builder" | "erd" | "compare" | "schedules" | "backup" | "restore" | "activity" | "roles" | "runfile" | "extensions") => void;
+  onTool: (tool: "builder" | "erd" | "compare" | "schedules" | "backup" | "restore" | "activity" | "roles" | "runfile" | "extensions" | "dashboards") => void;
   conn: ConnectionConfig | null;
   dark: boolean;
   onToggleTheme: () => void;
@@ -86,6 +86,7 @@ export function Titlebar({
             </>
           }
           items={[
+            { label: "Dashboards", onSelect: () => onTool("dashboards") },
             { label: "Query builder", onSelect: () => onTool("builder") },
             { label: "Diagram (ERD)", onSelect: () => onTool("erd") },
             { label: "Compare schema / data", onSelect: () => onTool("compare") },

@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Activity, Blocks, FileCode2, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Activity, Blocks, FileCode2, LayoutGrid, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -10,7 +10,9 @@ export function CommandPalette({
   tables,
   actions,
   extensions = [],
+  dashboards = [],
 }: {
+  dashboards?: { label: string; run: () => void }[];
   /** panels of enabled extensions */
   extensions?: { label: string; run: () => void }[];
   open: boolean;
@@ -36,6 +38,7 @@ export function CommandPalette({
     showRoles: () => void;
     runFile: () => void;
     showExtensions: () => void;
+    showDashboards: () => void;
     backup: () => void;
     restore: () => void;
   };
@@ -135,6 +138,14 @@ export function CommandPalette({
             <Command.Item onSelect={run(actions.showSettings)} className={item}>
               <Settings size={13} className="text-subtle" /> Settings · AI model
             </Command.Item>
+            <Command.Item onSelect={run(actions.showDashboards)} className={item}>
+              <LayoutGrid size={13} className="text-subtle" /> Dashboards…
+            </Command.Item>
+            {dashboards.map((x) => (
+              <Command.Item key={x.label} onSelect={run(x.run)} className={item}>
+                <LayoutGrid size={13} className="text-accent" /> {x.label}
+              </Command.Item>
+            ))}
             <Command.Item onSelect={run(actions.showExtensions)} className={item}>
               <Puzzle size={13} className="text-subtle" /> Extensions…
             </Command.Item>

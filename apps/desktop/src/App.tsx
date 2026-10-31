@@ -19,6 +19,8 @@ import { ActivityDialog } from "./components/ActivityDialog";
 import { RolesDialog } from "./components/RolesDialog";
 import { ExtensionsDialog } from "./components/ExtensionsDialog";
 import { ExtensionPanel } from "./components/ExtensionPanel";
+import { DashboardView } from "./components/DashboardView";
+import { DashboardsDialog, PinDialog } from "./components/DashboardsDialog";
 import { RunFileDialog } from "./components/RunFileDialog";
 import { FakeDataDialog } from "./components/FakeDataDialog";
 import { BackupDialog } from "./components/BackupDialog";
@@ -32,7 +34,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type DbObject, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Dashboard, type DashTile, type DbObject, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 import { findVars, type VarRef } from "./lib/vars";
@@ -96,6 +98,16 @@ export default function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
+  const [dashboardsOpen, setDashboardsOpen] = useState(false);
+  const [pinTile, setPinTile] = useState<Omit<DashTile, "id" | "w" | "h"> | null>(null);
+  const [dashList, setDashList] = useState<Dashboard[]>([]);
+  const refreshDashList = useCallback(() => {
+    api.dashboards
+      .list()
+      .then(setDashList)
+      .catch(() => {});
+  }, []);
+  useEffect(refreshDashList, [refreshDashList]);
   const [exts, setExts] = useState<ExtensionInfo[]>([]);
   useEffect(() => {
     api.ext
@@ -559,6 +571,20 @@ export default function App() {
     [tableDlg, activeConn, loadTables, tabs, setToast, closeTab, execTab],
   );
 
+  const openDashboard = useCallback(
+    (d: Dashboard) => {
+      refreshDashList();
+      if (d.connectionId !== activeConn && connections.some((c) => c.id === d.connectionId)) selectConnection(d.connectionId);
+      const existing = tabs.find((t) => t.kind === "dashboard" && t.dashboardId === d.id);
+      if (existing) {
+        patchTab(existing.id, { title: d.name });
+        return selectTab(existing.id);
+      }
+      addTab({ id: uid(), kind: "dashboard", title: d.name, connId: d.connectionId, sql: "", dashboardId: d.id });
+    },
+    [tabs, activeConn, connections, selectConnection, patchTab, selectTab, addTab, refreshDashList],
+  );
+
   /** Open (or focus) an extension panel tab, optionally delivering an event to it. */
   const openExtPanel = useCallback(
     (x: ExtensionInfo, panel: string, event?: { event: string; data: unknown }) => {
@@ -658,6 +684,15 @@ export default function App() {
               onRunSql={(sql) => openQuery(t.connId, sql, true)}
               onToast={setToast}
             />
+          ) : t.kind === "dashboard" && t.dashboardId ? (
+            <DashboardView
+              key={t.id + (t.extEvent?.nonce ?? "")}
+              dashboardId={t.dashboardId}
+              conn={connections.find((c) => c.id === t.connId)}
+              onOpenQuery={(sql) => openQuery(t.connId, sql, false)}
+              onToast={setToast}
+              onDeleted={() => (closeTab(t.id), refreshDashList(), setToast("Dashboard deleted", "ok"))}
+            />
           ) : t.kind === "extension" ? (
             <ExtensionPanel
               key={t.id}
@@ -696,6 +731,7 @@ export default function App() {
               }}
               onView={(v) => setView(t, v)}
               onFollow={(target, filters) => openTable({ ...target, kind: "table" }, "data", filters)}
+              onPin={(tile) => setPinTile(tile)}
               resultActions={exts
                 .filter((x) => x.enabled && x.granted.includes("result"))
                 .flatMap((x) => x.manifest.contributes.resultActions.map((a) => ({ ext: x.manifest.id, id: a.id, title: a.title })))}
@@ -768,7 +804,9 @@ export default function App() {
                         ? setRunFileOpen(true)
                         : t === "extensions"
                           ? setExtensionsOpen(true)
-                          : setBackup(t)
+                          : t === "dashboards"
+                            ? setDashboardsOpen(true)
+                            : setBackup(t)
         }
       />
       )}
@@ -951,6 +989,19 @@ export default function App() {
           }}
         />
       )}
+      <DashboardsDialog open={dashboardsOpen} conn={conn} connections={connections} onClose={() => setDashboardsOpen(false)} onOpen={openDashboard} onToast={setToast} />
+      <PinDialog
+        open={!!pinTile}
+        conn={conn}
+        tile={pinTile}
+        onClose={() => setPinTile(null)}
+        onToast={setToast}
+        onPinned={(d) => {
+          refreshDashList();
+          const open = tabs.find((x) => x.kind === "dashboard" && x.dashboardId === d.id);
+          if (open) patchTab(open.id, { extEvent: { nonce: uid(), event: "reload", data: null } });
+        }}
+      />
       <ExtensionsDialog
         open={extensionsOpen}
         onClose={() => setExtensionsOpen(false)}
@@ -993,6 +1044,7 @@ export default function App() {
         onClose={() => setPalette(false)}
         connections={connections}
         tables={connTables}
+        dashboards={dashList.map((d) => ({ label: `Dashboard: ${d.name}`, run: () => openDashboard(d) }))}
         extensions={exts
           .filter((x) => x.enabled)
           .flatMap((x) => x.manifest.contributes.panels.map((p) => ({ label: `${x.manifest.name}: ${p.title}`, run: () => openExtPanel(x, p.id) })))}
@@ -1015,6 +1067,7 @@ export default function App() {
           showRoles: () => setRolesOpen(true),
           runFile: () => setRunFileOpen(true),
           showExtensions: () => setExtensionsOpen(true),
+          showDashboards: () => setDashboardsOpen(true),
           backup: () => setBackup("backup"),
           restore: () => setBackup("restore"),
         }}

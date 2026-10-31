@@ -12,6 +12,7 @@ const TYPES: Record<string, string[]> = {
   duckdb: ["VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "DECIMAL(12,2)", "BOOLEAN", "TIMESTAMP", "DATE", "JSON"],
   mssql: ["nvarchar(255)", "nvarchar(max)", "int", "bigint", "decimal(12,2)", "bit", "datetime2", "date", "uniqueidentifier"],
   clickhouse: ["String", "Int32", "Int64", "UInt64", "Float64", "Decimal(12,2)", "Bool", "DateTime", "Date", "Nullable(String)"],
+  oracle: ["VARCHAR2(255)", "NUMBER(10)", "NUMBER(12,2)", "DATE", "TIMESTAMP", "CLOB", "BLOB", "NVARCHAR2(255)", "CHAR(1)"],
 };
 
 const same = (a: ColumnInfo, b: ColumnInfo) =>

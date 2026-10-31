@@ -233,6 +233,7 @@ export function buildSql(state: QbState, d: Dialect): BuiltSql {
   if (where.length) out.push(`WHERE ${where.join("\n  AND ")}`);
   if (groupBy.length) out.push(`GROUP BY ${groupBy.join(", ")}`);
   if (orderBy.length) out.push(`ORDER BY ${orderBy.join(", ")}`);
-  if (state.limit && d !== "mssql") out.push(`LIMIT ${state.limit}`);
+  if (state.limit && d === "oracle") out.push(`FETCH FIRST ${state.limit} ROWS ONLY`);
+  else if (state.limit && d !== "mssql") out.push(`LIMIT ${state.limit}`);
   return { sql: out.join("\n") + ";", warnings };
 }

@@ -9,6 +9,7 @@ const LANG: Partial<Record<Dialect, string>> = {
   mssql: "transactsql",
   clickhouse: "clickhouse",
   cql: "sql",
+  oracle: "plsql",
 };
 
 export function canFormat(d: Dialect) {

@@ -17,6 +17,7 @@ export type DbKind =
   | "d1"
   | "duckdb"
   | "mssql"
+  | "oracle"
   | "clickhouse"
   | "redis"
   | "upstash"
@@ -24,7 +25,7 @@ export type DbKind =
   | "cassandra"
   | "scylla";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql" | "oracle";
 
 export interface KindInfo {
   kind: DbKind;
@@ -54,6 +55,7 @@ export const KINDS: KindInfo[] = [
   { kind: "turso", label: "Turso", abbr: "Tu", color: "#13a88a", dialect: "sqlite", port: null, user: null, api: true },
   { kind: "d1", label: "Cloudflare D1", abbr: "D1", color: "#f38020", dialect: "sqlite", port: null, user: null, api: true },
   { kind: "mssql", label: "SQL Server", abbr: "Ss", color: "#a91d22", dialect: "mssql", port: 1433, user: "sa", beta: true },
+  { kind: "oracle", label: "Oracle", abbr: "Or", color: "#c74634", dialect: "oracle", port: 1521, user: "system", beta: true },
   { kind: "duckdb", label: "DuckDB", abbr: "Du", color: "#1f1f1f", dialect: "duckdb", port: null, user: null, file: true },
   { kind: "clickhouse", label: "ClickHouse", abbr: "Ch", color: "#d4b106", dialect: "clickhouse", port: 8123, user: "default" },
   { kind: "redis", label: "Redis", abbr: "Re", color: "#b3261e", dialect: "redis", port: 6379, user: null },
@@ -115,6 +117,8 @@ export interface ConnectionConfig {
   mcpWrites?: boolean;
   color?: string | null;
   ssh?: SshConfig | null;
+  /** Oracle: Instant Client folder (empty = auto-detect) */
+  clientDir?: string | null;
   env?: Environment;
   tls?: TlsConfig | null;
 }
@@ -214,7 +218,7 @@ export interface ForeignKey {
 export interface DbObject {
   schema: string;
   name: string;
-  kind: "function" | "procedure" | "trigger" | "sequence" | "type" | "matview" | "macro";
+  kind: "function" | "procedure" | "trigger" | "sequence" | "type" | "matview" | "macro" | "package";
   detail: string | null;
 }
 export interface RoleInfo {
@@ -280,6 +284,24 @@ export interface ExtensionInfo {
   dir: string;
   enabled: boolean;
   granted: string[];
+}
+export interface DashTile {
+  id: string;
+  title: string;
+  sql: string;
+  snippetId: number | null;
+  view: "chart" | "table" | "number";
+  chart: import("../components/ResultsChart").ChartSpec | null;
+  w: number;
+  h: number;
+}
+export interface Dashboard {
+  id: string;
+  name: string;
+  connectionId: string;
+  tiles: DashTile[];
+  refreshSecs: number;
+  updatedAt: number;
 }
 export interface Relations {
   outgoing: ForeignKey[];
@@ -657,6 +679,12 @@ export const api = {
     query: (ext: string, id: string, sql: string, limit?: number) => call<QueryOutput>("ext_query", { ext, id, sql, limit }),
   },
   aiDetectLocal: () => call<LocalAi[]>("ai_detect_local"),
+  dashboards: {
+    list: () => call<Dashboard[]>("dashboards_list"),
+    save: (dashboard: Dashboard) => call<Dashboard>("dashboard_save", { dashboard }),
+    remove: (dashboardId: string) => call<void>("dashboard_delete", { dashboardId }),
+    query: (id: string, sql: string) => call<QueryOutput>("dashboard_query", { id, sql }),
+  },
   listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
   roleGrants: (id: string, role: string) => call<RoleGrant[]>("role_grants", { id, role }),
   roleAction: (id: string, op: RoleOp, preview: boolean) => call<string[]>("role_action", { id, op, preview }),
@@ -791,6 +819,21 @@ const mockMcpClients: McpClient[] = [
   { id: "codex", label: "Codex", configPath: "~/.codex/config.toml", detected: true, status: "missing" },
   { id: "opencode", label: "OpenCode", configPath: "~/.config/opencode/opencode.json", detected: false, status: "missing" },
   { id: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", detected: false, status: "missing" },
+];
+const mockDashboards: Dashboard[] = [
+  {
+    id: "d1",
+    name: "Sales overview",
+    connectionId: "local-pg",
+    refreshSecs: 300,
+    updatedAt: Math.floor(Date.now() / 1000) - 3600,
+    tiles: [
+      { id: "t1", title: "Orders today", sql: "SELECT count(*) AS orders_today FROM orders WHERE created_at::date = current_date", snippetId: null, view: "number", chart: null, w: 3, h: 1 },
+      { id: "t2", title: "Revenue · last 14 days", sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue FROM orders GROUP BY 1 ORDER BY 1", snippetId: null, view: "chart", chart: { type: "area", x: "day", y: ["revenue"] }, w: 9, h: 2 },
+      { id: "t3", title: "Orders by status", sql: "SELECT status, count(*) AS orders FROM orders GROUP BY status ORDER BY 2 DESC", snippetId: null, view: "chart", chart: { type: "bar", x: "status", y: ["orders"] }, w: 3, h: 1 },
+      { id: "t4", title: "Daily orders", sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue, count(*) AS orders FROM orders GROUP BY 1 ORDER BY 1", snippetId: null, view: "table", chart: null, w: 12, h: 2 },
+    ],
+  },
 ];
 const mockRoles: RoleInfo[] = [
   { id: "postgres", name: "postgres", host: null, login: true, superuser: true, attributes: ["CREATEDB", "CREATEROLE", "REPLICATION"], memberOf: [] },
@@ -1104,6 +1147,27 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
         { id: "opencode", label: "OpenCode", kind: "cli", location: "~/.opencode/bin/opencode", version: "0.15.2", models: [] },
         { id: "ollama", label: "Ollama", kind: "server", location: "http://localhost:11434/v1", version: null, models: ["qwen2.5-coder:7b", "llama3.1:8b"] },
       ] satisfies LocalAi[];
+    case "dashboards_list":
+      return mockDashboards.map((d) => structuredClone(d));
+    case "dashboard_save": {
+      const d = structuredClone(a.dashboard as Dashboard);
+      if (!d.name.trim()) throw "give the dashboard a name";
+      d.updatedAt = nowS();
+      const i = mockDashboards.findIndex((x) => x.id === d.id);
+      if (i >= 0) mockDashboards[i] = d;
+      else mockDashboards.push(d);
+      return d;
+    }
+    case "dashboard_delete":
+      mockDashboards.splice(mockDashboards.findIndex((x) => x.id === a.dashboardId), 1);
+      return null;
+    case "dashboard_query": {
+      const sql = String(a.sql).toLowerCase();
+      await sleep(150 + Math.random() * 250);
+      if (sql.includes("count(*)") && !sql.includes("group by")) return { elapsed_ms: 4, results: [{ columns: [{ name: "orders_today", data_type: "INT8" }], rows: [[1284]], rows_affected: 0, truncated: false }] } satisfies QueryOutput;
+      if (sql.includes("status")) return { elapsed_ms: 6, results: [{ columns: [{ name: "status", data_type: "TEXT" }, { name: "orders", data_type: "INT8" }], rows: [["paid", 812], ["pending", 214], ["shipped", 190], ["refunded", 68]], rows_affected: 0, truncated: false }] } satisfies QueryOutput;
+      return mock("run_query", { sql: sql.includes("group by") ? sql : sql + " group by 1" });
+    }
     case "list_roles":
       return mockRoles;
     case "role_grants":

@@ -1,4 +1,4 @@
-import { AlertCircle, AlignLeft, BarChart3, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { AlertCircle, AlignLeft, BarChart3, Pin, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { canFormat, formatSql } from "../lib/format";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type Filter, type Relations, type TableInfo } from "../lib/api";
@@ -9,7 +9,7 @@ import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
 import { StructureEditor } from "./StructureEditor";
 import { ResultsGrid } from "./ResultsGrid";
-import { ResultsChart } from "./ResultsChart";
+import { ResultsChart, defaultSpec } from "./ResultsChart";
 import { SqlEditor } from "./SqlEditor";
 import { Button, Field, Input, Kbd, Menu, Modal, Segmented, Switch, cx } from "./ui";
 
@@ -32,7 +32,10 @@ export function Workspace({
   onFollow,
   resultActions = [],
   onResultAction,
+  onPin,
 }: {
+  /** pin the current query / chart to a dashboard */
+  onPin?: (tile: Omit<import("../lib/api").DashTile, "id" | "w" | "h">) => void;
   /** "Send to …" actions contributed by extensions */
   resultActions?: { ext: string; id: string; title: string }[];
   onResultAction?: (ext: string, action: string, result: import("../lib/api").QueryResult) => void;
@@ -483,7 +486,20 @@ export function Workspace({
             )}
           </div>
         ) : result && tab.showChart && result.columns.length > 0 ? (
-          <ResultsChart result={result} spec={tab.chart} onSpec={(chart) => onChange({ chart })} title={tab.title} onToast={onToast} />
+          <ResultsChart
+            result={result}
+            spec={tab.chart}
+            onSpec={(chart) => onChange({ chart })}
+            title={tab.title}
+            onToast={onToast}
+            extraActions={
+              onPin && (
+                <Button size="xs" variant="ghost" title="Pin to a dashboard" onClick={() => onPin({ title: /^Query \d+$/.test(tab.title) ? "" : tab.title, sql: tab.sql, snippetId: tab.snippetId ?? null, view: "chart", chart: tab.chart ?? defaultSpec(result) })}>
+                  <Pin size={11} /> Pin
+                </Button>
+              )
+            }
+          />
         ) : result ? (
           <ResultsGrid
             result={result}

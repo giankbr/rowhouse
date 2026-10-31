@@ -87,7 +87,7 @@ export function ConnectionDialog({
   const shownKinds = KINDS.filter((k) => !kindFilter || k.label.toLowerCase().includes(kindFilter.toLowerCase()));
   const hasNet = !info.file && !info.api;
   const dialect = info.dialect;
-  const hostPh = c.kind === "mongodb" ? "localhost or mongodb+srv://…" : dialect === "cql" ? "node1, node2:9042" : c.kind === "neon" ? "ep-xxx.region.aws.neon.tech" : c.kind === "supabase" ? "db.xxxx.supabase.co" : c.kind === "upstash" ? "xxx.upstash.io" : "localhost";
+  const hostPh = dialect === "oracle" ? "db.example.com (or a TNS alias / EZConnect string)" : c.kind === "mongodb" ? "localhost or mongodb+srv://…" : dialect === "cql" ? "node1, node2:9042" : c.kind === "neon" ? "ep-xxx.region.aws.neon.tech" : c.kind === "supabase" ? "db.xxxx.supabase.co" : c.kind === "upstash" ? "xxx.upstash.io" : "localhost";
   const tabs = [
     { id: "general" as const, label: "General" },
     ...(hasNet ? [{ id: "ssh" as const, label: ssh ? "SSH · on" : "SSH" }, { id: "tls" as const, label: "TLS" }] : []),
@@ -260,9 +260,18 @@ export function ConnectionDialog({
                         <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
                       </Field>
                     </div>
-                    <Field label={dialect === "redis" ? "Database number" : dialect === "cql" ? "Keyspace" : "Database"}>
-                      <Input value={c.database ?? ""} placeholder={dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : "optional — pick later from the titlebar"} onChange={(e) => set({ database: e.target.value || null })} />
+                    <Field label={dialect === "redis" ? "Database number" : dialect === "cql" ? "Keyspace" : dialect === "oracle" ? "Service name" : "Database"}>
+                      <Input
+                        value={c.database ?? ""}
+                        placeholder={dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : dialect === "oracle" ? "FREEPDB1 · ORCLPDB1 · XEPDB1" : "optional — pick later from the titlebar"}
+                        onChange={(e) => set({ database: e.target.value || null })}
+                      />
                     </Field>
+                    {dialect === "oracle" && (
+                      <Field label="Oracle Instant Client folder" hint="Rowhouse loads Oracle's client library at runtime. Leave empty to find it in ~/Downloads, ~/instantclient*, /opt/oracle… — or download “Basic Light” from oracle.com.">
+                        <Input value={c.clientDir ?? ""} placeholder="auto-detect" onChange={(e) => set({ clientDir: e.target.value || null })} />
+                      </Field>
+                    )}
                   </>
                 )}
                 <Field label="Environment" hint={c.env === "production" ? "Production starts read-only, gets a red frame, and asks you to type the table name before destructive statements." : undefined}>
@@ -392,7 +401,7 @@ export function ConnectionDialog({
 }
 
 const KIND_GROUPS: { label: string; kinds: DbKind[] }[] = [
-  { label: "Relational", kinds: ["postgres", "mysql", "mariadb", "mssql", "sqlite", "duckdb"] },
+  { label: "Relational", kinds: ["postgres", "mysql", "mariadb", "mssql", "oracle", "sqlite", "duckdb"] },
   { label: "Cloud", kinds: ["neon", "supabase", "turso", "d1", "upstash", "cockroach", "redshift", "tidb", "singlestore", "greenplum"] },
   { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "cassandra", "scylla"] },
 ];

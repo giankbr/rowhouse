@@ -3,7 +3,7 @@ import type { Pending } from "./pending";
 
 export interface Tab {
   id: string;
-  kind: "query" | "table" | "erd" | "compare" | "builder" | "extension";
+  kind: "query" | "table" | "erd" | "compare" | "builder" | "extension" | "dashboard";
   /** split pane the tab lives in */
   pane?: 0 | 1;
   title: string;
@@ -35,6 +35,8 @@ export interface Tab {
   showChart?: boolean;
   /** extension tabs: which extension and panel, and an event to deliver */
   ext?: string;
+  /** dashboard tabs */
+  dashboardId?: string;
   panel?: string;
   extEvent?: import("../components/ExtensionPanel").ExtEvent;
   /** last values for `:name` / `{{name}}` query variables */

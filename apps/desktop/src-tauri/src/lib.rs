@@ -410,6 +410,35 @@ async fn ai_detect_local() -> Vec<rowhouse_core::ai_local::Detected> {
     rowhouse_core::ai_local::detect().await
 }
 
+// ---- dashboards ---------------------------------------------------------------
+
+use rowhouse_core::dashboards::{Dashboard, DashboardStore};
+
+#[tauri::command]
+fn dashboards_list() -> CmdResult<Vec<Dashboard>> {
+    DashboardStore::default().list()
+}
+
+#[tauri::command]
+fn dashboard_save(dashboard: Dashboard) -> CmdResult<Dashboard> {
+    DashboardStore::default().save(dashboard)
+}
+
+#[tauri::command]
+fn dashboard_delete(dashboard_id: String) -> CmdResult<()> {
+    DashboardStore::default().delete(&dashboard_id)
+}
+
+/// Tiles always run read-only.
+#[tauri::command]
+async fn dashboard_query(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+) -> CmdResult<QueryOutput> {
+    state.conn(&id).await?.query_read_only(&sql, 2000).await
+}
+
 #[derive(serde::Serialize)]
 struct Relations {
     outgoing: Vec<rowhouse_core::erd::ForeignKey>,
@@ -1414,6 +1443,10 @@ pub fn run() {
             table_ddl,
             table_relations,
             list_objects,
+            dashboards_list,
+            dashboard_save,
+            dashboard_delete,
+            dashboard_query,
             ai_detect_local,
             mcp_clients,
             mcp_install,

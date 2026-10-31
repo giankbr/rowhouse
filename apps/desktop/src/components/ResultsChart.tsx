@@ -91,7 +91,13 @@ export function ResultsChart({
   onSpec,
   title,
   onToast,
+  compact = false,
+  extraActions,
 }: {
+  /** no toolbar: just the plot (dashboard tiles) */
+  compact?: boolean;
+  /** extra buttons at the end of the toolbar */
+  extraActions?: React.ReactNode;
   result: QueryResult;
   spec?: ChartSpec;
   onSpec: (s: ChartSpec) => void;
@@ -111,7 +117,7 @@ export function ResultsChart({
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setSize({ w: Math.max(320, e.contentRect.width), h: Math.max(220, e.contentRect.height) }));
+    const ro = new ResizeObserver(([e]) => setSize({ w: Math.max(compact ? 200 : 320, e.contentRect.width), h: Math.max(compact ? 110 : 220, e.contentRect.height) }));
     ro.observe(el);
     return () => ro.disconnect();
   }, [!!fallback || !!valid]);
@@ -130,7 +136,7 @@ export function ResultsChart({
   const t = tokens();
   const { w, h } = size;
   const legend = s.y.length > 1;
-  const m = { top: legend ? 34 : 16, right: 20, bottom: 38, left: 56 };
+  const m = compact ? { top: legend ? 28 : 10, right: 12, bottom: 22, left: 44 } : { top: legend ? 34 : 16, right: 20, bottom: 38, left: 56 };
   const iw = w - m.left - m.right;
   const ih = h - m.top - m.bottom;
 
@@ -277,7 +283,7 @@ export function ResultsChart({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-2.5 text-2xs">
+      {!compact && <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-2.5 text-2xs">
         <Segmented
           value={s.type}
           onChange={(type) => set({ type: type as ChartType })}
@@ -324,7 +330,8 @@ export function ResultsChart({
         <Button size="xs" variant="ghost" onClick={() => save("svg")} title="Save as SVG">
           SVG
         </Button>
-      </div>
+        {extraActions}
+      </div>}
 
       <div ref={box} className="relative min-h-0 flex-1">
         <svg ref={svgRef} width={w} height={h} className="absolute inset-0 select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={`${s.type} chart of ${s.y.join(", ")} by ${s.x}`}>
@@ -338,14 +345,16 @@ export function ResultsChart({
             </g>
           ))}
           {xt.map((tk, i) => (
-            <text key={i} x={tk.at} y={h - m.bottom + 16} textAnchor="middle" fontSize={10.5} fill={t.subtle}>
+            <text key={i} x={tk.at} y={h - m.bottom + (compact ? 14 : 16)} textAnchor="middle" fontSize={10.5} fill={t.subtle}>
               {tk.text}
             </text>
           ))}
-          <text x={m.left + iw / 2} y={h - 6} textAnchor="middle" fontSize={10.5} fill={t.muted}>
-            {s.x}
-          </text>
-          {!legend && (
+          {!compact && (
+            <text x={m.left + iw / 2} y={h - 6} textAnchor="middle" fontSize={10.5} fill={t.muted}>
+              {s.x}
+            </text>
+          )}
+          {!legend && !compact && (
             <text x={12} y={m.top + ih / 2} transform={`rotate(-90 12 ${m.top + ih / 2})`} textAnchor="middle" fontSize={10.5} fill={t.muted}>
               {s.y[0]}
             </text>

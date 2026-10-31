@@ -14,8 +14,9 @@ const OBJECT_GROUP: Record<string, { label: string; icon: typeof Braces }> = {
   trigger: { label: "Triggers", icon: Zap },
   sequence: { label: "Sequences", icon: ListOrdered },
   type: { label: "Types", icon: Hash },
+  package: { label: "Packages", icon: Braces },
 };
-const GROUP_ORDER = ["Materialized views", "Functions", "Macros", "Triggers", "Sequences", "Types"];
+const GROUP_ORDER = ["Materialized views", "Functions", "Packages", "Macros", "Triggers", "Sequences", "Types"];
 
 export type TableMenuAction =
   | "open"
