@@ -486,3 +486,194 @@ async fn bigquery_needs_credentials() {
         .to_string();
     assert!(e.contains("service-account key"), "{e}");
 }
+
+// ---------------------------------------------------------------- live servers (CI)
+//
+// ROWHOUSE_TEST_ES=http://localhost:9200 (+ ROWHOUSE_TEST_ES_USER / _PASSWORD)
+// ROWHOUSE_TEST_OPENSEARCH=http://localhost:9201
+// ROWHOUSE_TEST_BIGQUERY=http://localhost:9050 (goccy/bigquery-emulator, project "test")
+
+async fn seed_index(base: &str, user: Option<&str>, pw: Option<&str>, index: &str) {
+    let http = reqwest::Client::new();
+    let req = |m: reqwest::Method, path: &str| {
+        let r = http.request(m, format!("{base}{path}"));
+        match user {
+            Some(u) => r.basic_auth(u, pw),
+            None => r,
+        }
+    };
+    let _ = req(reqwest::Method::DELETE, &format!("/{index}"))
+        .send()
+        .await;
+    let r = req(reqwest::Method::PUT, &format!("/{index}"))
+        .json(&json!({ "mappings": { "properties": {
+            "customer": { "type": "keyword" },
+            "total": { "type": "double" },
+            "paid": { "type": "boolean" },
+            "address": { "properties": { "city": { "type": "keyword" } } }
+        } } }))
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+    let mut bulk = String::new();
+    for (i, (c, t)) in [
+        ("alice", 10.0),
+        ("bob", 25.5),
+        ("carol", 7.0),
+        ("dan", 40.0),
+        ("erin", 3.0),
+    ]
+    .iter()
+    .enumerate()
+    {
+        bulk.push_str(&format!("{{\"index\":{{\"_id\":\"{i}\"}}}}\n"));
+        bulk.push_str(&format!(
+            "{{\"customer\":\"{c}\",\"total\":{t},\"paid\":{},\"address\":{{\"city\":\"Bandung\"}}}}\n",
+            i % 2 == 0
+        ));
+    }
+    let r = req(
+        reqwest::Method::POST,
+        &format!("/{index}/_bulk?refresh=true"),
+    )
+    .header("Content-Type", "application/x-ndjson")
+    .body(bulk)
+    .send()
+    .await
+    .unwrap();
+    assert!(r.status().is_success());
+}
+
+async fn live_search(kind: DbKind, base: String, user: Option<String>, pw: Option<String>) {
+    let index = "rh_orders";
+    seed_index(&base, user.as_deref(), pw.as_deref(), index).await;
+    let mut cfg = ConnectionConfig::new("live", kind);
+    cfg.host = Some(base);
+    cfg.user = user;
+    let c = Connection::connect_with(&cfg, pw.as_deref()).await.unwrap();
+
+    assert!(c
+        .list_tables()
+        .await
+        .unwrap()
+        .iter()
+        .any(|t| t.name == index));
+    let cols = c.describe_table("indices", index).await.unwrap();
+    assert!(cols.iter().any(|c| c.name == "address.city"), "{cols:?}");
+
+    let r = &c
+        .query(
+            &format!("SELECT customer, total FROM {index} ORDER BY total DESC"),
+            1000,
+        )
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!(r.rows.len(), 5);
+    assert_eq!(r.rows[0][0], json!("dan"));
+
+    let r = &c
+        .query(&format!("SELECT customer FROM {index}"), 2)
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!((r.rows.len(), r.truncated), (2, true));
+
+    let page = c
+        .table_page(&PageRequest {
+            schema: "indices".into(),
+            table: index.into(),
+            offset: 4,
+            limit: 2,
+            sort: None,
+            filters: vec![],
+            count: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.result.rows.len(), 1);
+    assert_eq!(page.total, Some(5));
+    assert!(c.query(&format!("DELETE FROM {index}"), 1).await.is_err());
+}
+
+#[tokio::test]
+async fn live_elasticsearch() {
+    let Ok(base) = std::env::var("ROWHOUSE_TEST_ES") else {
+        eprintln!("skipped: ROWHOUSE_TEST_ES not set");
+        return;
+    };
+    live_search(
+        DbKind::Elasticsearch,
+        base,
+        std::env::var("ROWHOUSE_TEST_ES_USER").ok(),
+        std::env::var("ROWHOUSE_TEST_ES_PASSWORD").ok(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn live_opensearch() {
+    let Ok(base) = std::env::var("ROWHOUSE_TEST_OPENSEARCH") else {
+        eprintln!("skipped: ROWHOUSE_TEST_OPENSEARCH not set");
+        return;
+    };
+    live_search(DbKind::Opensearch, base, None, None).await;
+}
+
+#[tokio::test]
+async fn live_bigquery_emulator() {
+    let Ok(base) = std::env::var("ROWHOUSE_TEST_BIGQUERY") else {
+        eprintln!("skipped: ROWHOUSE_TEST_BIGQUERY not set");
+        return;
+    };
+    let mut cfg = ConnectionConfig::new("bq", DbKind::Bigquery);
+    cfg.host = Some(format!("{}/bigquery/v2", base.trim_end_matches('/')));
+    cfg.database = Some("test".into());
+    // the emulator accepts any token
+    let c = Connection::connect_with(&cfg, Some("emulator"))
+        .await
+        .unwrap();
+    c.query(
+        "CREATE OR REPLACE TABLE sales.rh_orders (id INT64 NOT NULL, customer STRING, total FLOAT64, tags ARRAY<STRING>)",
+        10,
+    )
+    .await
+    .unwrap();
+    c.query(
+        "INSERT INTO sales.rh_orders (id, customer, total, tags) VALUES \
+         (1, 'alice', 10.5, ['vip']), (2, 'bob', 25.0, []), (3, 'carol', 7.25, ['new', 'vip'])",
+        10,
+    )
+    .await
+    .unwrap();
+    let tables = c.list_tables().await.unwrap();
+    assert!(
+        tables
+            .iter()
+            .any(|t| t.schema == "sales" && t.name == "rh_orders"),
+        "{tables:?}"
+    );
+    let cols = c.describe_table("sales", "rh_orders").await.unwrap();
+    assert_eq!(cols[0].data_type, "INT64");
+    assert_eq!(cols[3].data_type, "ARRAY<STRING>");
+    let r = &c
+        .query(
+            "SELECT id, customer, total, tags FROM sales.rh_orders ORDER BY id",
+            100,
+        )
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!(r.rows.len(), 3);
+    assert_eq!(
+        r.rows[2],
+        vec![json!(3), json!("carol"), json!(7.25), json!(["new", "vip"])]
+    );
+    let r = &c
+        .query("SELECT id FROM sales.rh_orders", 2)
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!((r.rows.len(), r.truncated), (2, true));
+}

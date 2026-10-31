@@ -92,8 +92,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 | --- | --- | --- |
 | ✅ integration-tested | PostgreSQL (incl. TLS / mTLS), Redis (incl. TLS), MySQL / MariaDB, SQLite, DuckDB, ClickHouse | `sqlx`, `duckdb` (embedded), ClickHouse HTTP API |
 | ✅ tested against a protocol-level fake backed by real SQLite | Turso / libSQL (Hrana HTTP), Cloudflare D1 (REST API) | `reqwest` |
-| 🧪 tested against a fake REST server (beta) | Elasticsearch / OpenSearch (SQL API), Google BigQuery (REST API) | `reqwest`, `ring` (service-account JWT) |
-| 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8, MongoDB (beta), Cassandra / ScyllaDB (beta), Oracle (beta) | `tiberius`, Postgres protocol, official `mongodb` driver, `scylla` (CQL), `oracle` (ODPI-C) |
+| 🧪 tests wired into CI (verify on first run) | SQL Server, CockroachDB, MySQL 8, MongoDB (beta), Cassandra / ScyllaDB (beta), Oracle (beta), Elasticsearch / OpenSearch (beta), BigQuery (beta, emulator + fake REST server) | `tiberius`, Postgres protocol, official `mongodb` driver, `scylla` (CQL), `oracle` (ODPI-C), SQL REST APIs |
 | 🟡 beta (wire-compatible, not yet run against a live server) | Neon, Supabase (Postgres + TLS), Amazon Redshift, Greenplum, TiDB, SingleStore | Postgres / MySQL protocol |
 | ⏳ planned | Snowflake | — |
 

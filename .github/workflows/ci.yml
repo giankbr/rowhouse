@@ -61,6 +61,29 @@ jobs:
         options: >-
           --health-cmd "cqlsh -e 'describe keyspaces'"
           --health-interval 10s --health-timeout 10s --health-retries 30
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "true"
+          xpack.security.http.ssl.enabled: "false"
+          ELASTIC_PASSWORD: rowhouse
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports: ["9200:9200"]
+        options: >-
+          --health-cmd "curl -s -u elastic:rowhouse localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+      opensearch:
+        image: opensearchproject/opensearch:2.17.1
+        env:
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+        ports: ["9201:9200"]
+        options: >-
+          --health-cmd "curl -s localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 5s --health-retries 30
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
         env: { CLICKHOUSE_USER: rh, CLICKHOUSE_PASSWORD: rh, CLICKHOUSE_DB: default }
@@ -79,6 +102,8 @@ jobs:
           sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 || true
           curl -sSL -o /tmp/ic.zip https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
           sudo mkdir -p /opt/oracle && sudo unzip -q /tmp/ic.zip -d /opt/oracle
+      - name: Start BigQuery emulator
+        run: docker run -d --name bq -p 9050:9050 ghcr.io/goccy/bigquery-emulator:latest --project=test --dataset=sales
       - name: Wait for SQL Server
         run: |
           for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/1433) 2>/dev/null && break; sleep 2; done
@@ -95,6 +120,11 @@ jobs:
           ROWHOUSE_TEST_CASSANDRA: localhost:9042
           ROWHOUSE_TEST_COCKROACH: localhost:26257:root
           ROWHOUSE_TEST_ORACLE: localhost:1521:rh:rh:FREEPDB1
+          ROWHOUSE_TEST_ES: http://localhost:9200
+          ROWHOUSE_TEST_ES_USER: elastic
+          ROWHOUSE_TEST_ES_PASSWORD: rowhouse
+          ROWHOUSE_TEST_OPENSEARCH: http://localhost:9201
+          ROWHOUSE_TEST_BIGQUERY: http://localhost:9050
 
   desktop:
     strategy:
