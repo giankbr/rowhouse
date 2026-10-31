@@ -444,27 +444,78 @@ fn claim_snapshot(id: &str, now: i64) -> bool {
     true
 }
 
-/// The frontend finished (or failed) rendering a scheduled snapshot.
+/// The frontend rendered (or failed to render) a snapshot: save the PNG to the
+/// folder, send it to each destination, record the run and notify.
 #[tauri::command]
-fn dashboard_snapshot_done(
+async fn dashboard_snapshot_done(
     app: tauri::AppHandle,
     dashboard_id: String,
-    path: Option<String>,
+    data: Option<String>,
     error: Option<String>,
 ) -> CmdResult<()> {
     if let Some(m) = SNAPSHOTS_IN_FLIGHT.lock().unwrap().as_mut() {
         m.remove(&dashboard_id);
     }
     let store = DashboardStore::default();
+    let Some(d) = store.list()?.into_iter().find(|d| d.id == dashboard_id) else {
+        return Ok(());
+    };
+    let snap = d.snapshot.clone();
+    let mut errors: Vec<String> = error.into_iter().collect();
+    let mut sent: Vec<String> = Vec::new();
+    let mut saved: Option<String> = None;
+    if let (Some(data), Some(snap)) = (data.as_deref(), snap.as_ref()) {
+        let png = rowhouse_core::backend::libsql::base64_decode(data)
+            .ok_or_else(|| Error::Other("invalid image data".into()))?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M");
+        let safe: String = d
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || "._-".contains(c) {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let file = format!("{safe}-{stamp}.png");
+        if !snap.dir.trim().is_empty() {
+            let dir = std::path::PathBuf::from(rowhouse_core::tunnel::expand_home(snap.dir.trim()));
+            let path = dir.join(&file);
+            match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &png)) {
+                Ok(()) => saved = Some(path.to_string_lossy().into_owned()),
+                Err(e) => errors.push(format!("couldn't save to {}: {e}", dir.display())),
+            }
+        }
+        let caption = format!(
+            "{} · {}",
+            d.name,
+            chrono::Local::now().format("%Y-%m-%d %H:%M")
+        );
+        for target in &snap.deliver {
+            let r = match target.secret() {
+                Ok(Some(secret)) => {
+                    rowhouse_core::notify::deliver(target, &secret, &caption, &file, &png).await
+                }
+                Ok(None) => Err(Error::Other("its secret is missing — set it again".into())),
+                Err(e) => Err(e),
+            };
+            match r {
+                Ok(()) => sent.push(format!("{:?}", target.kind).to_lowercase()),
+                Err(e) => errors.push(format!("{:?}: {e}", target.kind)),
+            }
+        }
+    }
+    let error = (!errors.is_empty()).then(|| errors.join("; "));
     store.mark_snapshot(&dashboard_id, schedules::now(), error.clone())?;
-    let d = store.list()?.into_iter().find(|d| d.id == dashboard_id);
-    if let Some(d) = d.filter(|d| d.snapshot.as_ref().is_some_and(|s| s.notify) || error.is_some())
-    {
+    if snap.as_ref().is_some_and(|s| s.notify) || error.is_some() {
         use tauri_plugin_notification::NotificationExt;
-        let body = match (&error, &path) {
-            (Some(e), _) => format!("Snapshot failed: {}", e.lines().next().unwrap_or(e)),
-            (None, Some(p)) => format!("Snapshot saved to {p}"),
-            (None, None) => "Snapshot saved".to_string(),
+        let body = match (&error, &saved) {
+            (Some(e), _) => format!("Snapshot problem: {}", e.lines().next().unwrap_or(e)),
+            (None, Some(p)) if sent.is_empty() => format!("Snapshot saved to {p}"),
+            (None, Some(_)) => format!("Snapshot saved and sent to {}", sent.join(", ")),
+            (None, None) => format!("Snapshot sent to {}", sent.join(", ")),
         };
         let _ = app
             .notification()
@@ -473,6 +524,42 @@ fn dashboard_snapshot_done(
             .body(body)
             .show();
     }
+    Ok(())
+}
+
+/// Store a delivery's secret (Slack token / webhook URL) in the keychain;
+/// returns the masked label the UI shows.
+#[tauri::command]
+fn delivery_set_secret(
+    delivery: rowhouse_core::notify::Delivery,
+    secret: String,
+) -> CmdResult<String> {
+    let label = rowhouse_core::notify::check_secret(delivery.kind, &secret)?;
+    delivery.set_secret(Some(&secret))?;
+    Ok(label)
+}
+
+#[tauri::command]
+fn delivery_delete_secret(delivery: rowhouse_core::notify::Delivery) -> CmdResult<()> {
+    delivery.set_secret(None)
+}
+
+/// Take a snapshot right away (the "Send now" button).
+#[tauri::command]
+fn dashboard_snapshot_now(app: tauri::AppHandle, dashboard_id: String) -> CmdResult<()> {
+    let d = DashboardStore::default()
+        .list()?
+        .into_iter()
+        .find(|d| d.id == dashboard_id)
+        .ok_or_else(|| Error::NotFound(dashboard_id.clone()))?;
+    if d.snapshot.is_none() {
+        return Err(Error::Other("save the snapshot settings first".into()));
+    }
+    if let Some(m) = SNAPSHOTS_IN_FLIGHT.lock().unwrap().as_mut() {
+        m.remove(&dashboard_id);
+    }
+    claim_snapshot(&dashboard_id, schedules::now());
+    let _ = app.emit("dashboard-snapshot-due", d);
     Ok(())
 }
 
@@ -1521,6 +1608,9 @@ pub fn run() {
             dashboard_delete,
             dashboard_query,
             dashboard_snapshot_done,
+            dashboard_snapshot_now,
+            delivery_set_secret,
+            delivery_delete_secret,
             ai_detect_local,
             mcp_clients,
             mcp_install,

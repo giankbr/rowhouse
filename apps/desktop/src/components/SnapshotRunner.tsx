@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type ConnectionConfig, type Dashboard } from "../lib/api";
 import { DashboardView } from "./DashboardView";
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const stamp = (d = new Date()) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 const TIMEOUT_MS = 120_000;
 
 async function blobToBase64(blob: Blob) {
@@ -34,8 +32,8 @@ export function SnapshotRunner({ connections }: { connections: ConnectionConfig[
     };
   }, []);
 
-  const finish = useCallback(async (d: Dashboard, path: string | null, error: string | null) => {
-    await api.dashboards.snapshotDone(d.id, path, error).catch(() => {});
+  const finish = useCallback(async (d: Dashboard, data: string | null, error: string | null) => {
+    await api.dashboards.snapshotDone(d.id, data, error).catch(() => {});
     setQueue((q) => q.filter((x) => x.id !== d.id));
   }, []);
 
@@ -48,17 +46,12 @@ export function SnapshotRunner({ connections }: { connections: ConnectionConfig[
 
   const onReady = useCallback(
     async (node: HTMLElement, dash: Dashboard) => {
-      const snap = dash.snapshot;
-      if (!snap) return finish(dash, null, "snapshot settings missing");
       try {
         const { toBlob } = await import("html-to-image");
         const blob = await toBlob(node, { pixelRatio: 2, backgroundColor: getComputedStyle(document.body).backgroundColor });
         if (!blob) throw "couldn't render the dashboard";
-        const dir = snap.dir.replace(/[\\/]+$/, "");
-        const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-        const path = `${dir}${sep}${dash.name.replace(/[^\w.-]+/g, "-")}-${stamp()}.png`;
-        await api.writeBase64File(path, await blobToBase64(blob));
-        await finish(dash, path, null);
+        // the backend names the file, saves it to the folder and sends it on
+        await finish(dash, await blobToBase64(blob), null);
       } catch (e) {
         await finish(dash, null, String(e));
       }

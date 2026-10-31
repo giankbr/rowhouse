@@ -317,10 +317,21 @@ export interface Dashboard {
   filters?: Record<string, string>;
   snapshot?: DashSnapshot | null;
 }
+export type DeliveryKind = "slack" | "discord" | "webhook";
+export interface Delivery {
+  id: string;
+  kind: DeliveryKind;
+  /** Slack channel ID */
+  channel?: string | null;
+  /** masked, e.g. "discord.com/…a1b2" */
+  label: string;
+}
+
 export interface DashSnapshot {
   enabled: boolean;
   every: Schedule["every"];
   dir: string;
+  deliver?: Delivery[];
   notify: boolean;
   lastRun?: number | null;
   lastError?: string | null;
@@ -707,10 +718,15 @@ export const api = {
     save: (dashboard: Dashboard) => call<Dashboard>("dashboard_save", { dashboard }),
     remove: (dashboardId: string) => call<void>("dashboard_delete", { dashboardId }),
     query: (id: string, sql: string) => call<QueryOutput>("dashboard_query", { id, sql }),
-    snapshotDone: (dashboardId: string, path: string | null, error: string | null) => call<void>("dashboard_snapshot_done", { dashboardId, path, error }),
+    /** `data`: the PNG as base64; the backend saves it to the folder and sends it on */
+    snapshotDone: (dashboardId: string, data: string | null, error: string | null) => call<void>("dashboard_snapshot_done", { dashboardId, data, error }),
+    snapshotNow: (dashboardId: string) => call<void>("dashboard_snapshot_now", { dashboardId }),
+    setDeliverySecret: (delivery: Delivery, secret: string) => call<string>("delivery_set_secret", { delivery, secret }),
+    deleteDeliverySecret: (delivery: Delivery) => call<void>("delivery_delete_secret", { delivery }),
     async onSnapshotDue(fn: (d: Dashboard) => void): Promise<() => void> {
       if (!isTauri) {
-        // dev mock: `window.__rhSnapshot(id)` fires one by hand
+        // dev mock: `window.__rhSnapshot(id)` (or "Send now") fires one by hand
+        mockSnapshotDue = fn;
         (window as unknown as { __rhSnapshot?: (id: string) => void }).__rhSnapshot = (id) => {
           const d = mockDashboards.find((x) => x.id === id);
           if (d) fn(structuredClone(d));
@@ -856,6 +872,7 @@ const mockMcpClients: McpClient[] = [
   { id: "opencode", label: "OpenCode", configPath: "~/.config/opencode/opencode.json", detected: false, status: "missing" },
   { id: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", detected: false, status: "missing" },
 ];
+let mockSnapshotDue: ((d: Dashboard) => void) | undefined;
 const mockDashboards: Dashboard[] = [
   {
     id: "d1",
@@ -1201,9 +1218,30 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
     case "dashboard_snapshot_done": {
       const d = mockDashboards.find((x) => x.id === a.dashboardId);
       if (d?.snapshot) Object.assign(d.snapshot, { lastRun: nowS(), lastError: a.error ?? null });
-      console.info("[rowhouse] snapshot done", a);
+      (window as unknown as { __rhLastWrite?: unknown }).__rhLastWrite = a.data;
+      console.info("[rowhouse] snapshot done", { dashboardId: a.dashboardId, bytes: a.data ? String(a.data).length : 0, error: a.error });
       return null;
     }
+    case "dashboard_snapshot_now": {
+      const d = mockDashboards.find((x) => x.id === a.dashboardId);
+      if (!d?.snapshot) throw "save the snapshot settings first";
+      setTimeout(() => mockSnapshotDue?.(structuredClone(d)), 50);
+      return null;
+    }
+    case "delivery_set_secret": {
+      const dl = a.delivery as Delivery;
+      const s = String(a.secret).trim();
+      if (dl.kind === "slack") {
+        if (!s.startsWith("xoxb-")) throw "use a Slack bot token (xoxb-…) with the files:write scope; incoming webhooks can't post images";
+        return `bot token …${s.slice(-4)}`;
+      }
+      if (!/^https?:\/\//.test(s)) throw "that isn't a URL";
+      if (dl.kind === "discord" && !s.includes("/api/webhooks/")) throw "use a Discord webhook URL (Channel settings → Integrations → Webhooks)";
+      const u = new URL(s);
+      return `${u.host}/…${u.pathname.slice(-4)}`;
+    }
+    case "delivery_delete_secret":
+      return null;
     case "dashboard_query": {
       const sql = String(a.sql).toLowerCase();
       await sleep(150 + Math.random() * 250);

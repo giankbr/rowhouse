@@ -1,6 +1,6 @@
-import { AlertCircle, BarChart3, Copy, Download, GripVertical, Hash, LayoutGrid, MoreHorizontal, Pencil, Plus, RefreshCw, SquareTerminal, Table2, Trash2 } from "lucide-react";
+import { AlertCircle, BarChart3, Copy, Download, GripVertical, Hash, LayoutGrid, MoreHorizontal, Pencil, Plus, RefreshCw, Send, SquareTerminal, Table2, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, dialogs, kindInfo, type ConnectionConfig, type Dashboard, type DashTile, type QueryResult, type Snippet } from "../lib/api";
+import { api, dialogs, kindInfo, type ConnectionConfig, type Dashboard, type DashTile, type Delivery, type DeliveryKind, type QueryResult, type Snippet } from "../lib/api";
 import { uid } from "../lib/types";
 import { findVars, substitute, type VarRef } from "../lib/vars";
 import { display } from "./ResultsGrid";
@@ -357,7 +357,26 @@ export function DashboardView({
         />
       )}
 
-      {snapOpen && <SnapshotDialog dash={dash} onClose={() => setSnapOpen(false)} onSave={(snapshot) => (persist({ ...dash, snapshot }), setSnapOpen(false))} />}
+      {snapOpen && (
+        <SnapshotDialog
+          dash={dash}
+          onToast={onToast}
+          onClose={() => setSnapOpen(false)}
+          onSave={async (snapshot, sendNow) => {
+            try {
+              const saved = await api.dashboards.save({ ...dash, snapshot });
+              setDash(saved);
+              setSnapOpen(false);
+              if (sendNow) {
+                await api.dashboards.snapshotNow(saved.id);
+                onToast("Taking a snapshot…", "ok");
+              }
+            } catch (e) {
+              onToast(String(e));
+            }
+          }}
+        />
+      )}
 
       {editing && (
         <TileEditor
@@ -615,7 +634,87 @@ function FilterInput({ v, value, onChange }: { v: VarRef; value: string; onChang
 }
 
 /** Save a PNG of the dashboard to a folder on a schedule. */
-function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: () => void; onSave: (s: import("../lib/api").DashSnapshot | null) => void }) {
+const DELIVERY: Record<DeliveryKind, { label: string; ph: string; hint: string }> = {
+  slack: { label: "Slack", ph: "xoxb-… bot token", hint: "A Slack app's bot token with files:write, invited to the channel. Incoming webhooks can't post images." },
+  discord: { label: "Discord", ph: "https://discord.com/api/webhooks/…", hint: "Channel settings → Integrations → Webhooks → Copy URL." },
+  webhook: { label: "Webhook", ph: "https://example.com/hooks/rowhouse", hint: "POSTs multipart/form-data: `file` (the PNG) and `payload` (JSON)." },
+};
+
+function DeliveryEditor({ list, onChange, onToast }: { list: Delivery[]; onChange: (l: Delivery[]) => void; onToast: (m: string, k?: "ok" | "err") => void }) {
+  const [kind, setKind] = useState<DeliveryKind>("slack");
+  const [secret, setSecret] = useState("");
+  const [channel, setChannel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const field = "h-7 rounded-md border border-line bg-elevated px-2 text-xs text-fg outline-none focus:border-accent";
+  const add = async () => {
+    const d: Delivery = { id: uid(), kind, channel: kind === "slack" ? channel.trim() : null, label: "" };
+    if (kind === "slack" && !d.channel) return onToast("Enter the Slack channel ID (C0123…)");
+    setBusy(true);
+    try {
+      d.label = await api.dashboards.setDeliverySecret(d, secret);
+      onChange([...list, d]);
+      setSecret("");
+      setChannel("");
+    } catch (e) {
+      onToast(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-2xs text-muted">Also send each snapshot to</span>
+      {list.map((d) => (
+        <div key={d.id} className="flex items-center gap-2 rounded-md border border-line bg-panel/40 px-2 py-1">
+          <Send size={11} className="text-subtle" />
+          <span className="font-medium">{DELIVERY[d.kind].label}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted">
+            {d.kind === "slack" ? `#${d.channel} · ` : ""}
+            {d.label}
+          </span>
+          <button
+            type="button"
+            title="Remove"
+            className="text-subtle hover:text-danger"
+            onClick={() => {
+              api.dashboards.deleteDeliverySecret(d).catch(() => {});
+              onChange(list.filter((x) => x.id !== d.id));
+            }}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={kind} onChange={(e) => setKind(e.target.value as DeliveryKind)} className={field}>
+          {(Object.keys(DELIVERY) as DeliveryKind[]).map((k) => (
+            <option key={k} value={k}>
+              {DELIVERY[k].label}
+            </option>
+          ))}
+        </select>
+        {kind === "slack" && <input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="Channel ID" className={cx(field, "w-28 font-mono")} />}
+        <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={DELIVERY[kind].ph} className={cx(field, "min-w-0 flex-1 font-mono")} />
+        <Button size="sm" disabled={!secret.trim() || busy} onClick={add}>
+          <Plus size={12} /> Add
+        </Button>
+      </div>
+      <p className="text-2xs text-subtle">{DELIVERY[kind].hint} Secrets stay in your system keychain.</p>
+    </div>
+  );
+}
+
+function SnapshotDialog({
+  dash,
+  onClose,
+  onSave,
+  onToast,
+}: {
+  dash: Dashboard;
+  onClose: () => void;
+  onSave: (s: import("../lib/api").DashSnapshot | null, sendNow?: boolean) => void;
+  onToast: (m: string, k?: "ok" | "err") => void;
+}) {
   const cur = dash.snapshot;
   const [enabled, setEnabled] = useState(cur?.enabled ?? true);
   const [kind, setKind] = useState<"daily" | "weekly" | "minutes">((cur?.every.kind as "daily" | "weekly" | "minutes") ?? "daily");
@@ -624,6 +723,9 @@ function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: (
   const [n, setN] = useState(cur && "n" in cur.every ? cur.every.n : 60);
   const [dir, setDir] = useState(cur?.dir ?? "");
   const [notify, setNotify] = useState(cur?.notify ?? true);
+  const [deliver, setDeliver] = useState<Delivery[]>(cur?.deliver ?? []);
+  const ready = !!dir.trim() || deliver.length > 0;
+  const value = () => ({ enabled, every: every as import("../lib/api").DashSnapshot["every"], dir: dir.trim(), deliver, notify, lastRun: cur?.lastRun ?? null, lastError: null });
   const every = kind === "daily" ? { kind, at } : kind === "weekly" ? { kind, weekday, at } : { kind, n: Math.max(5, n) };
   const field = "h-7 rounded-md border border-line bg-elevated px-2 text-xs text-fg outline-none focus:border-accent";
   return (
@@ -635,7 +737,7 @@ function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: (
       footer={
         <>
           {cur && (
-            <Button variant="danger" size="sm" onClick={() => onSave(null)}>
+            <Button variant="danger" size="sm" onClick={() => (deliver.forEach((d) => api.dashboards.deleteDeliverySecret(d).catch(() => {})), onSave(null))}>
               Remove
             </Button>
           )}
@@ -643,14 +745,17 @@ function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: (
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!dir.trim()} onClick={() => onSave({ enabled, every: every as import("../lib/api").DashSnapshot["every"], dir: dir.trim(), notify, lastRun: cur?.lastRun ?? null, lastError: null })}>
+          <Button disabled={!ready} onClick={() => onSave(value(), true)} title="Save, then take a snapshot right away">
+            <Send size={12} /> Save &amp; send now
+          </Button>
+          <Button variant="primary" disabled={!ready} onClick={() => onSave(value())}>
             Save
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-xs">
-        <p className="text-muted">Rowhouse refreshes “{dash.name}” and saves a PNG into the folder — handy for a daily report in a shared Dropbox or Google Drive folder. Runs while the app is open (a missed run happens on next launch).</p>
+        <p className="text-muted">Rowhouse refreshes “{dash.name}” and saves a PNG into a folder, posts it to Slack or Discord, or both — a daily report without a BI server. Runs while the app is open (a missed run happens on next launch).</p>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented<string>
             value={kind}
@@ -679,9 +784,10 @@ function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: (
           )}
         </div>
         <div className="flex gap-2">
-          <Input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Folder for the PNGs" className="font-mono" />
+          <Input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Folder for the PNGs (optional when sending)" className="font-mono" />
           <Button onClick={() => dialogs.folder().then((f) => f && setDir(f))}>Browse…</Button>
         </div>
+        <DeliveryEditor list={deliver} onChange={setDeliver} onToast={onToast} />
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="accent-[var(--accent)]" /> Notify me when a snapshot is saved
         </label>
