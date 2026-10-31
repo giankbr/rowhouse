@@ -41,6 +41,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A tag that doesn't match the app version would ship installers (and an
+      # updater manifest) with the wrong number — stop before building anything.
+      - name: Check version matches the tag
+        run: node scripts/version.mjs --check ${{ github.ref_name }}
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4

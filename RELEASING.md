@@ -1,13 +1,18 @@
 # Releasing Rowhouse
 
 Pushing a tag `v*` runs `.github/workflows/release.yml`, which builds installers for
-macOS (universal), Windows and Linux and attaches them to a GitHub Release.
+macOS (Apple silicon and Intel, built in parallel), Windows and Linux and attaches
+them to a GitHub Release.
 `rowhouse-mcp` is built and bundled automatically (`scripts/sidecar.mjs`).
 
 ```bash
-# bump the version in apps/desktop/src-tauri/tauri.conf.json and apps/desktop/package.json
-git tag v0.2.0 && git push origin v0.2.0
+node scripts/version.mjs 0.7.0      # Cargo.toml, tauri.conf.json, package.json
+git commit -am "chore(release): v0.7.0"
+git tag v0.7.0 && git push origin main v0.7.0
 ```
+
+The workflow refuses to build a tag that doesn't match those three versions
+(`node scripts/version.mjs --check v0.7.0`).
 
 Everything below is optional — without it you still get working, **unsigned** builds.
 
