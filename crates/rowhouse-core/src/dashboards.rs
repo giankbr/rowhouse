@@ -64,8 +64,12 @@ pub struct Dashboard {
 pub struct Snapshot {
     pub enabled: bool,
     pub every: crate::schedules::Every,
-    /// folder the PNGs go to
+    /// folder the PNGs go to (may be empty when they're only sent somewhere)
+    #[serde(default)]
     pub dir: String,
+    /// also send each PNG to Slack / Discord / a webhook
+    #[serde(default)]
+    pub deliver: Vec<crate::notify::Delivery>,
     #[serde(default)]
     pub notify: bool,
     #[serde(default)]
@@ -80,7 +84,7 @@ impl Dashboard {
         let s = self
             .snapshot
             .as_ref()
-            .filter(|s| s.enabled && !s.dir.trim().is_empty())?;
+            .filter(|s| s.enabled && (!s.dir.trim().is_empty() || !s.deliver.is_empty()))?;
         crate::schedules::next_after(&s.every, s.last_run.unwrap_or(self.updated_at))
     }
 
@@ -169,8 +173,13 @@ impl DashboardStore {
             }
         }
         if let Some(s) = d.snapshot.as_mut().filter(|s| s.enabled) {
-            if s.dir.trim().is_empty() {
-                return Err(Error::Other("pick a folder for the snapshots".into()));
+            if s.dir.trim().is_empty() && s.deliver.is_empty() {
+                return Err(Error::Other(
+                    "pick a folder for the snapshots, or somewhere to send them".into(),
+                ));
+            }
+            for d in &s.deliver {
+                d.validate()?;
             }
             if let crate::schedules::Every::Minutes { n } = &mut s.every {
                 *n = (*n).max(5);
@@ -236,6 +245,7 @@ mod tests {
                 enabled: true,
                 every: crate::schedules::Every::Minutes { n: 60 },
                 dir: "/tmp".into(),
+                deliver: vec![],
                 notify: false,
                 last_run: Some(1_000),
                 last_error: None,

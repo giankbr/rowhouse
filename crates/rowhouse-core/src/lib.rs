@@ -28,6 +28,7 @@ pub mod io;
 pub mod license;
 pub mod mcp_clients;
 pub mod model;
+pub mod notify;
 pub mod objects;
 pub mod plan;
 pub mod roles;
@@ -37,6 +38,7 @@ pub mod structure;
 pub mod sync;
 pub mod table_ops;
 pub mod tunnel;
+pub mod vars;
 
 pub use changes::{ChangeSet, RowUpdate};
 pub use config::{ConnectionConfig, ConnectionStore, DbKind};
