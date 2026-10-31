@@ -10,6 +10,8 @@ const LANG: Partial<Record<Dialect, string>> = {
   clickhouse: "clickhouse",
   cql: "sql",
   oracle: "plsql",
+  bigquery: "bigquery",
+  elastic: "sql",
 };
 
 export function canFormat(d: Dialect) {

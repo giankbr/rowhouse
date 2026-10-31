@@ -181,7 +181,7 @@ export function SqlEditor({
             ? MSSQL
             : d === "oracle"
               ? PLSQL
-            : d === "duckdb" || d === "cql"
+            : d === "duckdb" || d === "cql" || d === "elastic" || d === "bigquery"
               ? StandardSQL
               : PostgreSQL;
     return [

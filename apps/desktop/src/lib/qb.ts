@@ -56,6 +56,7 @@ const rid = () => Math.random().toString(36).slice(2, 9);
 
 export function quoteIdent(d: Dialect, name: string) {
   if (d === "mysql" || d === "clickhouse") return "`" + name.replace(/`/g, "``") + "`";
+  if (d === "bigquery") return "`" + name.replace(/\\/g, "\\\\").replace(/`/g, "\\`") + "`";
   if (d === "mssql") return "[" + name.replace(/]/g, "]]") + "]";
   return /^[a-z_][a-z0-9_]*$/.test(name) && !RESERVED.has(name) ? name : `"${name.replace(/"/g, '""')}"`;
 }

@@ -1,6 +1,6 @@
 import { CheckCircle2, Link2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment, type TlsMode } from "../lib/api";
+import { api, dialogs, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment, type TlsMode } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
 
@@ -87,7 +87,7 @@ export function ConnectionDialog({
   const shownKinds = KINDS.filter((k) => !kindFilter || k.label.toLowerCase().includes(kindFilter.toLowerCase()));
   const hasNet = !info.file && !info.api;
   const dialect = info.dialect;
-  const hostPh = dialect === "oracle" ? "db.example.com (or a TNS alias / EZConnect string)" : c.kind === "mongodb" ? "localhost or mongodb+srv://…" : dialect === "cql" ? "node1, node2:9042" : c.kind === "neon" ? "ep-xxx.region.aws.neon.tech" : c.kind === "supabase" ? "db.xxxx.supabase.co" : c.kind === "upstash" ? "xxx.upstash.io" : "localhost";
+  const hostPh = dialect === "oracle" ? "db.example.com (or a TNS alias / EZConnect string)" : c.kind === "mongodb" ? "localhost or mongodb+srv://…" : dialect === "cql" ? "node1, node2:9042" : c.kind === "neon" ? "ep-xxx.region.aws.neon.tech" : c.kind === "supabase" ? "db.xxxx.supabase.co" : c.kind === "upstash" ? "xxx.upstash.io" : dialect === "elastic" ? "localhost or https://my-deploy.es.io:443" : "localhost";
   const tabs = [
     { id: "general" as const, label: "General" },
     ...(hasNet ? [{ id: "ssh" as const, label: ssh ? "SSH · on" : "SSH" }, { id: "tls" as const, label: "TLS" }] : []),
@@ -228,6 +228,28 @@ export function ConnectionDialog({
                       <Input type="password" value={password} placeholder={isNew ? "turso db tokens create <db>" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
                     </Field>
                   </>
+                ) : c.kind === "bigquery" ? (
+                  <>
+                    <Field label="Service-account key file" hint="IAM → Service accounts → Keys → Add key (JSON). Needs BigQuery Job User + Data Viewer (or Editor to change data).">
+                      <div className="flex gap-2">
+                        <Input value={c.file ?? ""} placeholder="~/keys/my-project-1234.json" className="font-mono" onChange={(e) => set({ file: e.target.value || null })} />
+                        <Button type="button" onClick={() => dialogs.openAny("Key file", ["json"]).then((f) => f && set({ file: f }))}>
+                          Browse…
+                        </Button>
+                      </div>
+                    </Field>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="Project ID">
+                        <Input value={c.database ?? ""} placeholder="from the key file" onChange={(e) => set({ database: e.target.value || null })} />
+                      </Field>
+                      <Field label="Location">
+                        <Input value={c.user ?? ""} placeholder="auto · US · EU · asia-southeast2" onChange={(e) => set({ user: e.target.value || null })} />
+                      </Field>
+                    </div>
+                    <Field label="Access token" hint="Instead of a key file: paste the output of `gcloud auth print-access-token` (expires after an hour).">
+                      <Input type="password" value={password} placeholder={isNew ? "optional" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+                    </Field>
+                  </>
                 ) : c.kind === "d1" ? (
                   <>
                     <div className="grid grid-cols-2 gap-2">
@@ -253,20 +275,20 @@ export function ConnectionDialog({
                       </Field>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <Field label="User">
-                        <Input value={c.user ?? ""} placeholder={info.user ?? (dialect === "redis" ? "default" : "")} onChange={(e) => set({ user: e.target.value || null })} />
+                      <Field label="User" hint={dialect === "elastic" ? "Leave empty to use an API key" : undefined}>
+                        <Input value={c.user ?? ""} placeholder={info.user ?? (dialect === "redis" ? "default" : dialect === "elastic" ? (c.kind === "opensearch" ? "admin" : "elastic") : "")} onChange={(e) => set({ user: e.target.value || null })} />
                       </Field>
-                      <Field label="Password">
+                      <Field label={dialect === "elastic" ? "Password or API key" : "Password"}>
                         <Input type="password" value={password} placeholder={isNew ? "" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
                       </Field>
                     </div>
-                    <Field label={dialect === "redis" ? "Database number" : dialect === "cql" ? "Keyspace" : dialect === "oracle" ? "Service name" : "Database"}>
+                    {dialect !== "elastic" && <Field label={dialect === "redis" ? "Database number" : dialect === "cql" ? "Keyspace" : dialect === "oracle" ? "Service name" : "Database"}>
                       <Input
                         value={c.database ?? ""}
                         placeholder={dialect === "redis" ? "0" : c.kind === "mongodb" ? "test" : dialect === "oracle" ? "FREEPDB1 · ORCLPDB1 · XEPDB1" : "optional — pick later from the titlebar"}
                         onChange={(e) => set({ database: e.target.value || null })}
                       />
-                    </Field>
+                    </Field>}
                     {dialect === "oracle" && (
                       <Field label="Oracle Instant Client folder" hint="Rowhouse loads Oracle's client library at runtime. Leave empty to find it in ~/Downloads, ~/instantclient*, /opt/oracle… — or download “Basic Light” from oracle.com.">
                         <Input value={c.clientDir ?? ""} placeholder="auto-detect" onChange={(e) => set({ clientDir: e.target.value || null })} />
@@ -403,7 +425,7 @@ export function ConnectionDialog({
 const KIND_GROUPS: { label: string; kinds: DbKind[] }[] = [
   { label: "Relational", kinds: ["postgres", "mysql", "mariadb", "mssql", "oracle", "sqlite", "duckdb"] },
   { label: "Cloud", kinds: ["neon", "supabase", "turso", "d1", "upstash", "cockroach", "redshift", "tidb", "singlestore", "greenplum"] },
-  { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "cassandra", "scylla"] },
+  { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "bigquery", "elasticsearch", "opensearch", "cassandra", "scylla"] },
 ];
 
 /** Empty host / port / user fall back to the placeholders' defaults. */
@@ -418,6 +440,7 @@ function defaultName(c: ConnectionConfig) {
   if (kindInfo(c.kind).file) return c.file?.split(/[\\/]/).pop() || kindInfo(c.kind).label;
   if (c.kind === "turso") return c.host?.replace(/^\w+:\/\//, "").split(".")[0] || "Turso";
   if (c.kind === "d1") return `D1 · ${c.database?.slice(0, 8) || "database"}`;
+  if (c.kind === "bigquery") return `BigQuery · ${c.database || c.file?.split(/[\\/]/).pop()?.replace(/\.json$/, "") || "project"}`;
   return `${c.database || kindInfo(c.kind).label}@${c.host || "localhost"}`;
 }
 
