@@ -47,7 +47,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 
 - SQL editor (CodeMirror 6) — dialect-aware highlighting, table autocomplete, `⌘/Ctrl+↵` runs the selection or whole script; multi-statement scripts return multiple result sets.
 - **SQL formatter** and a **database switcher** to jump between databases on a connection.
-- **Dashboards** — pin a chart from any query, or build tiles from saved queries: charts, tables and big numbers on a grid, drag to reorder, auto-refresh. Tiles always run read-only and follow their saved query. Global filters (`:from`, `{{region}}`) apply to every tile, and scheduled snapshots save a PNG to a folder every day/week/N minutes, with a notification.
+- **Dashboards** — pin a chart from any query, or build tiles from saved queries: charts, tables and big numbers on a grid, drag to reorder, auto-refresh. Tiles always run read-only and follow their saved query. Global filters (`:from`, `{{region}}`) apply to every tile, and scheduled snapshots save a PNG to a folder and/or post it to Slack, Discord or any webhook every day/week/N minutes (secrets stay in the system keychain).
 - **Charts** — bar, line, area or scatter from any result, with hover tooltips; copy or save as PNG / SVG.
 - **Query variables** — `:name` (quoted for you) and `{{name}}` (pasted as typed) are asked for before the query runs.
 - **Run SQL files** — big seed files and migrations run statement by statement with progress, stop or keep going at errors (MySQL `DELIMITER` and Postgres `$$` bodies handled).
@@ -120,6 +120,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 | `explain_query` | Query plan as a tree (`analyze` only for reads) |
 | `table_stats` | Approximate row counts and sizes from the database's statistics |
 | `list_saved_queries` · `run_saved_query` · `recent_queries` | The user's saved queries and history |
+| `list_dashboards` · `run_dashboard` | Dashboards and their filters; run every tile read-only, optionally with other filter values |
 | `run_query` | Read-only SQL (SELECT / WITH / SHOW / EXPLAIN); read commands for Redis, find/aggregate for MongoDB |
 | `execute_sql` | A write — only after you approve it in Rowhouse (connections with “Allow AI to request writes”) |
 
