@@ -72,6 +72,10 @@ impl Default for DashboardStore {
 }
 
 impl DashboardStore {
+    pub fn default_path() -> PathBuf {
+        ConnectionStore::default_dir().join("dashboards.json")
+    }
+
     pub fn at(path: PathBuf) -> Self {
         Self { path }
     }

@@ -1156,6 +1156,7 @@ async fn do_sync(
         history,
         state_path: fsync::SyncState::path(),
         keychain: true,
+        dashboards: Some(rowhouse_core::dashboards::DashboardStore::default_path()),
     }
     .sync(std::path::Path::new(folder), pass, include_secrets)
     .await
@@ -1180,6 +1181,7 @@ async fn sync_setup(
     if st.folder.as_deref() != Some(folder.as_str()) {
         st.conns.clear();
         st.snippets.clear();
+        st.dashboards.clear();
         st.save_to(&path)?;
     }
     Syncer {
@@ -1187,6 +1189,7 @@ async fn sync_setup(
         history,
         state_path: path,
         keychain: true,
+        dashboards: Some(rowhouse_core::dashboards::DashboardStore::default_path()),
     }
     .check(std::path::Path::new(&folder), &passphrase)?;
     fsync::save_passphrase(Some(&passphrase))?;

@@ -1,11 +1,11 @@
-import { AlertCircle, BarChart3, Copy, GripVertical, Hash, LayoutGrid, MoreHorizontal, Pencil, Plus, RefreshCw, SquareTerminal, Table2, Trash2 } from "lucide-react";
+import { AlertCircle, BarChart3, Copy, Download, GripVertical, Hash, LayoutGrid, MoreHorizontal, Pencil, Plus, RefreshCw, SquareTerminal, Table2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type ConnectionConfig, type Dashboard, type DashTile, type QueryResult, type Snippet } from "../lib/api";
+import { api, dialogs, type ConnectionConfig, type Dashboard, type DashTile, type QueryResult, type Snippet } from "../lib/api";
 import { uid } from "../lib/types";
 import { display } from "./ResultsGrid";
 import { ResultsChart, defaultSpec, type ChartSpec } from "./ResultsChart";
 import { ContextMenu } from "./TableActions";
-import { Button, Input, Modal, Segmented, cx } from "./ui";
+import { Button, Input, Menu, Modal, Segmented, cx } from "./ui";
 
 const ROW_H = 168;
 const WIDTHS: { w: number; label: string }[] = [
@@ -46,6 +46,39 @@ export function DashboardView({
   const [dragId, setDragId] = useState<string | null>(null);
   const [rename, setRename] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const shot = useRef<HTMLDivElement>(null);
+  const exportPng = async (mode: "save" | "copy") => {
+    if (!shot.current || !dash) return;
+    setExporting(true);
+    await new Promise((r) => setTimeout(r, 60));
+    try {
+      const { toBlob } = await import("html-to-image");
+      const blob = await toBlob(shot.current, {
+        pixelRatio: 2,
+        backgroundColor: getComputedStyle(document.body).backgroundColor,
+        filter: (n) => !(n instanceof HTMLElement && n.dataset.noExport !== undefined),
+      });
+      if (!blob) throw "couldn't render the dashboard";
+      if (mode === "copy") {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        onToast("Dashboard copied as PNG", "ok");
+      } else {
+        const path = await dialogs.save(`${dash.name.replace(/[^\w.-]+/g, "-")}.png`, "png");
+        if (path) {
+          const buf = new Uint8Array(await blob.arrayBuffer());
+          let bin = "";
+          for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+          await api.writeBase64File(path, btoa(bin));
+          onToast(`Saved ${path.split(/[\\/]/).pop()}`, "ok");
+        }
+      }
+    } catch (e) {
+      onToast(String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
   const [, tick] = useState(0);
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -117,8 +150,8 @@ export function DashboardView({
   const anyLoading = Object.values(states).some((s) => s.loading);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-bg">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+    <div className="rh-print flex h-full min-h-0 flex-1 flex-col bg-bg">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 print:hidden">
         <LayoutGrid size={14} className="text-accent" />
         {rename !== null ? (
           <input
@@ -151,6 +184,19 @@ export function DashboardView({
             </option>
           ))}
         </select>
+        <Menu
+          label={
+            <>
+              <Download size={12} /> Export
+            </>
+          }
+          disabled={dash.tiles.length === 0}
+          items={[
+            { label: "Save as PNG…", onSelect: () => exportPng("save") },
+            { label: "Copy as PNG", onSelect: () => exportPng("copy") },
+            { label: "Print / save as PDF…", onSelect: () => window.print() },
+          ]}
+        />
         <Button size="xs" variant="ghost" onClick={runAll} title="Refresh all tiles">
           <RefreshCw size={12} className={cx(anyLoading && "animate-spin")} /> Refresh
         </Button>
@@ -181,7 +227,14 @@ export function DashboardView({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 print:overflow-visible">
+        <div ref={shot} className="bg-bg">
+        <div className={cx("mb-3 items-baseline gap-2 px-1", exporting ? "flex" : "hidden print:flex")}>
+          <span className="text-base font-semibold">{dash.name}</span>
+          <span className="text-2xs text-muted">
+            {conn?.name ?? ""} · {new Date().toLocaleString()}
+          </span>
+        </div>
         {dash.tiles.length === 0 ? (
           <div className="mx-auto mt-16 flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-line p-8 text-center text-xs text-muted">
             <LayoutGrid size={22} className="text-subtle" />
@@ -207,7 +260,8 @@ export function DashboardView({
                       draggable
                       onDragStart={() => setDragId(t.id)}
                       onDragEnd={() => setDragId(null)}
-                      className="cursor-grab rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 active:cursor-grabbing"
+                      data-no-export
+                      className="cursor-grab rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 active:cursor-grabbing print:hidden"
                       title="Drag to reorder"
                     >
                       <GripVertical size={12} />
@@ -217,8 +271,9 @@ export function DashboardView({
                     <span className="flex-1" />
                     {st?.loading && <RefreshCw size={11} className="animate-spin text-subtle" />}
                     <button
+                      data-no-export
                       onClick={(e) => setMenu({ x: e.clientX, y: e.clientY, tile: t })}
-                      className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-fg"
+                      className="print:hidden rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-fg"
                     >
                       <MoreHorizontal size={14} />
                     </button>
@@ -231,6 +286,7 @@ export function DashboardView({
             })}
           </div>
         )}
+        </div>
       </div>
 
       {menu && (

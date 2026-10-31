@@ -178,6 +178,8 @@ pub struct Payload {
     pub at: i64,
     pub connections: Vec<SyncedConnection>,
     pub snippets: Vec<Snippet>,
+    #[serde(default)]
+    pub dashboards: Vec<crate::dashboards::Dashboard>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +214,9 @@ pub struct SyncState {
     /// snippet key → fingerprint at last sync
     #[serde(default)]
     pub snippets: HashMap<String, String>,
+    /// dashboard id → fingerprint at last sync
+    #[serde(default)]
+    pub dashboards: HashMap<String, String>,
 }
 
 impl SyncState {
@@ -238,6 +243,7 @@ impl SyncState {
 pub struct SyncReport {
     pub pulled_connections: usize,
     pub pulled_snippets: usize,
+    pub pulled_dashboards: usize,
     pub pushed: bool,
     pub remote_device: Option<String>,
 }
@@ -253,6 +259,9 @@ fn snippet_key(s: &Snippet) -> String {
         s.connection_id.as_deref().unwrap_or(""),
         s.name
     )
+}
+fn dash_fp(d: &crate::dashboards::Dashboard) -> String {
+    fp(&(&d.name, &d.connection_id, &d.tiles, d.refresh_secs))
 }
 fn snippet_fp(s: &Snippet) -> String {
     fp(&(&s.name, &s.sql, &s.connection_id))
@@ -342,6 +351,7 @@ pub fn disable() -> Result<()> {
     st.last_error = None;
     st.conns.clear();
     st.snippets.clear();
+    st.dashboards.clear();
     st.save_to(&p)
 }
 
@@ -351,6 +361,8 @@ pub struct Syncer<'a> {
     pub state_path: PathBuf,
     /// read / write passwords in the OS keychain (off in tests)
     pub keychain: bool,
+    /// dashboards file to sync (None: leave the file's dashboards untouched)
+    pub dashboards: Option<PathBuf>,
 }
 
 impl Syncer<'_> {
@@ -501,6 +513,42 @@ impl Syncer<'_> {
             }
         }
 
+        // ---- dashboards (same three-way rule, keyed by id)
+        let dstore = self
+            .dashboards
+            .clone()
+            .map(crate::dashboards::DashboardStore::at);
+        let mut dashes = match &dstore {
+            Some(ds) => ds.list()?,
+            None => remote
+                .as_ref()
+                .map(|r| r.0.dashboards.clone())
+                .unwrap_or_default(),
+        };
+        if let (Some(ds), Some((payload, _))) = (&dstore, &remote) {
+            for rd in &payload.dashboards {
+                let base = state.dashboards.get(&rd.id).cloned();
+                let rfp = dash_fp(rd);
+                match dashes.iter().position(|d| d.id == rd.id) {
+                    None if base.is_none() => {
+                        let saved = ds.save(rd.clone())?;
+                        dashes.push(saved);
+                        report.pulled_dashboards += 1;
+                    }
+                    Some(i) => {
+                        let lfp = dash_fp(&dashes[i]);
+                        if lfp != rfp && base.as_deref() == Some(lfp.as_str()) {
+                            dashes[i] = ds.save(rd.clone())?;
+                            report.pulled_dashboards += 1;
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        dashes.sort_by(|a, b| a.id.cmp(&b.id));
+        let dash_fps: Vec<String> = dashes.iter().map(dash_fp).collect();
+
         // ---- push when our view differs from the file
         if include_secrets {
             if let Some((p, _)) = &remote {
@@ -539,7 +587,10 @@ impl Syncer<'_> {
                     .map(|s| Snippet { id: 0, ..s.clone() })
                     .collect();
                 rs.sort_by_key(snippet_key);
-                serde_json::to_vec(&rc)? != serde_json::to_vec(&sorted)?
+                let mut rd = p.dashboards.clone();
+                rd.sort_by(|a, b| a.id.cmp(&b.id));
+                rd.iter().map(dash_fp).collect::<Vec<_>>() != dash_fps
+                    || serde_json::to_vec(&rc)? != serde_json::to_vec(&sorted)?
                     || fp(&rs.iter().map(snippet_fp).collect::<Vec<_>>())
                         != fp(&snips.iter().map(snippet_fp).collect::<Vec<_>>())
             }
@@ -550,6 +601,7 @@ impl Syncer<'_> {
                 at: now(),
                 connections: sorted.clone(),
                 snippets: snips.clone(),
+                dashboards: dashes.clone(),
             };
             let env = seal(pass, &serde_json::to_vec(&payload)?, salt)?;
             let tmp = folder.join(format!(".{FILE_NAME}.tmp"));
@@ -566,6 +618,7 @@ impl Syncer<'_> {
             .iter()
             .map(|s| (snippet_key(s), snippet_fp(s)))
             .collect();
+        state.dashboards = dashes.iter().map(|d| (d.id.clone(), dash_fp(d))).collect();
         state.last_sync = Some(now());
         state.last_error = None;
         state.folder = Some(folder.to_string_lossy().into());

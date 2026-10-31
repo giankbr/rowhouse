@@ -554,6 +554,7 @@ export interface SyncStatus {
 export interface SyncReport {
   pulledConnections: number;
   pulledSnippets: number;
+  pulledDashboards?: number;
   pushed: boolean;
   remoteDevice: string | null;
 }

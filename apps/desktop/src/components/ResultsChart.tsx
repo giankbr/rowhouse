@@ -334,7 +334,7 @@ export function ResultsChart({
       </div>}
 
       <div ref={box} className="relative min-h-0 flex-1">
-        <svg ref={svgRef} width={w} height={h} className="absolute inset-0 select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={`${s.type} chart of ${s.y.join(", ")} by ${s.x}`}>
+        <svg ref={svgRef} width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="absolute inset-0 select-none" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={`${s.type} chart of ${s.y.join(", ")} by ${s.x}`}>
           {/* grid + y axis */}
           {yt.map((v) => (
             <g key={v}>
