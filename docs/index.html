@@ -145,7 +145,7 @@
   .spec .v { font-family: var(--f-mono); font-size: 12px; color: var(--fg); text-align: right; }
 
   /* ---------- app window mock ---------- */
-  .mockwrap { margin-top: clamp(40px, 6vw, 68px); padding-bottom: clamp(44px, 7vw, 80px); position: relative; }
+  .mockwrap { margin-top: clamp(40px, 6vw, 68px); padding-bottom: clamp(30px, 4.5vw, 50px); position: relative; }
   .mockwrap::before { content: ""; position: absolute; inset: -10px -10px 20px -10px; background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 16px 16px; z-index: 0; -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 55%, transparent 100%); mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 55%, transparent 100%); }
   /* real app screenshot, swapped by theme */
   .shot { position: relative; z-index: 1; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; box-shadow: 0 30px 60px -32px rgba(30,27,75,.35); background: var(--surface); }
@@ -198,7 +198,7 @@
 
   /* ---------- section heads (split) ---------- */
   .band { padding-block: clamp(52px, 8vw, 88px); }
-  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 0; }
   @media (max-width: 900px) { .gallery { grid-template-columns: 1fr; } }
   .gallery figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
   .gallery .shot { border-radius: 10px; box-shadow: 0 18px 36px -26px rgba(30,27,75,.35); }
@@ -403,7 +403,7 @@
     </section>
 
     <!-- ---------- GALLERY ---------- -->
-    <section class="band" id="tour" style="padding-top:clamp(10px,2vw,22px);padding-bottom:0">
+    <section class="band" id="tour" style="padding-top:clamp(28px,4vw,44px);padding-bottom:clamp(36px,5vw,56px)">
       <div class="pad">
         <div class="gallery">
           <figure class="reveal">
