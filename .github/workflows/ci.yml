@@ -126,6 +126,17 @@ jobs:
           ROWHOUSE_TEST_OPENSEARCH: http://localhost:9201
           ROWHOUSE_TEST_BIGQUERY: http://localhost:9050
 
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter rowhouse-desktop exec playwright install --with-deps chromium
+      - run: pnpm --filter rowhouse-desktop e2e
+
   desktop:
     strategy:
       fail-fast: false
