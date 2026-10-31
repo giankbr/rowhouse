@@ -20,6 +20,7 @@ import { RolesDialog } from "./components/RolesDialog";
 import { ExtensionsDialog } from "./components/ExtensionsDialog";
 import { ExtensionPanel } from "./components/ExtensionPanel";
 import { DashboardView } from "./components/DashboardView";
+import { SnapshotRunner } from "./components/SnapshotRunner";
 import { DashboardsDialog, PinDialog } from "./components/DashboardsDialog";
 import { RunFileDialog } from "./components/RunFileDialog";
 import { FakeDataDialog } from "./components/FakeDataDialog";
@@ -998,6 +999,7 @@ export default function App() {
           }}
         />
       )}
+      <SnapshotRunner connections={connections} />
       <DashboardsDialog open={dashboardsOpen} conn={conn} connections={connections} onClose={() => setDashboardsOpen(false)} onOpen={openDashboard} onToast={setToast} />
       <PinDialog
         open={!!pinTile}

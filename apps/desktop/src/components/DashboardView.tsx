@@ -1,7 +1,8 @@
 import { AlertCircle, BarChart3, Copy, Download, GripVertical, Hash, LayoutGrid, MoreHorizontal, Pencil, Plus, RefreshCw, SquareTerminal, Table2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, dialogs, type ConnectionConfig, type Dashboard, type DashTile, type QueryResult, type Snippet } from "../lib/api";
+import { api, dialogs, kindInfo, type ConnectionConfig, type Dashboard, type DashTile, type QueryResult, type Snippet } from "../lib/api";
 import { uid } from "../lib/types";
+import { findVars, substitute, type VarRef } from "../lib/vars";
 import { display } from "./ResultsGrid";
 import { ResultsChart, defaultSpec, type ChartSpec } from "./ResultsChart";
 import { ContextMenu } from "./TableActions";
@@ -31,7 +32,12 @@ export function DashboardView({
   onOpenQuery,
   onToast,
   onDeleted,
+  headless = false,
+  onSnapshotReady,
 }: {
+  /** render for a scheduled snapshot: no toolbar, report when every tile has loaded */
+  headless?: boolean;
+  onSnapshotReady?: (node: HTMLElement, dash: Dashboard) => void;
   dashboardId: string;
   conn: ConnectionConfig | undefined;
   onOpenQuery: (sql: string) => void;
@@ -92,7 +98,16 @@ export function DashboardView({
     if (dash) api.listSnippets(dash.connectionId).then(setSnippets).catch(() => {});
   }, [dash?.connectionId]);
 
-  const sqlOf = useCallback((t: DashTile) => (t.snippetId != null ? (snippets.find((s) => s.id === t.snippetId)?.sql ?? t.sql) : t.sql), [snippets]);
+  const dialect = conn ? kindInfo(conn.kind).dialect : "postgres";
+  const filtersRef = useRef<Record<string, string>>({});
+  filtersRef.current = dash?.filters ?? {};
+  const rawSql = useCallback((t: DashTile) => (t.snippetId != null ? (snippets.find((s) => s.id === t.snippetId)?.sql ?? t.sql) : t.sql), [snippets]);
+  const sqlOf = useCallback((t: DashTile) => substitute(rawSql(t), filtersRef.current, dialect), [rawSql, dialect]);
+  const vars = useMemo(() => {
+    const seen = new Map<string, VarRef>();
+    for (const t of dash?.tiles ?? []) for (const v of findVars(rawSql(t), dialect)) if (!seen.has(v.name)) seen.set(v.name, v);
+    return [...seen.values()];
+  }, [dash?.tiles, rawSql, dialect]);
 
   const runTile = useCallback(
     async (t: DashTile) => {
@@ -125,6 +140,30 @@ export function DashboardView({
     return () => clearInterval(t);
   }, []);
 
+  // headless snapshot: hand the grid over once every tile has finished
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!headless || !dash || reported.current || !shot.current) return;
+    const done = dash.tiles.every((t) => states[t.id] && !states[t.id].loading);
+    if (!done) return;
+    reported.current = true;
+    setTimeout(() => shot.current && onSnapshotReady?.(shot.current, dash), 400);
+  }, [headless, dash, states, onSnapshotReady]);
+
+  const setFilter = (name: string, value: string) => {
+    if (!dash) return;
+    const next = { ...dash, filters: { ...(dash.filters ?? {}), [name]: value } };
+    filtersRef.current = next.filters;
+    setDash(next);
+    clearTimeout(filterTimer.current);
+    filterTimer.current = setTimeout(() => {
+      api.dashboards.save(next).catch((e) => onToast(String(e)));
+      next.tiles.filter((t) => findVars(rawSql(t), dialect).some((v) => v.name === name)).forEach(runTile);
+    }, 450);
+  };
+  const filterTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [snapOpen, setSnapOpen] = useState(false);
+
   const persist = async (d: Dashboard) => {
     setDash(d);
     try {
@@ -151,7 +190,7 @@ export function DashboardView({
 
   return (
     <div className="rh-print flex h-full min-h-0 flex-1 flex-col bg-bg">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 print:hidden">
+      {!headless && <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 print:hidden">
         <LayoutGrid size={14} className="text-accent" />
         {rename !== null ? (
           <input
@@ -195,6 +234,7 @@ export function DashboardView({
             { label: "Save as PNG…", onSelect: () => exportPng("save") },
             { label: "Copy as PNG", onSelect: () => exportPng("copy") },
             { label: "Print / save as PDF…", onSelect: () => window.print() },
+            { label: dash.snapshot?.enabled ? "Snapshot schedule (on)…" : "Schedule snapshots…", onSelect: () => setSnapOpen(true) },
           ]}
         />
         <Button size="xs" variant="ghost" onClick={runAll} title="Refresh all tiles">
@@ -225,14 +265,23 @@ export function DashboardView({
             <Trash2 size={13} />
           </Button>
         )}
-      </div>
+      </div>}
+
+      {vars.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-panel/40 px-3 py-1.5 print:hidden" data-no-export>
+          {vars.map((v) => (
+            <FilterInput key={v.name} v={v} value={dash.filters?.[v.name] ?? ""} onChange={(x) => setFilter(v.name, x)} />
+          ))}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3 print:overflow-visible">
         <div ref={shot} className="bg-bg">
-        <div className={cx("mb-3 items-baseline gap-2 px-1", exporting ? "flex" : "hidden print:flex")}>
+        <div className={cx("mb-3 flex-wrap items-baseline gap-2 px-1", exporting || headless ? "flex" : "hidden print:flex")}>
           <span className="text-base font-semibold">{dash.name}</span>
           <span className="text-2xs text-muted">
             {conn?.name ?? ""} · {new Date().toLocaleString()}
+            {vars.map((v) => ` · ${v.name} = ${dash.filters?.[v.name] || "—"}`).join("")}
           </span>
         </div>
         {dash.tiles.length === 0 ? (
@@ -308,8 +357,12 @@ export function DashboardView({
         />
       )}
 
+      {snapOpen && <SnapshotDialog dash={dash} onClose={() => setSnapOpen(false)} onSave={(snapshot) => (persist({ ...dash, snapshot }), setSnapOpen(false))} />}
+
       {editing && (
         <TileEditor
+          filters={dash.filters ?? {}}
+          dialect={dialect}
           connId={dash.connectionId}
           initial={editing === "new" ? null : editing}
           snippets={snippets}
@@ -389,7 +442,11 @@ function TileEditor({
   snippets,
   onClose,
   onSave,
+  filters,
+  dialect,
 }: {
+  filters: Record<string, string>;
+  dialect: import("../lib/api").Dialect;
   connId: string;
   initial: DashTile | null;
   snippets: Snippet[];
@@ -406,7 +463,7 @@ function TileEditor({
     setBusy(true);
     setError(null);
     try {
-      const out = await api.dashboards.query(connId, sql);
+      const out = await api.dashboards.query(connId, substitute(sql, filters, dialect));
       const r = [...out.results].reverse().find((x) => x.columns.length > 0) ?? out.results[0];
       setPreview(r);
       if (!t.chart && r) {
@@ -512,6 +569,131 @@ function TileEditor({
             <TileBody tile={t} state={{ result: preview, loading: false }} onToast={() => {}} />
           )}
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+const DATEISH = /(date|day|from|to|since|until|start|end|_at|_on)$/i;
+
+function iso(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** One dashboard filter: date inputs get quick presets. */
+function FilterInput({ v, value, onChange }: { v: VarRef; value: string; onChange: (v: string) => void }) {
+  const date = DATEISH.test(v.name);
+  const now = new Date();
+  const presets: [string, string][] = date
+    ? /(to|until|end)$/i.test(v.name)
+      ? [["Today", iso(now)]]
+      : [
+          ["7d", iso(new Date(now.getTime() - 7 * 864e5))],
+          ["30d", iso(new Date(now.getTime() - 30 * 864e5))],
+          ["Month", iso(new Date(now.getFullYear(), now.getMonth(), 1))],
+          ["Year", iso(new Date(now.getFullYear(), 0, 1))],
+        ]
+    : [];
+  return (
+    <label className="flex items-center gap-1.5 text-2xs">
+      <span className="font-mono text-muted">{v.raw ? `{{${v.name}}}` : `:${v.name}`}</span>
+      <input
+        type={date ? "date" : "text"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        placeholder={v.raw ? "raw SQL" : "value"}
+        className={cx("h-6 rounded-md border border-line bg-elevated px-1.5 text-[11.5px] text-fg outline-none focus:border-accent", date ? "w-32" : "w-28")}
+      />
+      {presets.map(([l, val]) => (
+        <button key={l} type="button" onClick={() => onChange(val)} className={cx("rounded px-1 text-[10.5px]", value === val ? "bg-accent-soft text-accent" : "text-subtle hover:text-fg")}>
+          {l}
+        </button>
+      ))}
+    </label>
+  );
+}
+
+/** Save a PNG of the dashboard to a folder on a schedule. */
+function SnapshotDialog({ dash, onClose, onSave }: { dash: Dashboard; onClose: () => void; onSave: (s: import("../lib/api").DashSnapshot | null) => void }) {
+  const cur = dash.snapshot;
+  const [enabled, setEnabled] = useState(cur?.enabled ?? true);
+  const [kind, setKind] = useState<"daily" | "weekly" | "minutes">((cur?.every.kind as "daily" | "weekly" | "minutes") ?? "daily");
+  const [at, setAt] = useState(cur && "at" in cur.every ? cur.every.at : "08:00");
+  const [weekday, setWeekday] = useState(cur && "weekday" in cur.every ? cur.every.weekday : 0);
+  const [n, setN] = useState(cur && "n" in cur.every ? cur.every.n : 60);
+  const [dir, setDir] = useState(cur?.dir ?? "");
+  const [notify, setNotify] = useState(cur?.notify ?? true);
+  const every = kind === "daily" ? { kind, at } : kind === "weekly" ? { kind, weekday, at } : { kind, n: Math.max(5, n) };
+  const field = "h-7 rounded-md border border-line bg-elevated px-2 text-xs text-fg outline-none focus:border-accent";
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      width={480}
+      title="Scheduled snapshots"
+      footer={
+        <>
+          {cur && (
+            <Button variant="danger" size="sm" onClick={() => onSave(null)}>
+              Remove
+            </Button>
+          )}
+          <span className="flex-1" />
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!dir.trim()} onClick={() => onSave({ enabled, every: every as import("../lib/api").DashSnapshot["every"], dir: dir.trim(), notify, lastRun: cur?.lastRun ?? null, lastError: null })}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 text-xs">
+        <p className="text-muted">Rowhouse refreshes “{dash.name}” and saves a PNG into the folder — handy for a daily report in a shared Dropbox or Google Drive folder. Runs while the app is open (a missed run happens on next launch).</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented<string>
+            value={kind}
+            onChange={(k) => setKind(k as "daily" | "weekly" | "minutes")}
+            options={[
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+              { value: "minutes", label: "Every…" },
+            ]}
+          />
+          {kind === "weekly" && (
+            <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} className={field}>
+              {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          )}
+          {kind !== "minutes" ? (
+            <input type="time" value={at} onChange={(e) => setAt(e.target.value)} className={field} />
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <input type="number" min={5} value={n} onChange={(e) => setN(Number(e.target.value))} className={cx(field, "w-20")} /> minutes
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Folder for the PNGs" className="font-mono" />
+          <Button onClick={() => dialogs.folder().then((f) => f && setDir(f))}>Browse…</Button>
+        </div>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="accent-[var(--accent)]" /> Notify me when a snapshot is saved
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="accent-[var(--accent)]" /> Enabled
+        </label>
+        {cur?.lastRun && (
+          <p className={cx("text-2xs", cur.lastError ? "text-danger" : "text-subtle")}>
+            Last run {new Date(cur.lastRun * 1000).toLocaleString()}
+            {cur.lastError ? ` — ${cur.lastError}` : ""}
+          </p>
+        )}
       </div>
     </Modal>
   );

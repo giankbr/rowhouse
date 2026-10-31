@@ -429,6 +429,53 @@ fn dashboard_delete(dashboard_id: String) -> CmdResult<()> {
     DashboardStore::default().delete(&dashboard_id)
 }
 
+/// Snapshots the frontend is rendering right now (id -> started at), so the
+/// scheduler doesn't fire the same one twice. Entries expire after 5 minutes.
+static SNAPSHOTS_IN_FLIGHT: std::sync::Mutex<Option<HashMap<String, i64>>> =
+    std::sync::Mutex::new(None);
+
+fn claim_snapshot(id: &str, now: i64) -> bool {
+    let mut g = SNAPSHOTS_IN_FLIGHT.lock().unwrap();
+    let m = g.get_or_insert_with(HashMap::new);
+    if m.get(id).is_some_and(|t| now - t < 300) {
+        return false;
+    }
+    m.insert(id.to_string(), now);
+    true
+}
+
+/// The frontend finished (or failed) rendering a scheduled snapshot.
+#[tauri::command]
+fn dashboard_snapshot_done(
+    app: tauri::AppHandle,
+    dashboard_id: String,
+    path: Option<String>,
+    error: Option<String>,
+) -> CmdResult<()> {
+    if let Some(m) = SNAPSHOTS_IN_FLIGHT.lock().unwrap().as_mut() {
+        m.remove(&dashboard_id);
+    }
+    let store = DashboardStore::default();
+    store.mark_snapshot(&dashboard_id, schedules::now(), error.clone())?;
+    let d = store.list()?.into_iter().find(|d| d.id == dashboard_id);
+    if let Some(d) = d.filter(|d| d.snapshot.as_ref().is_some_and(|s| s.notify) || error.is_some())
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let body = match (&error, &path) {
+            (Some(e), _) => format!("Snapshot failed: {}", e.lines().next().unwrap_or(e)),
+            (None, Some(p)) => format!("Snapshot saved to {p}"),
+            (None, None) => "Snapshot saved".to_string(),
+        };
+        let _ = app
+            .notification()
+            .builder()
+            .title(format!("Rowhouse · {}", d.name))
+            .body(body)
+            .show();
+    }
+    Ok(())
+}
+
 /// Tiles always run read-only.
 #[tauri::command]
 async fn dashboard_query(
@@ -1247,6 +1294,10 @@ fn write_text_file(path: String, contents: String) -> CmdResult<()> {
 fn write_base64_file(path: String, data: String) -> CmdResult<()> {
     let bytes = rowhouse_core::backend::libsql::base64_decode(&data)
         .ok_or_else(|| Error::Other("invalid file data".into()))?;
+    let path = std::path::PathBuf::from(rowhouse_core::tunnel::expand_home(&path));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(path, bytes)?;
     Ok(())
 }
@@ -1391,6 +1442,25 @@ pub fn run() {
                     }
                 }
             });
+            // Dashboard snapshots: the frontend renders them, we only say when.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    if !rowhouse_core::license::status().pro {
+                        continue;
+                    }
+                    let Ok(all) = DashboardStore::default().list() else {
+                        continue;
+                    };
+                    let now = schedules::now();
+                    for d in Dashboard::due(&all, now) {
+                        if claim_snapshot(&d.id, now) {
+                            let _ = handle.emit("dashboard-snapshot-due", d);
+                        }
+                    }
+                }
+            });
             // Folder sync: every 60 s while the app is open.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1450,6 +1520,7 @@ pub fn run() {
             dashboard_save,
             dashboard_delete,
             dashboard_query,
+            dashboard_snapshot_done,
             ai_detect_local,
             mcp_clients,
             mcp_install,

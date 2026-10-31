@@ -302,6 +302,17 @@ export interface Dashboard {
   tiles: DashTile[];
   refreshSecs: number;
   updatedAt: number;
+  /** values of the filters the tiles use (:from, {{region}}, …) */
+  filters?: Record<string, string>;
+  snapshot?: DashSnapshot | null;
+}
+export interface DashSnapshot {
+  enabled: boolean;
+  every: Schedule["every"];
+  dir: string;
+  notify: boolean;
+  lastRun?: number | null;
+  lastError?: string | null;
 }
 export interface Relations {
   outgoing: ForeignKey[];
@@ -685,6 +696,19 @@ export const api = {
     save: (dashboard: Dashboard) => call<Dashboard>("dashboard_save", { dashboard }),
     remove: (dashboardId: string) => call<void>("dashboard_delete", { dashboardId }),
     query: (id: string, sql: string) => call<QueryOutput>("dashboard_query", { id, sql }),
+    snapshotDone: (dashboardId: string, path: string | null, error: string | null) => call<void>("dashboard_snapshot_done", { dashboardId, path, error }),
+    async onSnapshotDue(fn: (d: Dashboard) => void): Promise<() => void> {
+      if (!isTauri) {
+        // dev mock: `window.__rhSnapshot(id)` fires one by hand
+        (window as unknown as { __rhSnapshot?: (id: string) => void }).__rhSnapshot = (id) => {
+          const d = mockDashboards.find((x) => x.id === id);
+          if (d) fn(structuredClone(d));
+        };
+        return () => {};
+      }
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<Dashboard>("dashboard-snapshot-due", (e) => fn(e.payload));
+    },
   },
   listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
   roleGrants: (id: string, role: string) => call<RoleGrant[]>("role_grants", { id, role }),
@@ -827,11 +851,12 @@ const mockDashboards: Dashboard[] = [
     name: "Sales overview",
     connectionId: "local-pg",
     refreshSecs: 300,
+    filters: { from: "2026-10-01" },
     updatedAt: Math.floor(Date.now() / 1000) - 3600,
     tiles: [
       { id: "t1", title: "Orders today", sql: "SELECT count(*) AS orders_today FROM orders WHERE created_at::date = current_date", snippetId: null, view: "number", chart: null, w: 3, h: 1 },
-      { id: "t2", title: "Revenue · last 14 days", sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue FROM orders GROUP BY 1 ORDER BY 1", snippetId: null, view: "chart", chart: { type: "area", x: "day", y: ["revenue"] }, w: 9, h: 2 },
-      { id: "t3", title: "Orders by status", sql: "SELECT status, count(*) AS orders FROM orders GROUP BY status ORDER BY 2 DESC", snippetId: null, view: "chart", chart: { type: "bar", x: "status", y: ["orders"] }, w: 3, h: 1 },
+      { id: "t2", title: "Revenue · last 14 days", sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue FROM orders WHERE created_at >= :from GROUP BY 1 ORDER BY 1", snippetId: null, view: "chart", chart: { type: "area", x: "day", y: ["revenue"] }, w: 9, h: 2 },
+      { id: "t3", title: "Orders by status", sql: "SELECT status, count(*) AS orders FROM orders WHERE created_at >= :from AND region = :region GROUP BY status ORDER BY 2 DESC", snippetId: null, view: "chart", chart: { type: "bar", x: "status", y: ["orders"] }, w: 3, h: 1 },
       { id: "t4", title: "Daily orders", sql: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue, count(*) AS orders FROM orders GROUP BY 1 ORDER BY 1", snippetId: null, view: "table", chart: null, w: 12, h: 2 },
     ],
   },
@@ -1162,6 +1187,12 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
     case "dashboard_delete":
       mockDashboards.splice(mockDashboards.findIndex((x) => x.id === a.dashboardId), 1);
       return null;
+    case "dashboard_snapshot_done": {
+      const d = mockDashboards.find((x) => x.id === a.dashboardId);
+      if (d?.snapshot) Object.assign(d.snapshot, { lastRun: nowS(), lastError: a.error ?? null });
+      console.info("[rowhouse] snapshot done", a);
+      return null;
+    }
     case "dashboard_query": {
       const sql = String(a.sql).toLowerCase();
       await sleep(150 + Math.random() * 250);
@@ -1610,6 +1641,9 @@ ALTER TABLE "public"."orders" ALTER COLUMN "status" SET DEFAULT 'pending'::text;
       mockSync = { ...mockSync, state: { ...mockSync.state, folder: null }, hasPassphrase: false };
       return null;
     case "write_base64_file":
+      console.info("[rowhouse] write", a.path, String(a.data).length);
+      (window as unknown as { __rhLastWrite?: unknown }).__rhLastWrite = a.data;
+      return null;
     case "write_text_file":
       return null;
     case "check_destructive": {
