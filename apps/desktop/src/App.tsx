@@ -108,6 +108,14 @@ export default function App() {
       .catch(() => {});
   }, []);
   useEffect(refreshDashList, [refreshDashList]);
+  useEffect(() => {
+    const on = () => {
+      refreshDashList();
+      setTabs((ts) => ts.map((t) => (t.kind === "dashboard" ? { ...t, extEvent: { nonce: uid(), event: "reload", data: null } } : t)));
+    };
+    window.addEventListener("rh-dashboards-changed", on);
+    return () => window.removeEventListener("rh-dashboards-changed", on);
+  }, [refreshDashList]);
   const [exts, setExts] = useState<ExtensionInfo[]>([]);
   useEffect(() => {
     api.ext
@@ -160,7 +168,8 @@ export default function App() {
     api.sync
       .onPulled((r) => {
         api.listConnections().then(setConnections).catch(() => {});
-        const n = r.pulledConnections + r.pulledSnippets;
+        if (r.pulledDashboards) window.dispatchEvent(new Event("rh-dashboards-changed"));
+        const n = r.pulledConnections + r.pulledSnippets + (r.pulledDashboards ?? 0);
         setToast(`Synced ${n} change${n === 1 ? "" : "s"}${r.remoteDevice ? ` from ${r.remoteDevice}` : ""}`, "ok");
       })
       .then((f) => (off = f));

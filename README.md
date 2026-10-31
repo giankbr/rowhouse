@@ -27,7 +27,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 - Paste a connection URL (`postgresql://…`, `mysql://…`, `mongodb+srv://…`); Neon and Supabase are recognised and use TLS by default.
 - Import connections from **DBeaver, TablePlus and Navicat** (auto-detected; passwords re-entered once).
 - Auto-reconnect after the machine wakes from sleep.
-- **Folder sync** (Pro) — connections and saved queries follow you across machines through a folder you already sync (iCloud Drive, Dropbox, OneDrive, Syncthing). One file, encrypted with your passphrase (PBKDF2 + AES-256-GCM); no Rowhouse server.
+- **Folder sync** (Pro) — connections, saved queries and dashboards follow you across machines through a folder you already sync (iCloud Drive, Dropbox, OneDrive, Syncthing). One file, encrypted with your passphrase (PBKDF2 + AES-256-GCM); no Rowhouse server.
 
 ### Browse & edit
 

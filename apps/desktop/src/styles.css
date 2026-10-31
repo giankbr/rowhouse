@@ -261,3 +261,15 @@ textarea,
   background-image: radial-gradient(color-mix(in srgb, var(--border-strong) 70%, transparent) 1px, transparent 1px);
   background-size: 16px 16px;
 }
+
+/* Printing a dashboard (Export → Print / save as PDF): only the dashboard, full height.
+   Everything off the path from #root to .rh-print is removed; the path itself flows normally. */
+@media print {
+  @page { margin: 10mm; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: var(--bg); }
+  *:has(.rh-print) { display: block !important; height: auto !important; width: auto !important; overflow: visible !important; position: static !important; }
+  *:has(.rh-print) > *:not(:has(.rh-print)):not(.rh-print) { display: none !important; }
+  .rh-print { height: auto !important; overflow: visible !important; }
+  .rh-print * { overflow: visible; }
+  .rh-print svg[role="img"] { width: 100% !important; height: 100% !important; }
+}

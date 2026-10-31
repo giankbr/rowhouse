@@ -365,8 +365,9 @@ function SyncSection() {
   }, []);
   if (!st) return null;
   const on = !!st.state.folder && st.hasPassphrase;
-  const report = (r: { pulledConnections: number; pulledSnippets: number; pushed: boolean }) => {
+  const report = (r: { pulledConnections: number; pulledSnippets: number; pulledDashboards?: number; pushed: boolean }) => {
     const parts = [];
+    if (r.pulledDashboards) parts.push(`${r.pulledDashboards} dashboard${r.pulledDashboards === 1 ? "" : "s"}`);
     if (r.pulledConnections) parts.push(`${r.pulledConnections} connection${r.pulledConnections === 1 ? "" : "s"}`);
     if (r.pulledSnippets) parts.push(`${r.pulledSnippets} saved quer${r.pulledSnippets === 1 ? "y" : "ies"}`);
     return parts.length ? `Got ${parts.join(" and ")}${r.pushed ? ", sent this device's changes" : ""}` : r.pushed ? "Sent this device's changes" : "Already up to date";
@@ -422,7 +423,7 @@ function SyncSection() {
           }}
         >
           <p className="text-xs text-muted">
-            Keep connections and saved queries in step across your machines through a folder you already sync — iCloud Drive, Dropbox, OneDrive, Syncthing. It's one
+            Keep connections, saved queries and dashboards in step across your machines through a folder you already sync — iCloud Drive, Dropbox, OneDrive, Syncthing. It's one
             file, encrypted with your passphrase; there's no Rowhouse server.
           </p>
           <div className="flex gap-2">
