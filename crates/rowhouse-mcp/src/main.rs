@@ -99,6 +99,16 @@ struct ObjectArg {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DashArg {
+    /// Dashboard name or id, as returned by `list_dashboards`.
+    dashboard: String,
+    /// Filter values for this run, overriding the saved ones, e.g. {"from": "2026-10-01"}.
+    filters: Option<std::collections::BTreeMap<String, String>>,
+    /// Max rows per tile (default 50).
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SavedArg {
     /// Connection name or id. For `list_saved_queries` it filters; global queries are always included.
     connection: Option<String>,
@@ -501,6 +511,106 @@ impl Rowhouse {
             .await
             .map_err(|e| e.to_string())?;
         Ok(pretty(list.into_iter().map(|s| json!({ "name": s.name, "sql": s.sql, "global": s.connection_id.is_none() })).collect::<Vec<_>>()))
+    }
+
+    #[tool(
+        description = "The user's Rowhouse dashboards (on MCP-enabled connections): tiles with their titles and views, the filters they take, and any snapshot schedule."
+    )]
+    async fn list_dashboards(&self) -> Result<String, String> {
+        let list = rowhouse_core::dashboards::DashboardStore::default()
+            .list()
+            .map_err(|e| e.to_string())?;
+        let out: Vec<_> = list
+            .into_iter()
+            .filter_map(|d| {
+                let cfg = self.profile(&d.connection_id).ok()?;
+                let colon = !matches!(
+                    cfg.kind.driver(),
+                    rowhouse_core::config::Driver::Redis | rowhouse_core::config::Driver::Mongo
+                );
+                let mut vars: Vec<String> = Vec::new();
+                for t in &d.tiles {
+                    for v in rowhouse_core::vars::find(&t.sql, colon) {
+                        if !vars.contains(&v) {
+                            vars.push(v);
+                        }
+                    }
+                }
+                Some(json!({
+                    "id": d.id,
+                    "name": d.name,
+                    "connection": cfg.name,
+                    "tiles": d.tiles.iter().map(|t| json!({ "title": t.title, "view": t.view, "followsSavedQuery": t.snippet_id.is_some() })).collect::<Vec<_>>(),
+                    "filters": vars.iter().map(|v| json!({ "name": v, "value": d.filters.get(v) })).collect::<Vec<_>>(),
+                    "snapshot": d.snapshot.as_ref().filter(|s| s.enabled).map(|s| rowhouse_core::schedules::describe(&s.every)),
+                }))
+            })
+            .collect();
+        Ok(pretty(out))
+    }
+
+    #[tool(
+        description = "Run every tile of a dashboard (read-only) and return each tile's rows. Pass `filters` to try other values (e.g. a date range) without changing the saved dashboard."
+    )]
+    async fn run_dashboard(&self, Parameters(a): Parameters<DashArg>) -> Result<String, String> {
+        let list = rowhouse_core::dashboards::DashboardStore::default()
+            .list()
+            .map_err(|e| e.to_string())?;
+        let d = list
+            .into_iter()
+            .find(|d| d.id == a.dashboard || d.name.eq_ignore_ascii_case(&a.dashboard))
+            .ok_or_else(|| format!("no dashboard named `{}`", a.dashboard))?;
+        let c = self.conn(&d.connection_id).await?;
+        let snippets = match &self.history {
+            Some(h) => h
+                .list_snippets(Some(&c.config.id), None)
+                .await
+                .unwrap_or_default(),
+            None => vec![],
+        };
+        let mut filters = d.filters.clone();
+        filters.extend(a.filters.unwrap_or_default());
+        let colon = !matches!(
+            c.driver(),
+            rowhouse_core::config::Driver::Redis | rowhouse_core::config::Driver::Mongo
+        );
+        let limit = a.limit.unwrap_or(50).clamp(1, MAX_LIMIT);
+        let mut tiles = Vec::new();
+        for t in &d.tiles {
+            let raw = t
+                .snippet_id
+                .and_then(|id| snippets.iter().find(|s| s.id == id))
+                .map(|s| s.sql.clone())
+                .unwrap_or_else(|| t.sql.clone());
+            let sql = rowhouse_core::vars::substitute(&raw, &filters, colon, |v| c.literal(v));
+            let started = std::time::Instant::now();
+            let res = c.query_read_only(&sql, limit).await;
+            let err = res.as_ref().err().map(|e| e.to_string());
+            let result = res.ok().and_then(|o| {
+                let mut r = o.results;
+                let i = r.iter().rposition(|x| !x.columns.is_empty()).unwrap_or(0);
+                (!r.is_empty()).then(|| r.swap_remove(i))
+            });
+            self.log(
+                &c,
+                &sql,
+                err.as_deref(),
+                result.as_ref().map(|r| r.rows.len() as i64).unwrap_or(0),
+                started.elapsed().as_millis() as i64,
+            )
+            .await;
+            tiles.push(json!({
+                "title": t.title,
+                "view": t.view,
+                "error": err,
+                "columns": result.as_ref().map(|r| r.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>()),
+                "rows": result.as_ref().map(|r| &r.rows),
+                "truncated": result.as_ref().map(|r| r.truncated),
+            }));
+        }
+        Ok(pretty(
+            json!({ "dashboard": d.name, "connection": c.config.name, "filters": filters, "tiles": tiles }),
+        ))
     }
 
     #[tool(description = "Run one of the user's saved queries by name (read-only).")]
