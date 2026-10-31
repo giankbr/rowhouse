@@ -208,17 +208,94 @@ impl Client {
         })
     }
 
-    pub async fn run(&self, sql: &str, limit: usize) -> Result<Vec<QueryResult>> {
+    /// SQL, or Kibana Dev Tools requests (`GET /orders/_search` + a JSON body).
+    pub async fn run(&self, src: &str, limit: usize, read_only: bool) -> Result<Vec<QueryResult>> {
+        if let Some(reqs) = parse_requests(src) {
+            let mut out = Vec::new();
+            for r in reqs? {
+                if read_only && !r.is_read() {
+                    return Err(Error::ReadOnly(format!(
+                        "`{} {}` changes data — not allowed in read-only mode",
+                        r.method, r.path
+                    )));
+                }
+                out.extend(self.rest(&r, limit).await?);
+            }
+            return Ok(out);
+        }
         let mut out = Vec::new();
-        for stmt in guard::split_statements(sql) {
+        for stmt in guard::split_statements(src) {
             if let Err(e) = guard::check_read_only(&stmt) {
                 return Err(err(format!(
-                    "SQL here is read-only (SELECT, SHOW, DESCRIBE) — {e}"
+                    "SQL here is read-only (SELECT, SHOW, DESCRIBE); use Dev Tools requests \
+                     like `POST /index/_doc` to change data — {e}"
                 )));
             }
             out.push(self.statement(&stmt, limit).await?);
         }
         Ok(out)
+    }
+
+    async fn rest(&self, r: &RestRequest, limit: usize) -> Result<Vec<QueryResult>> {
+        let mut path = if r.path.starts_with('/') {
+            r.path.clone()
+        } else {
+            format!("/{}", r.path)
+        };
+        // _cat APIs: ask for JSON so they become tables
+        if path.starts_with("/_cat") && !path.contains("format=") {
+            path.push_str(if path.contains('?') {
+                "&format=json"
+            } else {
+                "?format=json"
+            });
+        }
+        let method = reqwest::Method::from_bytes(r.method.as_bytes()).map_err(err)?;
+        let mut req = self.http.request(method, format!("{}{path}", self.base));
+        req = match &self.auth {
+            Auth::None => req,
+            Auth::Basic(u, p) => req.basic_auth(u, Some(p)),
+            Auth::ApiKey(k) => req.header("Authorization", format!("ApiKey {k}")),
+        };
+        if let Some(body) = &r.body {
+            let ndjson = path.contains("_bulk") || path.contains("_msearch");
+            req = req
+                .header(
+                    "Content-Type",
+                    if ndjson {
+                        "application/x-ndjson"
+                    } else {
+                        "application/json"
+                    },
+                )
+                .body(if ndjson && !body.ends_with('\n') {
+                    format!("{body}\n")
+                } else {
+                    body.clone()
+                });
+        }
+        let res = req.send().await.map_err(err)?;
+        let status = res.status();
+        let text = res.text().await.map_err(err)?;
+        let v: Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => {
+                if !status.is_success() {
+                    return Err(err(format!("{status}: {}", text.trim())));
+                }
+                return Ok(vec![text_result(&text, limit)]);
+            }
+        };
+        if !status.is_success() {
+            let reason = v["error"]["root_cause"][0]["reason"]
+                .as_str()
+                .or_else(|| v["error"]["reason"].as_str())
+                .or_else(|| v["error"].as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| text.trim().to_string());
+            return Err(err(format!("{status}: {reason}")));
+        }
+        Ok(shape(&v, limit))
     }
 
     pub async fn tables(&self) -> Result<Vec<TableInfo>> {
@@ -327,4 +404,324 @@ fn urlencode(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+/// One Dev Tools request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RestRequest {
+    pub method: String,
+    pub path: String,
+    pub body: Option<String>,
+}
+
+const READ_POST: [&str; 11] = [
+    "_search",
+    "_count",
+    "_msearch",
+    "_mget",
+    "_sql",
+    "_field_caps",
+    "_validate",
+    "_explain",
+    "_termsenum",
+    "_terms_enum",
+    "_eql",
+];
+
+impl RestRequest {
+    /// Reads: GET/HEAD, and POSTs to search-style endpoints.
+    pub fn is_read(&self) -> bool {
+        match self.method.as_str() {
+            "GET" | "HEAD" => true,
+            "POST" => {
+                let p = self.path.split('?').next().unwrap_or("");
+                // `_sql` is fine; `_sql/close` too; `_search/template` too
+                p.split('/').any(|seg| READ_POST.contains(&seg))
+                    && !p.contains("_delete_by_query")
+                    && !p.contains("_update_by_query")
+            }
+            _ => false,
+        }
+    }
+
+    /// `DELETE /index` (a whole index or pattern), the one that needs a typed confirmation.
+    pub fn drops_index(&self) -> Option<String> {
+        if self.method != "DELETE" {
+            return None;
+        }
+        let p = self.path.split('?').next().unwrap_or("").trim_matches('/');
+        (!p.is_empty() && !p.contains('/') && !p.starts_with('_')).then(|| p.to_string())
+    }
+}
+
+const METHODS: [&str; 5] = ["GET", "POST", "PUT", "DELETE", "HEAD"];
+
+fn method_line(line: &str) -> Option<(String, String)> {
+    let (m, rest) = line.trim().split_once(char::is_whitespace)?;
+    let m = m.to_uppercase();
+    let path = rest.trim();
+    // a path is one token (`DELETE FROM orders` is SQL, not a request)
+    (METHODS.contains(&m.as_str()) && !path.is_empty() && !path.contains(char::is_whitespace))
+        .then(|| (m, path.to_string()))
+}
+
+/// `None` when `src` is SQL. Otherwise each `METHOD path` line starts a request
+/// and the lines below it (up to the next one) are its body. `#` and `//` lines are comments.
+pub fn parse_requests(src: &str) -> Option<Result<Vec<RestRequest>>> {
+    let lines: Vec<&str> = src
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !t.starts_with('#') && !t.starts_with("//")
+        })
+        .collect();
+    let first = lines.iter().find(|l| !l.trim().is_empty())?;
+    method_line(first)?;
+    let mut out: Vec<RestRequest> = Vec::new();
+    let mut body: Vec<&str> = Vec::new();
+    let flush = |out: &mut Vec<RestRequest>, body: &mut Vec<&str>| -> Result<()> {
+        if let Some(last) = out.last_mut() {
+            let b = body.join("\n").trim().to_string();
+            if !b.is_empty() {
+                let ndjson = last.path.contains("_bulk") || last.path.contains("_msearch");
+                if !ndjson {
+                    serde_json::from_str::<Value>(&b).map_err(|e| {
+                        err(format!(
+                            "the body of `{} {}` isn't valid JSON: {e}",
+                            last.method, last.path
+                        ))
+                    })?;
+                }
+                last.body = Some(b);
+            }
+        }
+        body.clear();
+        Ok(())
+    };
+    for l in lines {
+        // a method line at the start of a line begins the next request
+        if !l.starts_with(char::is_whitespace) {
+            if let Some((method, path)) = method_line(l) {
+                if let Err(e) = flush(&mut out, &mut body) {
+                    return Some(Err(e));
+                }
+                out.push(RestRequest {
+                    method,
+                    path,
+                    body: None,
+                });
+                continue;
+            }
+        }
+        body.push(l);
+    }
+    if let Err(e) = flush(&mut out, &mut body) {
+        return Some(Err(e));
+    }
+    Some(Ok(out))
+}
+
+fn text_result(text: &str, limit: usize) -> QueryResult {
+    let lines: Vec<Vec<Value>> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| vec![Value::String(l.to_string())])
+        .collect();
+    QueryResult {
+        columns: vec![ResultColumn {
+            name: "response".into(),
+            data_type: "text".into(),
+        }],
+        truncated: lines.len() > limit,
+        rows: lines.into_iter().take(limit).collect(),
+        rows_affected: 0,
+    }
+}
+
+/// Flatten nested objects into `a.b` keys; arrays stay JSON.
+fn flat(prefix: &str, v: &Value, out: &mut Vec<(String, Value)>) {
+    match v.as_object() {
+        Some(o) if !o.is_empty() => {
+            for (k, x) in o {
+                let key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                flat(&key, x, out);
+            }
+        }
+        _ => out.push((prefix.to_string(), v.clone())),
+    }
+}
+
+/// Rows of objects → one table, columns in order of first appearance.
+fn objects_table(items: &[Vec<(String, Value)>], limit: usize, total: Option<u64>) -> QueryResult {
+    let mut cols: Vec<String> = Vec::new();
+    for it in items {
+        for (k, _) in it {
+            if !cols.contains(k) {
+                cols.push(k.clone());
+            }
+        }
+    }
+    let rows: Vec<Vec<Value>> = items
+        .iter()
+        .take(limit)
+        .map(|it| {
+            cols.iter()
+                .map(|c| {
+                    it.iter()
+                        .find(|(k, _)| k == c)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(Value::Null)
+                })
+                .collect()
+        })
+        .collect();
+    QueryResult {
+        columns: cols
+            .into_iter()
+            .map(|name| ResultColumn {
+                name,
+                data_type: String::new(),
+            })
+            .collect(),
+        truncated: items.len() > limit || total.is_some_and(|t| t > items.len().min(limit) as u64),
+        rows,
+        rows_affected: 0,
+    }
+}
+
+fn agg_table(name: &str, a: &Value, limit: usize) -> Option<QueryResult> {
+    let buckets: Vec<Value> = match &a["buckets"] {
+        Value::Array(b) => b.clone(),
+        // keyed buckets: { "key": { doc_count, ... } }
+        Value::Object(o) => o
+            .iter()
+            .map(|(k, v)| {
+                let mut v = v.clone();
+                v["key"] = json!(k);
+                v
+            })
+            .collect(),
+        _ => {
+            // a metric: { value } or { values: {...} } or stats
+            let mut kv = Vec::new();
+            flat("", a, &mut kv);
+            kv.retain(|(k, _)| k != "meta");
+            return Some(objects_table(
+                &[kv.into_iter()
+                    .map(|(k, v)| (format!("{name}.{k}"), v))
+                    .collect()],
+                limit,
+                None,
+            ));
+        }
+    };
+    let items: Vec<Vec<(String, Value)>> = buckets
+        .iter()
+        .map(|b| {
+            let mut row = vec![(
+                name.to_string(),
+                b.get("key_as_string")
+                    .cloned()
+                    .unwrap_or_else(|| b["key"].clone()),
+            )];
+            row.push(("doc_count".into(), b["doc_count"].clone()));
+            if let Some(o) = b.as_object() {
+                for (k, v) in o {
+                    if matches!(k.as_str(), "key" | "key_as_string" | "doc_count") {
+                        continue;
+                    }
+                    // sub-metrics become columns; sub-bucket aggs stay JSON
+                    match v.get("value") {
+                        Some(x) => row.push((k.clone(), x.clone())),
+                        None => row.push((k.clone(), v.clone())),
+                    }
+                }
+            }
+            row
+        })
+        .collect();
+    Some(objects_table(&items, limit, None))
+}
+
+/// A REST response → result sets.
+pub fn shape(v: &Value, limit: usize) -> Vec<QueryResult> {
+    if let Some(hits) = v["hits"]["hits"].as_array() {
+        let mut out = Vec::new();
+        let total = v["hits"]["total"]["value"]
+            .as_u64()
+            .or_else(|| v["hits"]["total"].as_u64());
+        let aggs = v["aggregations"].as_object();
+        if !hits.is_empty() || aggs.is_none() {
+            let items: Vec<Vec<(String, Value)>> = hits
+                .iter()
+                .map(|h| {
+                    let mut row = vec![
+                        ("_index".to_string(), h["_index"].clone()),
+                        ("_id".to_string(), h["_id"].clone()),
+                    ];
+                    if !h["_score"].is_null() {
+                        row.push(("_score".into(), h["_score"].clone()));
+                    }
+                    let src = h.get("_source").or_else(|| h.get("fields"));
+                    if let Some(src) = src {
+                        flat("", src, &mut row);
+                    }
+                    row
+                })
+                .collect();
+            out.push(objects_table(&items, limit, total));
+        }
+        for (name, a) in aggs.into_iter().flatten() {
+            out.extend(agg_table(name, a, limit));
+        }
+        return out;
+    }
+    if let Some(arr) = v.as_array() {
+        if arr.iter().all(Value::is_object) {
+            let items: Vec<Vec<(String, Value)>> = arr
+                .iter()
+                .map(|o| {
+                    let mut row = Vec::new();
+                    flat("", o, &mut row);
+                    row
+                })
+                .collect();
+            return vec![objects_table(&items, limit, None)];
+        }
+    }
+    if let Some(n) = v["count"].as_u64().filter(|_| v.get("_shards").is_some()) {
+        return vec![objects_table(&[vec![("count".into(), json!(n))]], 1, None)];
+    }
+    // anything else: field / value pairs
+    let mut kv = Vec::new();
+    flat("", v, &mut kv);
+    let rows: Vec<Vec<Value>> = kv
+        .into_iter()
+        .map(|(k, x)| vec![Value::String(k), x])
+        .collect();
+    let affected = v["result"]
+        .as_str()
+        .map(|r| u64::from(matches!(r, "created" | "updated" | "deleted")))
+        .or_else(|| v["deleted"].as_u64())
+        .or_else(|| v["updated"].as_u64())
+        .unwrap_or(0);
+    vec![QueryResult {
+        columns: vec![
+            ResultColumn {
+                name: "field".into(),
+                data_type: "text".into(),
+            },
+            ResultColumn {
+                name: "value".into(),
+                data_type: String::new(),
+            },
+        ],
+        truncated: rows.len() > limit,
+        rows: rows.into_iter().take(limit).collect(),
+        rows_affected: affected,
+    }]
 }

@@ -126,6 +126,7 @@ enum Pool {
     Cql(backend::cassandra::Client),
     Es(backend::elastic::Client),
     Bq(backend::bigquery::Client),
+    Sf(backend::snowflake::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -218,6 +219,33 @@ impl Connection {
                         key.as_deref(),
                         token,
                     )
+                    .await?,
+                )
+            }
+            Driver::Snowflake => {
+                let key = match config
+                    .file
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|f| !f.is_empty())
+                {
+                    Some(f) => Some(
+                        std::fs::read_to_string(crate::tunnel::expand_home(f)).map_err(|e| {
+                            Error::Other(format!("couldn't read the private key {f}: {e}"))
+                        })?,
+                    ),
+                    None => None,
+                };
+                Pool::Sf(
+                    backend::snowflake::Client::connect(backend::snowflake::Options {
+                        account: config.host.as_deref().unwrap_or(""),
+                        user: user.unwrap_or(""),
+                        private_key_pem: key.as_deref(),
+                        token: password,
+                        database: db,
+                        warehouse: config.warehouse.as_deref(),
+                        role: config.role.as_deref(),
+                    })
                     .await?,
                 )
             }
@@ -556,8 +584,9 @@ impl Connection {
             Pool::Libsql(c) => c.run(sql, limit, false).await?,
             Pool::D1(c) => c.run(sql, limit, false).await?,
             Pool::Cql(c) => c.run(sql, limit, false).await?,
-            Pool::Es(c) => c.run(sql, limit).await?,
+            Pool::Es(c) => c.run(sql, limit, false).await?,
             Pool::Bq(c) => c.run(sql, limit, false).await?,
+            Pool::Sf(c) => c.run(sql, limit, false).await?,
         })
     }
 
@@ -583,6 +612,14 @@ impl Connection {
         }
         if let Pool::Mongo(c) = &self.pool {
             // mongosh statements: the backend checks them against its read allowlist
+            let results = c.run(sql, limit, true).await?;
+            return Ok(QueryOutput {
+                results,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+        if let Pool::Es(c) = &self.pool {
+            // SQL or Dev Tools requests: the backend checks both
             let results = c.run(sql, limit, true).await?;
             return Ok(QueryOutput {
                 results,
@@ -633,9 +670,11 @@ impl Connection {
             Pool::Ch(c) => c.run(sql, limit, true).await?,
             Pool::Libsql(c) => c.run(sql, limit, true).await?,
             Pool::D1(c) => c.run(sql, limit, true).await?,
-            Pool::Es(c) => c.run(sql, limit).await?,
             Pool::Bq(c) => c.run(sql, limit, true).await?,
-            Pool::Redis(_) | Pool::Mongo(_) | Pool::Cql(_) => unreachable!("handled above"),
+            Pool::Sf(c) => c.run(sql, limit, true).await?,
+            Pool::Redis(_) | Pool::Mongo(_) | Pool::Cql(_) | Pool::Es(_) => {
+                unreachable!("handled above")
+            }
         };
         Ok(QueryOutput {
             results,
@@ -678,6 +717,7 @@ impl Connection {
             Pool::D1(c) => c.exec_tx(stmts).await,
             Pool::Cql(c) => c.exec_tx(stmts).await,
             Pool::Bq(c) => c.exec_tx(stmts).await,
+            Pool::Sf(c) => c.exec_tx(stmts).await,
             Pool::Es(_) => Err(Error::Other(
                 "Elasticsearch SQL is read-only — edit documents with the REST API".into(),
             )),
@@ -760,6 +800,7 @@ impl Connection {
             Driver::Clickhouse => "SELECT name FROM system.databases \
                  WHERE name NOT IN ('system','INFORMATION_SCHEMA','information_schema') ORDER BY 1",
             Driver::Cassandra => "SELECT keyspace_name FROM system_schema.keyspaces",
+            Driver::Snowflake => "SELECT database_name FROM information_schema.databases ORDER BY 1",
             _ => return Ok(vec![]),
         };
         let mut out: Vec<String> = self
@@ -817,6 +858,8 @@ impl Connection {
                  AND (iot_type IS NULL OR iot_type = 'IOT') \
                  UNION ALL SELECT owner, view_name, 'view' FROM all_views \
                  WHERE owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N') ORDER BY 1, 2",
+            Driver::Snowflake => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
+                 WHERE table_schema <> 'INFORMATION_SCHEMA' ORDER BY 1, 2",
             Driver::Clickhouse => "SELECT database, name, engine FROM system.tables \
                  WHERE database = currentDatabase() ORDER BY name",
         };
@@ -913,6 +956,19 @@ impl Connection {
                 self.meta(&sql).await?.rows
             }
             Driver::Duckdb | Driver::Mssql => self.meta(&info_schema("c.data_type")).await?.rows,
+            Driver::Snowflake => {
+                // primary keys aren't enforced in Snowflake; skip the lookup
+                let sql = format!(
+                    "SELECT column_name, \
+                       CASE WHEN data_type = 'NUMBER' THEN 'NUMBER(' || numeric_precision || ',' || numeric_scale || ')' \
+                            WHEN data_type = 'TEXT' AND character_maximum_length < 16777216 THEN 'VARCHAR(' || character_maximum_length || ')' \
+                            ELSE data_type END, \
+                       is_nullable, column_default, 0 \
+                     FROM information_schema.columns WHERE table_schema = {s} AND table_name = {t} \
+                     ORDER BY ordinal_position"
+                );
+                self.meta(&sql).await?.rows
+            }
             Driver::Mysql => {
                 let sql = format!(
                     "SELECT column_name, column_type, is_nullable, column_default, column_key = 'PRI' \
@@ -1028,6 +1084,7 @@ impl Connection {
                 format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
             }
             Driver::Bigquery => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
+            Driver::Snowflake => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''")),
             Driver::Mssql => format!("N'{}'", s.replace('\'', "''")),
             _ => format!("'{}'", s.replace('\'', "''")),
         }

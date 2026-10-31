@@ -271,6 +271,18 @@ impl Connection {
                             out.push(format!("ALTER TABLE {tb} MODIFY ({col}{ty}{dflt}{null});"));
                         }
                         Driver::Redis | Driver::Mongo | Driver::Elastic => out.push("-- no column schema to alter".into()),
+                        Driver::Snowflake => {
+                            if has("type") {
+                                out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} SET DATA TYPE {};", to.data_type));
+                            }
+                            if has("nullable") {
+                                let act = if to.nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
+                                out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} {act};"));
+                            }
+                            if has("default") && to.default.is_none() {
+                                out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} DROP DEFAULT;"));
+                            }
+                        }
                         Driver::Bigquery => {
                             if has("type") {
                                 out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} SET DATA TYPE {};", to.data_type));

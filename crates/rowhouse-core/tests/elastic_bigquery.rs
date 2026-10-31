@@ -595,6 +595,27 @@ async fn live_search(kind: DbKind, base: String, user: Option<String>, pw: Optio
     assert_eq!(page.result.rows.len(), 1);
     assert_eq!(page.total, Some(5));
     assert!(c.query(&format!("DELETE FROM {index}"), 1).await.is_err());
+
+    // Dev Tools: an aggregation, then a write
+    let out = c
+        .query(
+            &format!("GET /{index}/_search\n{{ \"size\": 0, \"aggs\": {{ \"by_customer\": {{ \"terms\": {{ \"field\": \"customer\" }} }} }} }}"),
+            100,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.results[0].rows.len(), 5);
+    let r = &c
+        .query(
+            &format!(
+                "PUT /{index}/_doc/99?refresh=true\n{{ \"customer\": \"zed\", \"total\": 1 }}"
+            ),
+            10,
+        )
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!(r.rows_affected, 1);
 }
 
 #[tokio::test]
@@ -676,4 +697,146 @@ async fn live_bigquery_emulator() {
         .unwrap()
         .results[0];
     assert_eq!((r.rows.len(), r.truncated), (2, true));
+}
+
+// ---------------------------------------------------------------- Dev Tools requests
+
+#[test]
+fn parses_dev_tools_requests() {
+    use rowhouse_core::backend::elastic::parse_requests;
+    assert!(parse_requests("SELECT * FROM orders").is_none());
+    assert!(parse_requests("DELETE FROM orders WHERE id = 1").is_none());
+    let src = "# top customers\nGET /orders/_search\n{\n  \"size\": 0,\n  \"aggs\": { \"c\": { \"terms\": { \"field\": \"customer\" } } }\n}\n\nPOST orders/_doc\n{ \"customer\": \"zed\" }\n\nDELETE /old-logs\nGET _cat/indices";
+    let r = parse_requests(src).unwrap().unwrap();
+    assert_eq!(r.len(), 4);
+    assert_eq!(
+        (r[0].method.as_str(), r[0].path.as_str()),
+        ("GET", "/orders/_search")
+    );
+    assert!(r[0].body.as_deref().unwrap().contains("\"aggs\""));
+    assert!(r[0].is_read() && !r[1].is_read() && !r[2].is_read() && r[3].is_read());
+    assert_eq!(r[2].drops_index().as_deref(), Some("old-logs"));
+    assert_eq!(r[1].drops_index(), None);
+    // POST to a search endpoint is a read; to _delete_by_query it isn't
+    let r = parse_requests(
+        "POST /orders/_search\n{}\nPOST /orders/_delete_by_query\n{\"query\":{\"match_all\":{}}}",
+    )
+    .unwrap()
+    .unwrap();
+    assert!(r[0].is_read() && !r[1].is_read());
+    assert!(parse_requests("GET /x/_search\n{ broken").unwrap().is_err());
+    // the confirm-before-running guard sees index deletes
+    let d = rowhouse_core::guard::destructive("DELETE /old-logs\nDELETE /orders/_doc/1");
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].object, "old-logs");
+}
+
+#[test]
+fn shapes_rest_responses() {
+    use rowhouse_core::backend::elastic::shape;
+    let r = shape(
+        &json!({ "hits": { "total": { "value": 42 }, "hits": [
+            { "_index": "orders", "_id": "1", "_score": 1.0, "_source": { "customer": "alice", "address": { "city": "Bandung" } } },
+            { "_index": "orders", "_id": "2", "_score": 0.5, "_source": { "customer": "bob", "tags": ["vip"] } }
+        ] } }),
+        100,
+    );
+    let cols: Vec<_> = r[0].columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        cols,
+        [
+            "_index",
+            "_id",
+            "_score",
+            "customer",
+            "address.city",
+            "tags"
+        ]
+    );
+    assert_eq!(r[0].rows[1][5], json!(["vip"]));
+    assert!(r[0].truncated, "42 hits in total, 2 returned");
+
+    let r = shape(
+        &json!({ "hits": { "total": { "value": 5 }, "hits": [] }, "aggregations": {
+            "by_customer": { "buckets": [
+                { "key": "alice", "doc_count": 3, "spent": { "value": 70.5 } },
+                { "key": "bob", "doc_count": 2, "spent": { "value": 12.0 } }
+            ] },
+            "avg_total": { "value": 16.5 }
+        } }),
+        100,
+    );
+    assert_eq!(r.len(), 2, "size 0: just the aggregations");
+    assert_eq!(
+        r[0].columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        ["by_customer", "doc_count", "spent"]
+    );
+    assert_eq!(r[0].rows[0], vec![json!("alice"), json!(3), json!(70.5)]);
+    assert_eq!(r[1].rows[0], vec![json!(16.5)]);
+
+    let r = shape(
+        &json!([{ "index": "orders", "docs.count": "5" }, { "index": "logs", "docs.count": "9" }]),
+        100,
+    );
+    assert_eq!(r[0].rows.len(), 2);
+    let r = shape(
+        &json!({ "_index": "orders", "_id": "9", "result": "created" }),
+        100,
+    );
+    assert_eq!(r[0].rows_affected, 1);
+    assert_eq!(r[0].columns[0].name, "field");
+}
+
+#[tokio::test]
+async fn dev_tools_against_fake_server() {
+    let s = es_server(false).await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/orders/_search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "hits": { "total": { "value": 1 }, "hits": [{ "_index": "orders", "_id": "1", "_source": { "customer": "alice" } }] }
+        })))
+        .mount(&s)
+        .await;
+    Mock::given(matchers::method("GET"))
+        .and(matchers::path("/_cat/indices"))
+        .and(matchers::query_param("format", "json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{ "index": "orders", "health": "green" }])),
+        )
+        .mount(&s)
+        .await;
+    Mock::given(matchers::method("PUT"))
+        .and(matchers::path("/orders/_doc/9"))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({ "_id": "9", "result": "created" })),
+        )
+        .expect(1)
+        .mount(&s)
+        .await;
+    let c = Connection::connect_with(&es_config(&s, DbKind::Elasticsearch), Some("secret"))
+        .await
+        .unwrap();
+    let out = c
+        .query("POST /orders/_search\n{ \"query\": { \"match\": { \"customer\": \"alice\" } } }\n\nGET _cat/indices", 100)
+        .await
+        .unwrap();
+    assert_eq!(out.results[0].rows[0][2], json!("alice"));
+    assert_eq!(out.results[1].rows[0][0], json!("orders"));
+    // read-only refuses writes before they're sent; a normal run sends them
+    let e = c
+        .query_read_only("PUT /orders/_doc/9\n{ \"customer\": \"zed\" }", 10)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("read-only"), "{e}");
+    let r = &c
+        .query("PUT /orders/_doc/9\n{ \"customer\": \"zed\" }", 10)
+        .await
+        .unwrap()
+        .results[0];
+    assert_eq!(r.rows_affected, 1);
 }

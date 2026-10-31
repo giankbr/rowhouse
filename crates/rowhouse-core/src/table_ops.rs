@@ -291,6 +291,20 @@ impl Connection {
                 0,
             )
             .map(|s| ensure_semicolon(&s))),
+            Driver::Snowflake => {
+                let name = self.literal(&format!("{}.{}", self.ident(schema), self.ident(table)));
+                let out = match self
+                    .query_admin(&format!("SELECT GET_DDL('TABLE', {name})"))
+                    .await
+                {
+                    Ok(o) => o,
+                    Err(_) => {
+                        self.query_admin(&format!("SELECT GET_DDL('VIEW', {name})"))
+                            .await?
+                    }
+                };
+                Ok(first_cell(out, 0).map(|s| ensure_semicolon(&s)))
+            }
             Driver::Mongo | Driver::Redis | Driver::Elastic => Ok(None),
         }
     }
@@ -537,7 +551,9 @@ impl Connection {
                             "copy the DDL (Show DDL) to duplicate a Cassandra table".into(),
                         ))
                     }
-                    Driver::Bigquery => vec![format!("CREATE TABLE {nt} LIKE {t}")],
+                    Driver::Bigquery | Driver::Snowflake => {
+                        vec![format!("CREATE TABLE {nt} LIKE {t}")]
+                    }
                     Driver::Mongo | Driver::Redis | Driver::Elastic => unreachable!(),
                 };
                 if *with_data {

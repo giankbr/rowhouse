@@ -157,9 +157,10 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Redis | Upstash => "Redis (reply with Redis commands, one per line, instead of SQL)",
         Cassandra => "Apache Cassandra (CQL; filter on partition/clustering keys, no JOINs)",
         Scylla => "ScyllaDB (CQL, Cassandra-compatible; filter on partition/clustering keys, no JOINs)",
-        Elasticsearch => "Elasticsearch SQL (read-only SELECT; indices are tables, quote names with dots or dashes in double quotes, use LIMIT)",
+        Elasticsearch => "Elasticsearch SQL (read-only SELECT; indices are tables, quote names with dots or dashes in double quotes, use LIMIT; Kibana Dev Tools requests like `GET /index/_search` with a JSON body also work)",
         Opensearch => "OpenSearch SQL (read-only SELECT; indices are tables, use LIMIT)",
         Bigquery => "Google BigQuery GoogleSQL (tables as `dataset.table` in backticks, LIMIT, SAFE_CAST, DATE_TRUNC(col, DAY))",
+        Snowflake => "Snowflake SQL (unquoted identifiers are upper-case, LIMIT, QUALIFY, ILIKE, :: casts, FLATTEN for VARIANT)",
         Mongodb => "MongoDB (reply with mongosh statements such as db.orders.find({ status: \"paid\" }).sort({ total: -1 }).limit(10) or db.orders.aggregate([...]) instead of SQL; the schema lists collections and sampled fields)",
     }
 }

@@ -13,6 +13,7 @@ pub mod mongo_shell;
 pub mod mssql;
 pub mod oracle;
 pub mod redis;
+pub mod snowflake;
 
 /// What a statement in `exec_tx` must affect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

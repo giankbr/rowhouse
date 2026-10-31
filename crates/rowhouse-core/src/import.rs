@@ -94,6 +94,8 @@ fn kind_from(name: &str) -> Option<DbKind> {
         DbKind::Elasticsearch
     } else if has("bigquery") {
         DbKind::Bigquery
+    } else if has("snowflake") {
+        DbKind::Snowflake
     } else {
         return None;
     })
@@ -594,7 +596,7 @@ mod tests {
   <Connection ConnectionName="Maria" ConnType="MARIADB" Host="m" Port="3306" UserName="root" SSH="false"/>
   <Connection ConnectionName="Mongo" ConnType="MONGODB" Host="mg" Port="27017"/>
   <Connection ConnectionName="Ora" ConnType="ORACLE" Host="o" Port="1521"/>
-  <Connection ConnectionName="Snow" ConnType="SNOWFLAKE" Host="s" Port="443"/>
+  <Connection ConnectionName="Fire" ConnType="FIREBIRD" Host="s" Port="3050"/>
 </Connections>"#;
         let c = parse_navicat(xml).unwrap();
         assert_eq!(c[0].config.kind, DbKind::Postgres);
@@ -607,11 +609,7 @@ mod tests {
         assert!(c[1].config.ssh.is_none());
         assert_eq!(c[2].config.kind, DbKind::Mongodb);
         assert_eq!(c[3].config.kind, DbKind::Oracle);
-        assert!(c[4]
-            .skipped_reason
-            .as_deref()
-            .unwrap()
-            .contains("SNOWFLAKE"));
+        assert!(c[4].skipped_reason.as_deref().unwrap().contains("FIREBIRD"));
     }
 
     #[test]

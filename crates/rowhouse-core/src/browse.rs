@@ -95,7 +95,7 @@ impl Connection {
     fn like(&self) -> &'static str {
         // case-insensitive "contains" everywhere
         match self.driver() {
-            Driver::Postgres | Driver::Duckdb | Driver::Clickhouse => "ILIKE",
+            Driver::Postgres | Driver::Duckdb | Driver::Clickhouse | Driver::Snowflake => "ILIKE",
             _ => "LIKE",
         }
     }

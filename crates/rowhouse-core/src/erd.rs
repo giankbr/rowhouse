@@ -110,7 +110,8 @@ impl Connection {
             | Driver::Mongo
             | Driver::Cassandra
             | Driver::Elastic
-            | Driver::Bigquery => None, // no foreign keys
+            | Driver::Bigquery
+            | Driver::Snowflake => None, // no foreign keys
         };
         let Some(sql) = sql else { return Ok(vec![]) };
         let rows = self

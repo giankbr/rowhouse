@@ -301,6 +301,18 @@ pub fn destructive(sql: &str) -> Vec<Destructive> {
     if head.starts_with("db.") || head.starts_with("db[") {
         return destructive_mongo(sql);
     }
+    if let Some(Ok(reqs)) = crate::backend::elastic::parse_requests(sql) {
+        return reqs
+            .iter()
+            .filter_map(|r| {
+                r.drops_index().map(|object| Destructive {
+                    kind: "drop".into(),
+                    object,
+                    statement: format!("{} {}", r.method, r.path),
+                })
+            })
+            .collect();
+    }
     let mut out = Vec::new();
     for stmt in split_statements(sql) {
         let t = tokenize(&stmt);

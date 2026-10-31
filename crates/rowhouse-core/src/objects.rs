@@ -101,7 +101,8 @@ impl Connection {
             | Driver::Redis
             | Driver::Cassandra
             | Driver::Elastic
-            | Driver::Bigquery => return Ok(vec![]),
+            | Driver::Bigquery
+            | Driver::Snowflake => return Ok(vec![]),
         };
         Ok(self
             .rows(sql)

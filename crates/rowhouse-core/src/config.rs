@@ -47,6 +47,7 @@ pub enum DbKind {
     Elasticsearch,
     Opensearch,
     Bigquery,
+    Snowflake,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -64,10 +65,11 @@ pub enum Driver {
     Oracle,
     Elastic,
     Bigquery,
+    Snowflake,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 25] = [
+    pub const ALL: [DbKind; 26] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -93,6 +95,7 @@ impl DbKind {
         DbKind::Elasticsearch,
         DbKind::Opensearch,
         DbKind::Bigquery,
+        DbKind::Snowflake,
     ];
 
     pub fn driver(self) -> Driver {
@@ -111,6 +114,7 @@ impl DbKind {
             Oracle => Driver::Oracle,
             Elasticsearch | Opensearch => Driver::Elastic,
             Bigquery => Driver::Bigquery,
+            Snowflake => Driver::Snowflake,
         }
     }
 
@@ -121,7 +125,10 @@ impl DbKind {
 
     /// Talks HTTP to a hosted API (no host/port, no SSH tunnel).
     pub fn is_http_api(self) -> bool {
-        matches!(self, DbKind::Turso | DbKind::D1 | DbKind::Bigquery)
+        matches!(
+            self,
+            DbKind::Turso | DbKind::D1 | DbKind::Bigquery | DbKind::Snowflake
+        )
     }
 
     pub fn default_port(self) -> Option<u16> {
@@ -139,7 +146,7 @@ impl DbKind {
             Cassandra | Scylla => Some(9042),
             Oracle => Some(1521),
             Elasticsearch | Opensearch => Some(9200),
-            Sqlite | Duckdb | Turso | D1 | Bigquery => None,
+            Sqlite | Duckdb | Turso | D1 | Bigquery | Snowflake => None,
         }
     }
 }
@@ -185,6 +192,12 @@ pub struct ConnectionConfig {
     /// Oracle: folder with the Instant Client libraries (empty = auto-detect)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_dir: Option<String>,
+    /// Snowflake: virtual warehouse to run queries on
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warehouse: Option<String>,
+    /// Snowflake: role to use
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// Same names as libpq's `sslmode`.
@@ -289,6 +302,8 @@ impl ConnectionConfig {
             },
             ssh: None,
             client_dir: None,
+            warehouse: None,
+            role: None,
         }
     }
 
