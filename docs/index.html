@@ -2,773 +2,682 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rowhouse — a fast database client with an AI copilot built in</title>
-<meta name="description" content="A fast, compact open-source database client for Postgres, MySQL and SQLite, with a read-only MCP server so AI assistants can explore your data safely.">
-<meta name="theme-color" content="#f7f7fa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#08080b" media="(prefers-color-scheme: dark)">
-<meta property="og:title" content="Rowhouse">
-<meta property="og:description" content="A fast, compact database client with a read-only MCP server built in.">
-<meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 13.5 16 4 28 13.5' fill='none' stroke='%234f46e5' stroke-width='2.4' stroke-linejoin='round' stroke-linecap='round'/%3E%3Crect x='6.5' y='13' width='19' height='15' rx='2.5' fill='none' stroke='%2315151b' stroke-width='2.1'/%3E%3Crect x='6.5' y='23' width='19' height='5' fill='%234f46e5' opacity='0.2'/%3E%3C/svg%3E">
-<script>
-  (function () {
-    var r = document.documentElement;
-    r.classList.add("js");
-    try { var s = localStorage.getItem("rh-theme"); if (s === "dark" || s === "light") r.dataset.theme = s; } catch (e) {}
-  })();
-</script>
+<meta name="description" content="Rowhouse is a fast, compact, open-source database client for Postgres, MySQL, SQLite and 20+ more — with an AI copilot and a read-only MCP server built in. Free, macOS, Windows and Linux.">
+<meta property="og:title" content="Rowhouse — a fast database client with an AI copilot built in">
+<meta property="og:description" content="One window for 20+ databases, with an AI copilot and a read-only MCP server built in. Free and open source.">
+<meta property="og:image" content="app-light.jpg">
+<link rel="icon" href="rowhouse-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.454.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js"></script>
 <style>
-  /* Layout: one bordered "sheet" (max 1120) with hairline rules between sections; everything
-     left-aligned, section heads split title/description across two columns, features as a bento. */
-  :root {
-    --bg: #f7f7fa;
-    --surface: #ffffff;
-    --surface-2: #f3f3f7;
-    --fg: #15151b;
-    --muted: #63636e;
-    --faint: #93939d;
-    --line: #e7e7ee;
-    --line-strong: #d7d7e1;
-    --accent: #4f46e5;
-    --accent-ink: #4f46e5;
-    --accent-soft: #eef0fe;
-    --green: #2f9e58;
-    --red: #d6455a;
-    --amber: #c2871b;
-    --dot: rgba(20,20,60,.05);
-    --f-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    --f-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-    --ease: cubic-bezier(.22,1,.36,1);
-    scroll-padding-top: calc(74px + env(safe-area-inset-top, 0px));
+:root {
+  --bg: #FAFAF8; --surface: #FFFFFF; --surface-2: #EEEEEB; --inner: #F5F5F2; --border: #E3E3DF; --border-strong: #CFCFCA;
+  --text-1: #111111; --text-2: #55555A; --text-3: #8C8C8C; --title-2: #A3A3A3; --accent: #3B8BFF; --live: #16A34A;
+  --sky: #81A9D3; --ui-1: #F2F2EF; --ui-2: #E8E8E4; --ui-3: #D4D4D0; --ui-active: #FFFFFF; --bg-deep: #F3F3F0;
+  --banner-bg: #E8F0FF; --banner-fg: #1F5FCC;
+  --key-top: #FFFFFF; --key-bottom: #F1F1EE; --key-line: rgba(0,0,0,.08); --key-edge: rgba(0,0,0,.12); --key-shine: rgba(255,255,255,.9);
+  --font: "Be Vietnam Pro", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121212; --surface: #1B1B1B; --surface-2: #222222; --inner: #161616; --border: #2A2A2A; --border-strong: #3A3A3A;
+    --text-1: #F2F2F2; --text-2: #A1A1A1; --text-3: #6B6B6B; --title-2: #707070; --live: #4ADE80;
+    --ui-1: #1C1C1C; --ui-2: #262626; --ui-3: #333333; --ui-active: #171717; --bg-deep: #0C0C0C;
+    --banner-bg: #0E1626; --banner-fg: #A9C8FF; color-scheme: dark;
+    --key-top: #2F2F2F; --key-bottom: #222222; --key-line: rgba(255,255,255,.08); --key-edge: rgba(0,0,0,.45); --key-shine: rgba(255,255,255,.1);
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #08080b; --surface: #0f0f14; --surface-2: #16161d;
-      --fg: #ededf2; --muted: #9b9ba7; --faint: #68686f;
-      --line: #20202a; --line-strong: #2c2c38;
-      --accent: #8785f6; --accent-ink: #a3a1ff; --accent-soft: #181830;
-      --green: #4ad07f; --red: #ff6b80; --amber: #e3ad46;
-      --dot: rgba(160,160,255,.06);
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #08080b; --surface: #0f0f14; --surface-2: #16161d;
-    --fg: #ededf2; --muted: #9b9ba7; --faint: #68686f;
-    --line: #20202a; --line-strong: #2c2c38;
-    --accent: #8785f6; --accent-ink: #a3a1ff; --accent-soft: #181830;
-    --green: #4ad07f; --red: #ff6b80; --amber: #e3ad46;
-    --dot: rgba(160,160,255,.06);
-    color-scheme: dark;
-  }
+}
+:root[data-theme="dark"] {
+  --bg: #121212; --surface: #1B1B1B; --surface-2: #222222; --inner: #161616; --border: #2A2A2A; --border-strong: #3A3A3A;
+  --text-1: #F2F2F2; --text-2: #A1A1A1; --text-3: #6B6B6B; --title-2: #707070; --live: #4ADE80;
+  --ui-1: #1C1C1C; --ui-2: #262626; --ui-3: #333333; --ui-active: #171717; --bg-deep: #0C0C0C;
+  --banner-bg: #0E1626; --banner-fg: #A9C8FF; color-scheme: dark;
+  --key-top: #2F2F2F; --key-bottom: #222222; --key-line: rgba(255,255,255,.08); --key-edge: rgba(0,0,0,.45); --key-shine: rgba(255,255,255,.1);
+}
 
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--f-sans);
-    font-size: 15px;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-    letter-spacing: -0.006em;
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 60; background: var(--bg); }
-  img { max-width: 100%; }
-  a { color: inherit; text-decoration: none; }
-  h1, h2, h3, h4 { text-wrap: balance; margin: 0; letter-spacing: -0.022em; line-height: 1.1; }
-  p { margin: 0; }
-  .mono { font-family: var(--f-mono); }
-  ::selection { background: var(--accent-soft); color: var(--accent-ink); }
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: hidden; }
+body { margin: 0; background: var(--bg); color: var(--text-1); font-family: var(--font); -webkit-font-smoothing: antialiased; transition: background .25s, color .25s; }
+img { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+i[data-lucide], svg.lucide { width: 16px; height: 16px; stroke-width: 1.75; flex-shrink: 0; }
 
-  /* the framed sheet */
-  .sheet { max-width: 1120px; margin: 0 auto; border-left: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--bg); }
-  .pad { padding-left: max(clamp(20px, 4.5vw, 56px), env(safe-area-inset-left, 0px)); padding-right: max(clamp(20px, 4.5vw, 56px), env(safe-area-inset-right, 0px)); }
-  section { border-bottom: 1px solid var(--line); }
+/* Buttons: shaded like a raised key — light from above, a bevel along the bottom edge. */
+.btn { position: relative; display: inline-flex; align-items: center; gap: 9px; height: 52px; padding: 0 26px; border-radius: 16px; font: 600 16px var(--font); border: 0; cursor: pointer; white-space: nowrap;
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease; -webkit-tap-highlight-color: transparent; }
+.btn:active { transform: translateY(1px); transition-duration: .05s; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.btn-primary { color: #fff; text-shadow: 0 1px 0 rgba(10,50,130,.3); background: linear-gradient(180deg, #6AADFF 0%, #3B8BFF 50%, #2C74E6 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), inset 0 -3px 0 rgba(12,56,150,.45), inset 0 0 0 1px rgba(20,70,170,.35); }
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-primary:active { box-shadow: inset 0 2px 3px rgba(12,56,150,.5), inset 0 0 0 1px rgba(20,70,170,.4); }
+.btn-ghost { color: var(--text-1); background: linear-gradient(180deg, var(--key-top), var(--key-bottom));
+  box-shadow: inset 0 1px 0 var(--key-shine), inset 0 -3px 0 var(--key-edge), inset 0 0 0 1px var(--key-line); }
+.btn-ghost:hover { filter: brightness(1.04); }
+.btn-ghost:active { box-shadow: inset 0 2px 3px var(--key-edge), inset 0 0 0 1px var(--key-line); }
+.btn-sm { height: 38px; padding: 0 16px; border-radius: 12px; font-size: 14px; }
 
-  /* ---------- reveal animations ---------- */
-  .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s var(--ease), transform .6s var(--ease); will-change: opacity, transform; }
-  .js .reveal.in { opacity: 1; transform: none; }
-  .js .stagger > * { opacity: 0; transform: translateY(18px); transition: opacity .55s var(--ease), transform .55s var(--ease); }
-  .js .stagger.in > * { opacity: 1; transform: none; }
-  .js .stagger.in > *:nth-child(2) { transition-delay: .06s; }
-  .js .stagger.in > *:nth-child(3) { transition-delay: .12s; }
-  .js .stagger.in > *:nth-child(4) { transition-delay: .18s; }
-  .js .stagger.in > *:nth-child(5) { transition-delay: .24s; }
-  .js .stagger.in > *:nth-child(6) { transition-delay: .30s; }
+/* Announcement + nav */
+.banner { background: var(--banner-bg); color: var(--banner-fg); border-bottom: 1px solid var(--border); font-size: 13.5px; font-weight: 500; }
+.banner a { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 9px 16px; text-align: center; }
+nav { position: sticky; top: 0; z-index: 20; padding: 12px 16px 0; pointer-events: none; }
+nav .bar { pointer-events: auto; max-width: 1180px; margin: 0 auto; height: 62px; padding: 0 10px 0 18px; border-radius: 20px;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--border);
+  backdrop-filter: saturate(160%) blur(18px); -webkit-backdrop-filter: saturate(160%) blur(18px);
+  box-shadow: 0 12px 32px -20px rgba(0,0,0,.45); transition: background .3s, box-shadow .3s; }
+.brand { justify-self: start; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.3px; }
+.brand img { width: 28px; height: 28px; border-radius: 8px; }
+.nav-links { display: flex; gap: 2px; padding: 4px; border-radius: 13px; font-size: 14px; font-weight: 500; white-space: nowrap;
+  background: color-mix(in srgb, var(--text-1) 5%, transparent); box-shadow: inset 0 0 0 1px var(--border); }
+.nav-links a { padding: 7px 14px; border-radius: 10px; color: var(--text-2); transition: color .2s, background .2s, box-shadow .2s; }
+.nav-links a:hover { color: var(--text-1); }
+.nav-links a.on { color: var(--text-1); background: linear-gradient(180deg, var(--key-top), var(--key-bottom));
+  box-shadow: inset 0 1px 0 var(--key-shine), inset 0 -2px 0 var(--key-edge), inset 0 0 0 1px var(--key-line); }
+@media (max-width: 1100px) { .nav-links a { padding: 7px 10px; } }
+.nav-right { justify-self: end; display: flex; gap: 8px; align-items: center; }
+.nav-right .btn { height: 40px; }
+.icon-btn { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; border: 0; color: var(--text-2); cursor: pointer;
+  background: linear-gradient(180deg, var(--key-top), var(--key-bottom)); transition: transform .12s, box-shadow .12s, color .12s;
+  box-shadow: inset 0 1px 0 var(--key-shine), inset 0 -2px 0 var(--key-edge), inset 0 0 0 1px var(--key-line); }
+.icon-btn:hover { color: var(--text-1); }
+.icon-btn:active { transform: translateY(1px); box-shadow: inset 0 2px 3px var(--key-edge), inset 0 0 0 1px var(--key-line); }
 
-  /* ---------- nav ---------- */
-  nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-  .nav-in { display: flex; align-items: center; gap: 14px; height: 58px; }
-  .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; }
-  .brand svg { display: block; }
-  .nav-links { display: flex; gap: 2px; margin-left: auto; align-items: center; }
-  .nav-links a.txt { color: var(--muted); font-size: 13.5px; padding: 6px 11px; border-radius: 7px; transition: color .14s, background .14s; }
-  .nav-links a.txt:hover, .nav-links a.txt.active { color: var(--fg); background: var(--surface-2); }
-  @media (max-width: 720px) { .nav-links a.txt { display: none; } }
+/* Hero */
+.hero { text-align: center; padding: 72px 0 0; position: relative; }
+.pill { display: inline-flex; align-items: center; gap: 10px; padding: 5px 12px 5px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 13px; color: var(--text-2); }
+.pill b { font-size: 11px; letter-spacing: .6px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-1); }
+h1 { font-size: clamp(42px, 7vw, 76px); line-height: 1.04; font-weight: 700; letter-spacing: -2.5px; margin: 26px 0 22px; }
+h1 .grad { color: var(--accent); }
+.lead { font-size: 18px; line-height: 1.6; color: var(--text-2); max-width: 650px; margin: 0 auto; }
+.cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+.meta { display: flex; gap: 28px; justify-content: center; flex-wrap: wrap; margin-top: 26px; font-size: 14px; color: var(--text-2); }
+.meta span { display: inline-flex; gap: 8px; align-items: center; }
+.meta svg { color: var(--text-3); }
+.hero-shot { position: relative; margin: 60px auto 0; max-width: 1180px; background: var(--sky); border-radius: 24px; padding: 42px 42px 0; overflow: hidden; }
+.hero-shot img { width: 100%; border-radius: 10px 10px 0 0; box-shadow: 0 30px 60px -30px rgba(10,30,70,.5); }
+.hero-glow { position: absolute; left: 6%; right: 6%; bottom: -40px; height: 90px; background: radial-gradient(60% 100% at 50% 0%, rgba(59,139,255,.55), transparent 70%); filter: blur(24px); z-index: -1; }
 
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; font-size: 13.5px; font-weight: 500; font-family: var(--f-sans); padding: 0 14px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); cursor: pointer; transition: border-color .14s, background .14s, transform .08s, box-shadow .14s; }
-  .btn:hover { border-color: var(--faint); }
-  .btn:active { transform: translateY(0.5px); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  :root[data-theme="dark"] .btn.primary, :root:not([data-theme="light"]) .btn.primary { color: #08080b; }
-  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .btn.primary { color: #fff; } }
-  .btn.primary:hover { filter: brightness(1.06); border-color: var(--accent); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 60%, transparent); }
-  .btn svg { display: block; }
-  .theme-btn { width: 34px; padding: 0; }
+/* Stats */
+.stats { margin-top: 90px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stats .wrap { display: grid; grid-template-columns: repeat(4, 1fr); max-width: 1040px; }
+.stat { text-align: center; padding: 56px 12px; position: relative; }
+.stat + .stat::before { content: ""; position: absolute; left: 0; top: 50%; height: 44px; transform: translateY(-50%); width: 1px; background: var(--border); }
+.stat strong { display: block; font-size: 40px; font-weight: 600; letter-spacing: -1px; }
+.stat span { display: block; font-size: 14px; color: var(--text-3); margin-top: 8px; }
 
-  /* ---------- hero ---------- */
-  .hero { padding-block: clamp(44px, 8vw, 84px) 0; }
-  .hero-top { display: grid; grid-template-columns: 1.35fr 0.65fr; gap: clamp(28px, 5vw, 60px); align-items: start; }
-  @media (max-width: 820px) { .hero-top { grid-template-columns: 1fr; gap: 34px; } }
-  .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.01em; color: var(--muted); border: 1px solid var(--line); background: var(--surface); padding: 4px 11px 4px 5px; border-radius: 999px; margin-bottom: 24px; }
-  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent); animation: pulse 2.4s var(--ease) infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--green) 6%, transparent); } }
-  .eyebrow .pill { font-family: var(--f-mono); font-size: 11px; background: var(--accent-soft); color: var(--accent-ink); padding: 1px 7px; border-radius: 999px; }
-  h1 { font-size: clamp(36px, 6.4vw, 60px); font-weight: 600; max-width: 14ch; letter-spacing: -0.03em; }
-  h1 .hl { color: var(--accent-ink); }
-  .lede { margin-top: 22px; font-size: clamp(16px, 2.1vw, 18.5px); color: var(--muted); max-width: 52ch; line-height: 1.55; }
-  .cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; align-items: center; }
-  .cta-note { font-size: 12.5px; color: var(--faint); font-family: var(--f-mono); }
+/* Sections */
+section { padding: 120px 0; }
+.eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; color: var(--text-2); }
+.eyebrow::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+h2 { font-size: clamp(38px, 5vw, 56px); font-weight: 600; letter-spacing: -2px; line-height: 1.08; margin: 22px 0 22px; }
+h2 em { font-style: normal; color: var(--title-2); display: block; }
+.sub { font-size: 17px; line-height: 1.65; color: var(--text-2); max-width: 600px; }
+.center { text-align: center; }
+.center .sub { margin: 0 auto; }
+.head-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; flex-wrap: wrap; }
 
-  .specs .lbl { font-family: var(--f-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: 14px; }
-  .spec { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
-  .spec:last-child { border-bottom: 1px solid var(--line); }
-  .spec .k { color: var(--muted); }
-  .spec .v { font-family: var(--f-mono); font-size: 12px; color: var(--fg); text-align: right; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 22px; overflow: hidden; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 
-  /* ---------- app window mock ---------- */
-  .mockwrap { margin-top: clamp(40px, 6vw, 68px); padding-bottom: clamp(30px, 4.5vw, 50px); position: relative; }
-  .mockwrap::before { content: ""; position: absolute; inset: -10px -10px 20px -10px; background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 16px 16px; z-index: 0; -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 55%, transparent 100%); mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 55%, transparent 100%); }
-  /* real app screenshot, swapped by theme */
-  .shot { position: relative; z-index: 1; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; box-shadow: 0 30px 60px -32px rgba(30,27,75,.35); background: var(--surface); }
-  .shot-img { display: block; width: 100%; height: auto; }
-  .shot-dark { display: none; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .shot-light { display: none; } :root:not([data-theme="light"]) .shot-dark { display: block; } }
-  :root[data-theme="dark"] .shot-light { display: none; }
-  :root[data-theme="dark"] .shot-dark { display: block; }
-  .window { position: relative; z-index: 1; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); overflow: hidden; box-shadow: 0 30px 60px -32px rgba(30,27,75,.35); }
-  .titlebar { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 13px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-  .lights { display: flex; gap: 6px; }
-  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
-  .lights i:nth-child(1){ background:#ec6a5e; } .lights i:nth-child(2){ background:#f4bf4f; } .lights i:nth-child(3){ background:#61c454; }
-  .titlebar .title { font-size: 12px; color: var(--muted); font-weight: 500; margin: 0 auto; display: flex; align-items: center; gap: 7px; }
-  .ro-tag { font-family: var(--f-mono); font-size: 10px; letter-spacing: .03em; color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); padding: 0 6px; border-radius: 5px; }
+/* Panel cards (screenshot on sky) */
+.panels { margin-top: 64px; }
+.panel-card .shot { background: var(--sky); margin: 8px 8px 0; border-radius: 16px; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; aspect-ratio: 16 / 9.4; }
+.panel-card .shot img { width: 94%; margin-top: 18px; border-radius: 8px 8px 0 0; box-shadow: 0 18px 30px -18px rgba(10,30,70,.5); }
+.panel-card .txt { padding: 22px 22px 26px; display: grid; gap: 8px; }
+.panel-card h3, .mini h3, .feature h3 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.2px; }
+.panel-card p, .mini p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
 
-  .app { display: grid; grid-template-columns: 188px 1fr; min-height: 0; }
-  .side { border-right: 1px solid var(--line); padding: 10px 8px; background: var(--surface); }
-  .side .sec2 { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 6px 8px 4px; }
-  .conn { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; color: var(--muted); }
-  .conn .tag { width: 7px; height: 7px; border-radius: 2px; flex: none; }
-  .conn.active { background: var(--accent-soft); color: var(--fg); font-weight: 500; }
-  .tbl { display: flex; align-items: center; gap: 7px; padding: 4px 8px 4px 18px; border-radius: 7px; font-size: 12.5px; color: var(--muted); }
-  .tbl svg { opacity: .55; flex: none; }
-  .tbl.on { color: var(--accent-ink); }
+/* Feature grid */
+.feature { padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; }
+.feature > div { background: var(--inner); border-radius: 17px; padding: 22px 22px 24px; height: 100%; }
+.feature h3 { display: flex; gap: 12px; align-items: center; margin: 0 0 12px; font-size: 18px; }
+.feature h3 span { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; color: var(--accent); }
+.feature p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
+.feat-grid { margin-top: 56px; }
 
-  .pane { display: flex; flex-direction: column; min-width: 0; }
-  .editor { border-bottom: 1px solid var(--line); padding: 13px 16px; font-family: var(--f-mono); font-size: 12.5px; line-height: 1.7; background: var(--surface); overflow-x: auto; }
-  .editor .ln { color: var(--faint); user-select: none; display: inline-block; width: 1.4em; text-align: right; margin-right: 14px; }
-  .kw { color: var(--accent-ink); font-weight: 500; } .fn { color: var(--amber); } .str { color: var(--green); } .cmt { color: var(--faint); font-style: italic; }
-  .caret { display: inline-block; width: 1px; height: 1.05em; background: var(--accent); vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
+/* Databases */
+#databases { background: var(--bg-deep); border-top: 1px solid var(--border); }
+.db-groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px; }
+.db-group { padding: 26px 24px; }
+.db-group .ghead { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.db-group .ghead h3 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--g); }
+.db-group .ghead .cnt { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--text-3); }
+.db-group .ghead i.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--g); box-shadow: 0 0 0 3px color-mix(in srgb, var(--g) 18%, transparent); }
+.db-group p.note { margin: 0 0 16px; font-size: 13.5px; color: var(--text-3); line-height: 1.5; }
+.db-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.db-chip { font-family: var(--mono); font-size: 12.5px; color: var(--text-1); background: var(--inner); border: 1px solid var(--border); border-radius: 9px; padding: 6px 11px; }
+.db-group.soon .db-chip { color: var(--text-3); border-style: dashed; background: transparent; }
 
-  .grid-head, .grid-row { display: grid; grid-template-columns: 42px 1.4fr 2fr 1fr 0.9fr; }
-  .result { font-size: 12px; min-width: 0; }
-  .grid-head { background: var(--surface-2); border-bottom: 1px solid var(--line); }
-  .grid-head span { padding: 6px 12px; font-weight: 500; color: var(--muted); font-size: 11px; border-right: 1px solid var(--line); }
-  .grid-head span:last-child, .grid-row span:last-child { border-right: 0; }
-  .grid-row span { padding: 6px 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--f-mono); font-size: 11.5px; }
-  .grid-row span:first-child { color: var(--faint); }
-  .cell-null { color: var(--faint); font-style: italic; } .cell-bool { color: var(--accent-ink); }
-  .statusbar { display: flex; align-items: center; gap: 14px; padding: 6px 14px; border-top: 1px solid var(--line); background: var(--surface-2); font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
-  .statusbar .ok { color: var(--green); }
-  @media (max-width: 620px) {
-    .app { grid-template-columns: 1fr; }
-    .side { display: none; }
-    .grid-head, .grid-row { grid-template-columns: 34px 1.2fr 1.6fr; }
-    .grid-head span:nth-child(n+4), .grid-row span:nth-child(n+4) { display: none; }
-  }
+/* MCP */
+.mcp-split { display: grid; grid-template-columns: 1fr 1.05fr; gap: 20px; align-items: stretch; margin-top: 56px; }
+.mcp-tools { padding: 28px; display: flex; flex-direction: column; gap: 2px; }
+.mcp-tools .row { display: grid; grid-template-columns: 180px 1fr; gap: 14px; align-items: baseline; padding: 13px 2px; border-top: 1px solid var(--border); }
+.mcp-tools .row:first-child { border-top: 0; }
+.mcp-tools code { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.mcp-tools small { color: var(--text-2); font-size: 14px; line-height: 1.45; }
+.mcp-aside { padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+.mcp-aside h3 { margin: 0; font-size: 20px; font-weight: 600; }
+.mcp-aside p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
+.mcp-aside ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.mcp-aside li { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; color: var(--text-2); }
+.mcp-aside li svg { color: var(--live); margin-top: 2px; }
+.code { background: #0F1115; color: #E6E6EC; font: 400 12.5px var(--mono); border-radius: 14px; padding: 16px 18px; overflow-x: auto; line-height: 1.7; }
+.code .k { color: #8FB7FF; } .code .s { color: #7FD6A0; } .code .p { color: #8C8C8C; }
 
-  /* ---------- section heads (split) ---------- */
-  .band { padding-block: clamp(52px, 8vw, 88px); }
-  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 0; }
-  @media (max-width: 900px) { .gallery { grid-template-columns: 1fr; } }
-  .gallery figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
-  .gallery .shot { border-radius: 10px; box-shadow: 0 18px 36px -26px rgba(30,27,75,.35); }
-  .gallery figcaption { font-size: 13.5px; color: var(--muted); line-height: 1.45; }
-  .gallery figcaption b { color: var(--fg, inherit); font-weight: 600; }
-  .sec-head { display: grid; grid-template-columns: 1fr 1fr; gap: 20px clamp(28px, 5vw, 64px); align-items: end; margin-bottom: clamp(34px, 5vw, 52px); }
-  @media (max-width: 760px) { .sec-head { grid-template-columns: 1fr; gap: 14px; align-items: start; } }
-  .sec-tag { font-family: var(--f-mono); font-size: 12px; color: var(--accent-ink); letter-spacing: .02em; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-  .sec-tag::before { content: ""; width: 18px; height: 1px; background: var(--accent); opacity: .5; }
-  h2 { font-size: clamp(26px, 4vw, 38px); font-weight: 600; letter-spacing: -0.03em; }
-  .sec-head .desc { color: var(--muted); font-size: 16px; line-height: 1.55; padding-bottom: 4px; }
+/* FAQ */
+.faq { display: grid; grid-template-columns: 1fr 1.25fr; gap: 80px; }
+details { border-top: 1px solid var(--border); }
+details:last-child { border-bottom: 1px solid var(--border); }
+summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 0; font-size: 17px; font-weight: 500; }
+summary::-webkit-details-marker { display: none; }
+summary svg { color: var(--text-3); transition: transform .2s; }
+details[open] summary svg { transform: rotate(180deg); }
+details p { margin: 0 0 20px; color: var(--text-2); font-size: 15px; line-height: 1.65; }
+code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
 
-  /* ---------- features bento ---------- */
-  .features { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
-  .feat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 9px; transition: border-color .18s, transform .18s, box-shadow .18s; min-width: 0; }
-  .feat:hover { border-color: var(--line-strong); transform: translateY(-3px); box-shadow: 0 16px 34px -24px rgba(30,27,75,.4); }
-  .feat.wide { grid-column: span 7; } .feat.mid { grid-column: span 5; } .feat.sm { grid-column: span 3; }
-  @media (max-width: 900px) { .feat.wide, .feat.mid { grid-column: span 12; } .feat.sm { grid-column: span 6; } }
-  @media (max-width: 520px) { .feat.sm { grid-column: span 12; } }
-  .feat .ic { width: 32px; height: 32px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; margin-bottom: 5px; }
-  .feat h3 { font-size: 15.5px; font-weight: 600; letter-spacing: -0.015em; }
-  .feat p { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
-  .kbd { font-family: var(--f-mono); font-size: 11px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--fg); }
-  .feat .viz { margin-top: auto; padding-top: 16px; }
-  .vcode { font-family: var(--f-mono); font-size: 11.5px; line-height: 1.7; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; overflow-x: auto; }
-  .vgrid { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-top: 16px; }
-  .vgrid .vr { display: grid; grid-template-columns: 1.3fr 1fr .8fr; font-family: var(--f-mono); font-size: 11px; }
-  .vgrid .vr span { padding: 5px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .vgrid .vr span:last-child { border-right: 0; } .vgrid .vr:last-child span { border-bottom: 0; }
-  .vgrid .vh { background: var(--surface-2); color: var(--muted); }
+/* Get Rowhouse */
+#download { padding-bottom: 56px; }
+.get-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px; }
+.get { padding: 30px; display: flex; flex-direction: column; gap: 18px; }
+.get .title { display: flex; align-items: center; gap: 12px; }
+.get .title b { display: flex; gap: 10px; align-items: center; font-size: 22px; font-weight: 700; letter-spacing: -.4px; }
+.get .meta-line { margin: -6px 0 0; color: var(--text-3); font-size: 13.5px; line-height: 1.5; }
+.get .files { display: flex; flex-wrap: wrap; gap: 8px; }
+.get .files span { font-family: var(--mono); font-size: 12px; color: var(--text-2); background: var(--inner); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; }
+.get .btn { width: 100%; justify-content: center; }
+.term { width: 100%; background: #111; color: #EDEDED; font: 400 12.5px var(--mono); border-radius: 12px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; }
+.term span { color: #777; }
+.term code { background: none; padding: 0; color: #EDEDED; flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.term button { background: none; border: 0; color: #999; cursor: pointer; display: grid; place-items: center; }
+.term button:hover { color: #fff; }
 
-  /* ---------- MCP ---------- */
-  .mcp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
-  @media (max-width: 820px) { .mcp-grid { grid-template-columns: 1fr; gap: 20px; } }
-  .tools { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
-  .tool { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); align-items: baseline; transition: background .14s; }
-  .tool:last-child { border-bottom: 0; }
-  .tool:hover { background: var(--surface-2); }
-  .tool .nm { font-family: var(--f-mono); font-size: 12.5px; color: var(--accent-ink); white-space: nowrap; }
-  .tool .ds { font-size: 13px; color: var(--muted); }
-  .code { border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; background: var(--surface); }
-  .code .bar { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
-  .code .bar .fdot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
-  .code pre { margin: 0; padding: 16px; overflow-x: auto; font-family: var(--f-mono); font-size: 12.5px; line-height: 1.65; }
-  .code .k { color: var(--accent-ink); } .code .s { color: var(--green); } .code .p { color: var(--muted); }
-  .safety3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 20px; }
-  @media (max-width: 760px) { .safety3 { grid-template-columns: 1fr; } }
-  .sfc { border: 1px solid var(--line); border-radius: 11px; padding: 16px 16px 18px; background: var(--surface); }
-  .sfc .ic { color: var(--green); margin-bottom: 11px; display: block; }
-  .sfc h4 { font-size: 13.5px; font-weight: 600; margin-bottom: 5px; }
-  .sfc p { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
-  .sfc code { font-family: var(--f-mono); font-size: 11.5px; color: var(--accent-ink); }
+/* Footer */
+footer { padding: 0 0 24px; overflow: hidden; }
+.foot { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 28px; width: min(1152px, calc(100% - 48px)); margin: 0 auto; }
+.running { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: #000; color: #fff; font-size: 13px; padding: 9px 20px; border-radius: 0 0 18px 18px; display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+.running::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #4ADE80; }
+.foot-top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 24px; padding: 80px 56px 48px; border-bottom: 1px solid var(--border); }
+.foot-top img { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 16px 30px -12px rgba(59,139,255,.5); }
+.foot-top h4 { margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -1.2px; }
+.foot-top p { margin: 4px 0 0; color: var(--text-2); font-size: 17px; }
+.foot-top .cta-row { margin: 0; flex-wrap: nowrap; gap: 10px; }
+.foot-top .cta-row .btn { height: 46px; padding: 0 18px; font-size: 15px; border-radius: 14px; }
+@media (max-width: 1240px) { .foot-top { grid-template-columns: auto 1fr; } .foot-top .cta-row { grid-column: 1 / -1; justify-content: flex-start; } }
+.cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; padding: 44px 56px; }
+.cols h5 { margin: 0 0 16px; font-size: 12px; letter-spacing: 1.6px; color: var(--text-3); font-weight: 600; }
+.cols a, .cols span { display: flex; gap: 8px; align-items: center; font-size: 15px; padding: 7px 0; color: var(--text-1); }
+.cols a:hover { color: var(--accent); }
+.credits { display: grid; grid-template-columns: 1fr 1.7fr; gap: 40px; margin: 0 56px; padding: 44px 0; border-top: 1px solid var(--border); }
+.credits h4 { margin: 18px 0 14px; font-size: 22px; font-weight: 600; }
+.credits p { margin: 0; color: var(--text-3); font-size: 14px; line-height: 1.6; max-width: 300px; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
+.chips a { display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: 14.5px; font-weight: 500; }
+.chips a svg { color: var(--text-3); }
+.chips a:hover { border-color: var(--border-strong); }
+.font-note { grid-column: 2; font-size: 12.5px; color: var(--text-3); display: flex; gap: 8px; align-items: center; }
+.bottom { display: flex; justify-content: space-between; padding: 22px 56px; background: var(--inner); border-top: 1px solid var(--border); border-radius: 0 0 28px 28px; font-size: 13.5px; color: var(--text-3); flex-wrap: wrap; gap: 8px; }
+.watermark { font-size: clamp(40px, 15vw, 196px); font-weight: 800; letter-spacing: -.035em; line-height: .78; text-align: center; margin-top: 30px; user-select: none; cursor: default; white-space: nowrap; padding-top: .06em; }
+.watermark span { display: inline-block; color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: radial-gradient(circle at var(--mx, -999px) var(--my, -999px), color-mix(in srgb, var(--accent) 85%, transparent) 0, transparent 0.9em), linear-gradient(180deg, var(--ui-3), transparent 92%);
+  transform: translateY(var(--lift, 0)) scale(var(--grow, 1)); transform-origin: 50% 100%;
+  transition: transform .55s cubic-bezier(.3,1.5,.5,1), opacity .9s cubic-bezier(.2,.7,.2,1); }
+.watermark.idle span { opacity: 0; --lift: .35em; }
+.watermark span:nth-child(2){transition-delay:0s,.07s}.watermark span:nth-child(3){transition-delay:0s,.14s}.watermark span:nth-child(4){transition-delay:0s,.21s}.watermark span:nth-child(5){transition-delay:0s,.28s}.watermark span:nth-child(6){transition-delay:0s,.35s}.watermark span:nth-child(7){transition-delay:0s,.42s}.watermark span:nth-child(8){transition-delay:0s,.49s}
+.watermark span:hover { --lift: -.08em; --grow: 1.03; }
 
-  /* ---------- databases ---------- */
-  .dbmatrix { margin-top: 30px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
-  .dbrow { display: grid; grid-template-columns: 196px 1fr; gap: 10px 28px; padding: 22px 24px; align-items: start; }
-  .dbrow + .dbrow { border-top: 1px solid var(--line); }
-  @media (max-width: 680px) { .dbrow { grid-template-columns: 1fr; gap: 14px; padding: 20px 18px; } }
-  .dbhd .lbl { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; color: var(--fg); }
-  .dbhd .cnt { margin-left: auto; font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-weight: 500; }
-  @media (max-width: 680px) { .dbhd .cnt { margin-left: 10px; } }
-  .dbhd .sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 7px 0 0 17px; }
-  @media (max-width: 680px) { .dbhd .sub { margin-left: 17px; } }
-  .ddot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
-  .ddot.live { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
-  .ddot.beta { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 16%, transparent); }
-  .ddot.soon { background: var(--muted); opacity: .5; }
-  .dbchips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .dbchip { font-family: var(--f-mono); font-size: 12.5px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; transition: border-color .14s var(--ease), color .14s var(--ease); }
-  .dbchip:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent-ink); }
-  .dbrow.r-beta .dbchip { color: var(--muted); }
-  .dbrow.r-soon .dbchip { color: var(--muted); border-style: dashed; background: transparent; }
-  .dbrow.r-soon .dbchip:hover { color: var(--muted); border-color: var(--line); }
+/* Small screens */
+@media (max-width: 960px) {
+  .nav-links { display: none; }
+  nav .bar { display: flex; justify-content: space-between; height: 58px; }
+  .grid-2, .grid-3, .faq, .db-groups, .mcp-split, .feat-grid, .get-grid, .credits { grid-template-columns: 1fr; }
+  .faq { gap: 32px; }
+  .stats .wrap { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(3)::before { display: none; }
+  .hero-shot { padding: 16px 14px 0; border-radius: 16px; margin-inline: 16px; }
+  .cols { grid-template-columns: repeat(2, 1fr); padding: 36px 28px; }
+  .foot-top { padding: 72px 28px 36px; grid-template-columns: 1fr; }
+  .foot-top .cta-row { flex-wrap: wrap; justify-content: flex-start; }
+  .credits { margin: 0 28px; }
+  .font-note { grid-column: 1; }
+  .bottom { padding: 20px 28px; }
+  section { padding: 84px 0; }
+  .mcp-tools .row { grid-template-columns: 1fr; gap: 4px; }
+}
+@media (max-width: 560px) {
+  .cta-row .btn { flex: 1 1 auto; justify-content: center; }
+  h2 { letter-spacing: -1.2px; }
+  .btn { height: 48px; padding: 0 20px; font-size: 15px; }
+  .meta { gap: 14px 20px; }
+  nav .btn-ghost { display: none; }
+}
+.cta > *, .faq > *, .grid-2 > *, .grid-3 > *, .db-groups > *, .mcp-split > *, .get-grid > * { min-width: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
 
-
-  /* ---------- pricing ---------- */
-  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: stretch; }
-  @media (max-width: 900px) { .plans { grid-template-columns: 1fr; } }
-  .plan { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px 22px 22px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-  .plan.pick { border-color: var(--accent); box-shadow: 0 22px 44px -28px color-mix(in srgb, var(--accent) 55%, transparent); }
-  .plan .badge { position: absolute; top: -11px; left: 22px; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .03em; background: var(--accent); color: #fff; padding: 2px 9px; border-radius: 999px; }
-  :root[data-theme="dark"] .plan .badge { color: #08080b; }
-  .plan h3 { font-size: 15px; font-weight: 600; }
-  .plan .who { font-size: 13px; color: var(--muted); margin-top: -8px; }
-  .price { display: flex; align-items: baseline; gap: 6px; }
-  .price .amt { font-size: 34px; font-weight: 600; letter-spacing: -0.03em; }
-  .price .per { font-size: 12.5px; color: var(--faint); font-family: var(--f-mono); }
-  .price-alt { font-size: 12px; color: var(--muted); margin-top: -8px; font-family: var(--f-mono); }
-  .plan ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .plan li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
-  .plan li svg { margin-top: 3px; color: var(--green); }
-  .plan li.inc { color: var(--fg); font-weight: 500; }
-  .plan .btn { margin-top: auto; width: 100%; }
-  .plan-note { margin-top: 18px; font-size: 12.5px; color: var(--faint); font-family: var(--f-mono); }
-  .faq { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 40px; margin-top: clamp(34px, 5vw, 52px); border-top: 1px solid var(--line); }
-  @media (max-width: 760px) { .faq { grid-template-columns: 1fr; } }
-  .faq div { padding: 18px 0; border-bottom: 1px solid var(--line); }
-  .faq h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.01em; }
-  .faq p { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
-
-  /* ---------- download ---------- */
-  .dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-  @media (max-width: 680px) { .dl-grid { grid-template-columns: 1fr; } }
-  .dl { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 22px; display: flex; align-items: center; gap: 15px; transition: border-color .18s, transform .18s, box-shadow .18s; }
-  .dl:hover { border-color: var(--faint); transform: translateY(-2px); box-shadow: 0 14px 30px -20px rgba(30,27,75,.4); }
-  .dl .os-ic { color: var(--fg); flex: none; }
-  .dl .dlt { min-width: 0; flex: 1; }
-  .dl h3 { font-size: 15px; font-weight: 600; }
-  .dl .fmt { font-family: var(--f-mono); font-size: 11px; color: var(--faint); margin-top: 2px; }
-  .dl .arr { color: var(--accent-ink); flex: none; transition: transform .18s var(--ease); }
-  .dl:hover .arr { transform: translateY(3px); }
-  .dl-note { margin-top: 20px; font-family: var(--f-mono); font-size: 12px; color: var(--faint); }
-  .dl-note a { color: var(--accent-ink); }
-
-  /* ---------- footer ---------- */
-  footer { background: var(--surface); padding-block: 52px calc(32px + env(safe-area-inset-bottom, 0px)); }
-  .foot-top { display: grid; grid-template-columns: 1.7fr 1fr 1fr 1fr; gap: 32px; }
-  @media (max-width: 760px) { .foot-top { grid-template-columns: 1fr 1fr; gap: 30px 24px; } .foot-brand { grid-column: 1 / -1; } }
-  .foot-brand .brand { font-size: 16px; margin-bottom: 12px; }
-  .foot-brand p { font-size: 13px; color: var(--muted); max-width: 32ch; line-height: 1.55; }
-  .foot-col h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); margin: 0 0 12px; font-weight: 600; }
-  .foot-col a { display: block; font-size: 13.5px; color: var(--muted); padding: 3.5px 0; transition: color .14s; }
-  .foot-col a:hover { color: var(--fg); }
-  .foot-bar { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin-top: 44px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--faint); }
-  .foot-bar .gh { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-family: var(--f-mono); font-size: 12px; }
-  .foot-bar .gh:hover { color: var(--fg); }
-  .foot-bar .gh svg { display: block; }
-
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    *, .js .reveal, .js .stagger > * { animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important; }
-  }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* Motion */
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); transition-delay: var(--d, 0s); }
+.reveal.in { opacity: 1; transform: none; }
+h2 em { transition: opacity .9s .15s, transform .9s .15s cubic-bezier(.2,.7,.2,1); }
+.reveal:not(.in) h2 em, h2.reveal:not(.in) em { opacity: 0; transform: translateY(14px); }
+.hero h1 .w { display: inline-block; opacity: 0; transform: translateY(.4em); filter: blur(8px); animation: rise .9s cubic-bezier(.2,.7,.2,1) forwards; animation-delay: calc(var(--i) * 70ms + 100ms); }
+@keyframes rise { to { opacity: 1; transform: none; filter: none; } }
+.hero .pill, .hero .lead, .hero .cta-row, .hero .meta { opacity: 0; animation: rise .8s cubic-bezier(.2,.7,.2,1) forwards; }
+.hero .pill { animation-delay: 0s; transform: translateY(10px); }
+.hero .lead { animation-delay: .45s; transform: translateY(12px); }
+.hero .cta-row { animation-delay: .6s; transform: translateY(12px); }
+.hero .meta { animation-delay: .75s; transform: translateY(12px); }
+.stage { perspective: 1400px; }
+.hero-shot { transform-origin: 50% 0%; transform: rotateX(var(--tilt, 18deg)) scale(var(--zoom, .92)); will-change: transform; opacity: 0; animation: fadein 1s .5s forwards; }
+@keyframes fadein { to { opacity: 1; } }
+.hero-shot img { transform: translateY(var(--shift, 0px)); will-change: transform; }
+.hero::before { content: ""; position: absolute; inset: -120px 0 auto; height: 620px; background: radial-gradient(42% 38% at 50% 52%, color-mix(in srgb, var(--accent) 14%, transparent), transparent); pointer-events: none; z-index: -1; transform: translateY(var(--glow, 0px)); }
+.panel-card .shot img { transition: transform .6s cubic-bezier(.2,.7,.2,1); }
+.panel-card:hover .shot img { transform: translateY(-6px) scale(1.02); }
+.card, .feature { transition: transform .35s cubic-bezier(.2,.7,.2,1), box-shadow .35s, border-color .35s; }
+.panel-card:hover, .feature:hover, .db-group.card:hover, .get:hover { transform: translateY(-4px); box-shadow: 0 18px 40px -22px rgba(0,0,0,.35); }
+nav.scrolled .bar { background: color-mix(in srgb, var(--surface) 86%, transparent); box-shadow: 0 16px 40px -18px rgba(0,0,0,.55); }
+.watermark { transform: translateY(var(--wm, 0px)); }
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .hero h1 .w, .hero .pill, .hero .lead, .hero .cta-row, .hero .meta, .hero-shot { opacity: 1 !important; transform: none !important; filter: none !important; animation: none !important; }
+  .watermark, .watermark span, .hero-shot img { transform: none !important; }
+  .watermark.idle span { opacity: 1; }
+}
 </style>
 </head>
 <body>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <symbol id="rh-mark" viewBox="0 0 32 32">
-      <path d="M4 13.5 L16 4 L28 13.5" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
-      <rect x="6.5" y="13" width="19" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="2.1"/>
-      <line x1="6.5" y1="18.2" x2="25.5" y2="18.2" stroke="currentColor" stroke-width="1.6" opacity="0.5"/>
-      <line x1="6.5" y1="23" x2="25.5" y2="23" stroke="currentColor" stroke-width="1.6" opacity="0.5"/>
-      <rect x="6.5" y="23" width="19" height="5" fill="var(--accent)" opacity="0.18"/>
-      <rect x="6.5" y="13" width="3.6" height="15" fill="var(--accent)" opacity="0.14"/>
-    </symbol>
-  </defs>
-</svg>
+<div class="banner"><a href="https://github.com/giankbr/rowhouse/releases">✦ New in v0.6: visual query builder, AI inline edit, backup/restore, server activity and 20+ database drivers. <i data-lucide="arrow-right"></i></a></div>
 
-<div class="sheet">
-  <nav>
-    <div class="pad nav-in">
-      <a class="brand" href="#top">
-        <svg width="26" height="26"><use href="#rh-mark"/></svg>
-        Rowhouse
-      </a>
-      <div class="nav-links">
-        <a class="txt" href="#features">Features</a>
-        <a class="txt" href="#mcp">MCP server</a>
-        <a class="txt" href="#databases">Databases</a>
-        <a class="txt" href="#pricing">Pricing</a>
-        <a class="txt" href="#download">Download</a>
-        <button class="btn theme-btn" id="theme" aria-label="Toggle theme" title="Toggle theme">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-        </button>
-        <a class="btn primary" href="https://github.com/giankbr/rowhouse">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.7 5.4-5.28 5.69.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"/></svg>
-          GitHub
-        </a>
-      </div>
+<nav>
+  <div class="bar">
+    <a class="brand" href="#"><img src="rowhouse-icon.png" alt="">Rowhouse</a>
+    <div class="nav-links">
+      <a href="#features">Features</a><a href="#databases">Databases</a><a href="#mcp">MCP</a><a href="#capabilities">Capabilities</a><a href="#faq">FAQ</a>
     </div>
-  </nav>
-
-  <main id="top">
-    <!-- ---------- HERO ---------- -->
-    <section class="hero">
-      <div class="pad">
-        <div class="stagger">
-            <span class="eyebrow"><span class="dot"></span> Open source · Tauri 2 <span class="pill">v0.6</span></span>
-            <h1>The database client with an <span class="hl">AI copilot</span> built in.</h1>
-            <p class="lede">A fast, compact SQL client for Postgres, MySQL and SQLite — bundled with a read-only MCP server so Claude and other assistants can explore your data safely, through the same connections you already use.</p>
-            <div class="cta-row">
-              <a class="btn primary" href="#download">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-                Download Rowhouse
-              </a>
-              <a class="btn" href="#mcp">See the MCP server</a>
-              <span class="cta-note">Free · macOS · Windows · Linux</span>
-            </div>
-          </div>
-        </div>
-
-      <div class="pad">
-        <div class="mockwrap reveal">
-          <div class="shot">
-            <img class="shot-img shot-light" src="app-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Rowhouse showing the users table of a read-only Production MySQL connection — schema tree, query toolbar and a grid with typed NULL, boolean and JSON cells.">
-            <img class="shot-img shot-dark" src="app-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- GALLERY ---------- -->
-    <section class="band" id="tour" style="padding-top:clamp(28px,4vw,44px);padding-bottom:clamp(36px,5vw,56px)">
-      <div class="pad">
-        <div class="gallery">
-          <figure class="reveal">
-            <a class="shot" href="shot-builder-light.jpg" target="_blank" rel="noopener">
-              <img class="shot-img shot-light" src="shot-builder-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Rowhouse visual query builder joining users, orders and order_items with a SUM aggregate and a filter, with the generated SQL beside it.">
-              <img class="shot-img shot-dark" src="shot-builder-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
-            </a>
-            <figcaption><b>Visual query builder</b> — drop tables on a canvas — foreign keys join themselves, the SQL writes itself.</figcaption>
-          </figure>
-          <figure class="reveal">
-            <a class="shot" href="shot-ai-light.jpg" target="_blank" rel="noopener">
-              <img class="shot-img shot-light" src="shot-ai-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Inline AI edit box proposing ORDER BY and LIMIT for a selected query.">
-              <img class="shot-img shot-dark" src="shot-ai-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
-            </a>
-            <figcaption><b>AI inline edit</b> — select SQL, press ⌘I, say what to change, review the diff, accept.</figcaption>
-          </figure>
-          <figure class="reveal">
-            <a class="shot" href="shot-activity-light.jpg" target="_blank" rel="noopener">
-              <img class="shot-img shot-light" src="shot-activity-light.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="Server activity table with active and idle-in-transaction sessions and cancel / terminate buttons.">
-              <img class="shot-img shot-dark" src="shot-activity-dark.jpg" width="1456" height="829" loading="lazy" decoding="async" alt="" aria-hidden="true">
-            </a>
-            <figcaption><b>Server activity</b> — see what's running, cancel a runaway query or kill a stuck session.</figcaption>
-          </figure>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- FEATURES ---------- -->
-    <section class="band" id="features">
-      <div class="pad">
-        <div class="sec-head reveal">
-          <div>
-            <div class="sec-tag">Workflow</div>
-            <h2>Built for people who live in a query editor.</h2>
-          </div>
-          <p class="desc">Compact, keyboard-first, and quick enough to disappear. No Electron bloat — a native Tauri shell over a Rust engine.</p>
-        </div>
-        <div class="features stagger">
-          <div class="feat wide">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 8-4 4 4 4M17 8l4 4-4 4M14 4l-4 16"/></svg></div>
-            <h3>Dialect-aware SQL editor</h3>
-            <p>CodeMirror 6 with syntax highlighting, table autocomplete, and multi-statement scripts. <span class="kbd">⌘↵</span> runs the selection or the whole file into separate result sets.</p>
-            <div class="viz">
-              <div class="vcode"><span class="cmt">-- runs as one script, two result sets</span><br><span style="color:var(--accent-ink)">SELECT</span> count(*) <span style="color:var(--accent-ink)">FROM</span> orders; <span style="color:var(--accent-ink)">SELECT</span> now();</div>
-            </div>
-          </div>
-          <div class="feat mid">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div>
-            <h3>Virtualized result grid</h3>
-            <p>Sort, resize and keyboard-navigate huge sets. JSON, booleans and numbers stay typed; <span class="kbd">⌘C</span> copies any cell. NUMERIC keeps full precision.</p>
-            <div class="vgrid">
-              <div class="vr vh"><span>id</span><span>balance</span><span>active</span></div>
-              <div class="vr"><span>1042</span><span>1299.90</span><span style="color:var(--accent-ink)">true</span></div>
-              <div class="vr"><span>1043</span><span style="color:var(--faint);font-style:italic">NULL</span><span style="color:var(--accent-ink)">false</span></div>
-            </div>
-          </div>
-          <div class="feat sm">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-            <h3>Secrets in the keychain</h3>
-            <p>Passwords live in Keychain or Credential Manager, never in a config file. Profiles are plain JSON.</p>
-          </div>
-          <div class="feat sm">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-            <h3>Read-only mode &amp; tags</h3>
-            <p>Flag a connection red for production and lock it to reads — guarded twice over.</p>
-          </div>
-          <div class="feat sm">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></div>
-            <h3>Command palette</h3>
-            <p>Jump to any connection, table or action with <span class="kbd">⌘K</span>. Light and dark, motion under 160ms.</p>
-          </div>
-          <div class="feat sm">
-            <div class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 7.5 12 3l9 4.5M3 7.5v9L12 21M21 7.5v9L12 21"/></svg></div>
-            <h3>Schema at a glance</h3>
-            <p>Filterable tree of tables and views, with Data and Structure views per table.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- MCP ---------- -->
-    <section class="band" id="mcp">
-      <div class="pad">
-        <div class="sec-head reveal">
-          <div>
-            <div class="sec-tag">rowhouse-mcp</div>
-            <h2>Safe, read-only eyes on your data — for any AI assistant.</h2>
-          </div>
-          <p class="desc">A stdio MCP server ships in the box. It reads the same connections as the app and exposes only the profiles you opt in, so an assistant can answer questions about real data without ever touching it.</p>
-        </div>
-        <div class="mcp-grid reveal">
-          <div class="tools">
-            <div class="tool"><span class="nm">list_connections</span><span class="ds">Connections you've exposed to MCP</span></div>
-            <div class="tool"><span class="nm">list_tables</span><span class="ds">Tables and views in a connection</span></div>
-            <div class="tool"><span class="nm">describe_table</span><span class="ds">Columns, types, nullability, defaults, PK</span></div>
-            <div class="tool"><span class="nm">sample_rows</span><span class="ds">The first N rows of a table</span></div>
-            <div class="tool"><span class="nm">run_query</span><span class="ds">Read-only SQL — SELECT / WITH / SHOW / EXPLAIN</span></div>
-          </div>
-          <div class="code">
-            <div class="bar"><span class="fdot"></span> claude_desktop_config.json</div>
-<pre><span class="p">{</span>
-  <span class="k">"mcpServers"</span>: {
-    <span class="k">"rowhouse"</span>: {
-      <span class="k">"command"</span>: <span class="s">"/Applications/Rowhouse.app/</span>
-<span class="s">        Contents/MacOS/rowhouse-mcp"</span>
-    }
-  }
-<span class="p">}</span></pre>
-          </div>
-        </div>
-        <div class="safety3 stagger">
-          <div class="sfc">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 8.5 8 11 4.6-2.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
-            <h4>Keyword guard</h4>
-            <p>A conservative classifier rejects anything that isn't a plain read before it ever reaches the database.</p>
-          </div>
-          <div class="sfc">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <h4>Read-only transaction</h4>
-            <p>Every query runs inside <code>BEGIN READ ONLY</code>, <code>START TRANSACTION READ ONLY</code>, or <code>PRAGMA query_only</code>.</p>
-          </div>
-          <div class="sfc">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/><circle cx="18" cy="6" r="3"/></svg>
-            <h4>Opt-in per connection</h4>
-            <p>Only profiles you explicitly mark are visible to MCP. Everything else stays invisible to the assistant.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- DATABASES ---------- -->
-    <section class="band" id="databases">
-      <div class="pad">
-        <div class="sec-head reveal">
-          <div>
-            <div class="sec-tag">Drivers</div>
-            <h2>20+ databases, one compact client.</h2>
-          </div>
-          <p class="desc">SQL, key-value, document and wide-column stores — browse, edit, back up and query them the same way. Beta drivers are marked until they have run against live servers in CI.</p>
-        </div>
-        <div class="dbmatrix reveal">
-          <div class="dbrow r-live">
-            <div class="dbhd">
-              <div class="lbl"><span class="ddot live"></span> Shipping <span class="cnt">11</span></div>
-              <p class="sub">Integration-tested in CI — browse, edit, back up and query.</p>
-            </div>
-            <div class="dbchips">
-              <span class="dbchip">PostgreSQL</span><span class="dbchip">MySQL</span><span class="dbchip">MariaDB</span><span class="dbchip">SQLite</span><span class="dbchip">DuckDB</span><span class="dbchip">ClickHouse</span><span class="dbchip">Redis &amp; Upstash</span><span class="dbchip">Neon</span><span class="dbchip">Supabase</span><span class="dbchip">Turso / libSQL</span><span class="dbchip">Cloudflare D1</span>
-            </div>
-          </div>
-          <div class="dbrow r-beta">
-            <div class="dbhd">
-              <div class="lbl"><span class="ddot beta"></span> Beta <span class="cnt">8</span></div>
-              <p class="sub">Wired into CI — verified the first time they run against a live server.</p>
-            </div>
-            <div class="dbchips">
-              <span class="dbchip">SQL Server</span><span class="dbchip">MongoDB</span><span class="dbchip">Cassandra</span><span class="dbchip">ScyllaDB</span><span class="dbchip">CockroachDB</span><span class="dbchip">Redshift</span><span class="dbchip">TiDB</span><span class="dbchip">SingleStore</span>
-            </div>
-          </div>
-          <div class="dbrow r-soon">
-            <div class="dbhd">
-              <div class="lbl"><span class="ddot soon"></span> Roadmap <span class="cnt">4</span></div>
-              <p class="sub">Next up, by demand.</p>
-            </div>
-            <div class="dbchips">
-              <span class="dbchip">Oracle</span><span class="dbchip">Snowflake</span><span class="dbchip">BigQuery</span><span class="dbchip">Elasticsearch</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- PRICING ---------- -->
-    <section class="band" id="pricing">
-      <div class="pad">
-        <div class="sec-head reveal">
-          <div>
-            <div class="sec-tag">Pricing</div>
-            <h2>Free to use. Pay when you want it everywhere.</h2>
-          </div>
-          <p class="desc">The whole client is open source and free — no tab limits, no connection limits. Pro adds encrypted sync, scheduled queries, and governed AI access; Team adds shared workspaces.</p>
-        </div>
-        <div class="plans stagger">
-          <div class="plan">
-            <div><h3>Free</h3></div>
-            <p class="who">For everyone. Forever.</p>
-            <div class="price"><span class="amt">$0</span><span class="per">MIT licensed</span></div>
-            <ul>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>PostgreSQL, MySQL/MariaDB, SQLite, DuckDB, ClickHouse, SQL Server, Neon, Supabase &amp; more</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Inline editing with SQL review, filters &amp; paging</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>SSH tunnels, TLS, keychain secrets</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>AI with your own model — ask, fix, explain</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Read-only MCP server for Claude, Cursor &amp; co.</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>ERD, query plans, schema &amp; data compare</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Import from DBeaver, TablePlus, Navicat</span></li>
-            </ul>
-            <a class="btn" href="#download">Download</a>
-          </div>
-          <div class="plan pick">
-            <span class="badge">EARLY ACCESS</span>
-            <div><h3>Pro</h3></div>
-            <p class="who">For people who live in their database.</p>
-            <div class="price"><span class="amt">$49</span><span class="per">one-time · 1 year of updates</span></div>
-            <p class="price-alt">or $5 / month · all your devices</p>
-            <ul>
-              <li class="inc"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Everything in Free</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Sync connections &amp; saved queries across devices through your own iCloud / Dropbox / OneDrive folder (end-to-end encrypted)</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>MCP write tools with in-app approval &amp; audit log</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Scheduled queries &amp; exports</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Signed installers with auto-update</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Priority email support</span></li>
-            </ul>
-            <a class="btn primary" href="https://github.com/giankbr/rowhouse/discussions">Join the waitlist</a>
-          </div>
-          <div class="plan">
-            <div><h3>Team</h3></div>
-            <p class="who">For teams sharing databases and AI.</p>
-            <div class="price"><span class="amt">$8</span><span class="per">per member / month</span></div>
-            <p class="price-alt">billed yearly · 3 seats minimum</p>
-            <ul>
-              <li class="inc"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Everything in Pro</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Shared team workspace: connections, snippets, environments</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Per-member access &amp; production policies</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Central MCP policy for every AI assistant on the team</span></li>
-              <li><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Invoice billing</span></li>
-            </ul>
-            <a class="btn" href="https://github.com/giankbr/rowhouse/discussions">Talk to us</a>
-          </div>
-        </div>
-        <p class="plan-note">Prices in USD. Scheduled queries, folder sync and MCP write approvals ship today; team workspaces and policies are on the roadmap.</p>
-        <div class="faq reveal">
-          <div><h4>Is Rowhouse still open source?</h4><p>Yes. The client — every feature in Free — stays MIT-licensed on GitHub. You can build it yourself and use it commercially.</p></div>
-          <div><h4>Why pay, then?</h4><p>Pro and Team pay for the extras (sync, schedules, team workspaces, policies) and for signed builds with auto-update. They also keep the free client maintained.</p></div>
-          <div><h4>Does my data go through your servers?</h4><p>No. Queries run directly from your machine, and sync never touches a Rowhouse server: it writes one file, encrypted with your passphrase, into a folder you already sync. Passwords are only included if you opt in.</p></div>
-          <div><h4>What happens after a year of Pro updates?</h4><p>Your license keeps working forever with the last version you got. Renew whenever you want the newer releases.</p></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- DOWNLOAD ---------- -->
-    <section class="band" id="download">
-      <div class="pad">
-        <div class="sec-head reveal">
-          <div>
-            <div class="sec-tag">Download</div>
-            <h2>Open the house. Read every row.</h2>
-          </div>
-          <p class="desc">Free and open source under the MIT license. Pick the build for your platform — your connections and secrets never leave your machine.</p>
-        </div>
-        <div class="dl-grid stagger">
-          <a class="dl" href="https://github.com/giankbr/rowhouse/releases">
-            <svg class="os-ic" width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 12.5c-.03-2.6 2.13-3.85 2.22-3.91-1.21-1.77-3.1-2.02-3.77-2.05-1.6-.16-3.13.94-3.94.94-.81 0-2.07-.92-3.4-.9-1.75.03-3.36 1.02-4.26 2.58-1.82 3.16-.47 7.83 1.3 10.4.86 1.26 1.89 2.67 3.24 2.62 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.39.81 1.4-.02 2.29-1.28 3.14-2.55.99-1.46 1.4-2.88 1.42-2.95-.03-.01-2.72-1.04-2.75-4.14M14.6 4.6c.72-.87 1.2-2.08 1.07-3.29-1.03.04-2.28.69-3.02 1.56-.66.77-1.24 2-1.08 3.18 1.15.09 2.32-.58 3.03-1.45"/></svg>
-            <div class="dlt"><h3>macOS</h3><div class="fmt">.dmg · Apple silicon &amp; Intel</div></div>
-            <svg class="arr" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5"/></svg>
-          </a>
-          <a class="dl" href="https://github.com/giankbr/rowhouse/releases">
-            <svg class="os-ic" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.1 10.4 4v7.4H3V5.1Zm0 13.8L10.4 20v-7.3H3v6.1Zm8.3 1.3L21 21.4V12.7h-9.7V20.2Zm0-16.4v7.4H21V2.6l-9.7 1.2Z"/></svg>
-            <div class="dlt"><h3>Windows</h3><div class="fmt">.msi · x64 installer</div></div>
-            <svg class="arr" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5"/></svg>
-          </a>
-          <a class="dl" href="https://github.com/giankbr/rowhouse/releases">
-            <svg class="os-ic" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
-            <div class="dlt"><h3>Linux</h3><div class="fmt">.AppImage · .deb</div></div>
-            <svg class="arr" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 10l5 5 5-5"/></svg>
-          </a>
-        </div>
-        <p class="dl-note">v0.6 · every build on <a href="https://github.com/giankbr/rowhouse/releases">GitHub Releases</a></p>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <div class="pad">
-      <div class="foot-top reveal">
-        <div class="foot-brand">
-          <span class="brand"><svg width="22" height="22"><use href="#rh-mark"/></svg> Rowhouse</span>
-          <p>A fast, compact database client with a read-only MCP server built in. Open source, MIT-licensed.</p>
-        </div>
-        <div class="foot-col">
-          <h4>Product</h4>
-          <a href="#features">Features</a>
-          <a href="#mcp">MCP server</a>
-          <a href="#databases">Databases</a>
-          <a href="#pricing">Pricing</a>
-          <a href="#download">Download</a>
-        </div>
-        <div class="foot-col">
-          <h4>Project</h4>
-          <a href="https://github.com/giankbr/rowhouse">GitHub</a>
-          <a href="https://github.com/giankbr/rowhouse/releases">Releases</a>
-          <a href="https://github.com/giankbr/rowhouse/blob/master/README.md">Documentation</a>
-          <a href="https://github.com/giankbr/rowhouse/issues">Report an issue</a>
-        </div>
-        <div class="foot-col">
-          <h4>Databases</h4>
-          <a href="#databases">PostgreSQL</a>
-          <a href="#databases">MySQL &amp; MariaDB</a>
-          <a href="#databases">SQLite</a>
-        </div>
-      </div>
-      <div class="foot-bar">
-        <span class="mono">© 2026 <a href="https://www.novagen.id/">Novagen</a> · MIT License</span>
-        <span>Built with Tauri, Rust &amp; React</span>
-        <a class="gh" href="https://github.com/giankbr/rowhouse">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.7 5.4-5.28 5.69.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"/></svg>
-          giankbr/rowhouse
-        </a>
-      </div>
+    <div class="nav-right">
+      <a class="icon-btn" href="https://github.com/giankbr/rowhouse" aria-label="Rowhouse on GitHub"><i data-lucide="github"></i></a>
+      <button class="icon-btn" id="themeBtn" aria-label="Switch light or dark"><i data-lucide="moon"></i></button>
+      <a class="btn btn-primary btn-sm" href="#download"><i data-lucide="download"></i>Download</a>
     </div>
-  </footer>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <a class="pill" href="https://github.com/giankbr/rowhouse"><b>FREE</b>Open source · macOS · Windows · Linux <i data-lucide="arrow-right"></i></a>
+    <h1 id="headline">The database client with<br>an <span class="grad">AI copilot</span> built in.</h1>
+    <p class="lead">A fast, compact SQL client for Postgres, MySQL, SQLite and 20+ more — bundled with a read-only MCP server so Claude and other assistants can explore your data safely, through the same connections you already use.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#download"><i data-lucide="download"></i>Download Rowhouse</a>
+      <a class="btn btn-ghost" href="#mcp"><i data-lucide="plug"></i>See the MCP server</a>
+    </div>
+    <div class="meta">
+      <span><i data-lucide="code"></i>Tauri 2 · Rust + React</span>
+      <span><i data-lucide="database"></i>20+ databases</span>
+      <span><i data-lucide="shield-check"></i>Read-only MCP</span>
+      <span><i data-lucide="cpu"></i>Native, no Electron</span>
+    </div>
+  </div>
+  <div class="stage"><div class="hero-shot">
+    <img src="app-light.jpg" alt="Rowhouse showing the users table of a read-only Production MySQL connection — schema tree, query toolbar and a grid with typed NULL, boolean and JSON cells.">
+  </div></div>
+  <div style="position:relative;max-width:1200px;margin:0 auto"><div class="hero-glow"></div></div>
+</header>
+
+<div class="stats">
+  <div class="wrap">
+    <div class="stat"><strong>20+</strong><span>databases, one client</span></div>
+    <div class="stat"><strong>3</strong><span>platforms, every release</span></div>
+    <div class="stat"><strong>0</strong><span>rows sent to AI</span></div>
+    <div class="stat"><strong>MIT</strong><span>open source</span></div>
+  </div>
 </div>
 
+<section id="features">
+  <div class="wrap">
+    <div class="center">
+      <span class="eyebrow">Tour</span>
+      <h2>Built for people who<em>live in a query editor.</em></h2>
+      <p class="sub">Compact, keyboard-first, and quick enough to disappear — a native Tauri shell over a Rust engine, not an Electron app.</p>
+    </div>
+    <div class="grid-3 panels">
+      <article class="card panel-card"><div class="shot"><img src="shot-builder-light.jpg" alt="Rowhouse visual query builder joining users, orders and order_items with a SUM aggregate and a filter, with the generated SQL beside it." loading="lazy"></div><div class="txt"><h3>Visual query builder</h3><p>Drop tables on a canvas — foreign keys join themselves, and the SQL writes itself beside them.</p></div></article>
+      <article class="card panel-card"><div class="shot"><img src="shot-ai-light.jpg" alt="Inline AI edit box proposing ORDER BY and LIMIT for a selected query." loading="lazy"></div><div class="txt"><h3>AI inline edit</h3><p>Select SQL, press ⌘I, say what to change. Review the diff, then accept — streaming, with your own model.</p></div></article>
+      <article class="card panel-card"><div class="shot"><img src="shot-activity-light.jpg" alt="Server activity table with active and idle-in-transaction sessions and cancel / terminate buttons." loading="lazy"></div><div class="txt"><h3>Server activity</h3><p>See what's running live, cancel a runaway query, or kill a stuck session — right from the app.</p></div></article>
+    </div>
+  </div>
+</section>
+
+<section id="capabilities" style="border-top:1px solid var(--border)">
+  <div class="wrap">
+    <div class="center">
+      <span class="eyebrow">Features</span>
+      <h2>Everything in one window.<em>No tab sprawl.</em></h2>
+      <p class="sub">Connect, browse, edit, query, visualize and ship — with production rails that keep you out of trouble.</p>
+    </div>
+    <div class="grid-3 feat-grid">
+      <article class="feature"><div><h3><span><i data-lucide="database"></i></span>Connections</h3><p>Passwords in the OS keychain, per-connection read-only mode, color tags, and import from DBeaver, TablePlus and Navicat.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="lock"></i></span>SSH &amp; TLS</h3><p>SSH tunnels (key, agent or password, host-key pinning) and full TLS — prefer, require, verify-ca/full, custom CA and client certs.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="table-2"></i></span>Inline editing</h3><p>Edit with a PK-guarded SQL preview, range select + bulk ops, paste from a spreadsheet, and commit atomically.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="sparkles"></i></span>AI copilot</h3><p>Ask, Fix, Explain and inline edit with your own model (OpenAI-compatible or Anthropic). Only schema and SQL leave the machine.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="git-compare"></i></span>ERD &amp; compare</h3><p>An ER diagram built from foreign keys, schema compare with a migration script, and PK-matched data compare with a sync script.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="gauge"></i></span>Query plan</h3><p>EXPLAIN as a tree with cost/time bars and hints — full scans, bad estimates, disk sorts. ANALYZE runs read-only.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="archive"></i></span>Backup / restore</h3><p>pg_dump, pg_restore, psql, mysqldump, mysql and SQLite VACUUM INTO, driven from the app.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="clock"></i></span>Scheduled queries</h3><p>Interval, daily or weekly — export to CSV/JSON and notify on failure or when the results change.</p></div></article>
+      <article class="feature"><div><h3><span><i data-lucide="shield-alert"></i></span>Production rails</h3><p>Tag connections Local → Production; production starts read-only, gets a red frame, and destructive SQL asks for the table name.</p></div></article>
+    </div>
+  </div>
+</section>
+
+<section id="databases">
+  <div class="wrap">
+    <div class="center">
+      <span class="eyebrow">Drivers</span>
+      <h2>20+ databases,<em>one compact client.</em></h2>
+      <p class="sub">SQL, key-value, document and wide-column stores — browse, edit, back up and query them the same way.</p>
+    </div>
+    <div class="db-groups">
+      <article class="card db-group" style="--g:var(--live)">
+        <div class="ghead"><i class="dot"></i><h3>Shipping</h3><span class="cnt">11</span></div>
+        <p class="note">Integration-tested in CI.</p>
+        <div class="db-chips">
+          <span class="db-chip">PostgreSQL</span><span class="db-chip">MySQL</span><span class="db-chip">MariaDB</span><span class="db-chip">SQLite</span><span class="db-chip">DuckDB</span><span class="db-chip">ClickHouse</span><span class="db-chip">Redis &amp; Upstash</span><span class="db-chip">Neon</span><span class="db-chip">Supabase</span><span class="db-chip">Turso / libSQL</span><span class="db-chip">Cloudflare D1</span>
+        </div>
+      </article>
+      <article class="card db-group" style="--g:#E0A126">
+        <div class="ghead"><i class="dot"></i><h3>Beta</h3><span class="cnt">8</span></div>
+        <p class="note">Wired into CI — verified on first run against a live server.</p>
+        <div class="db-chips">
+          <span class="db-chip">SQL Server</span><span class="db-chip">MongoDB</span><span class="db-chip">Cassandra</span><span class="db-chip">ScyllaDB</span><span class="db-chip">CockroachDB</span><span class="db-chip">Redshift</span><span class="db-chip">TiDB</span><span class="db-chip">SingleStore</span>
+        </div>
+      </article>
+      <article class="card db-group soon" style="--g:var(--text-3)">
+        <div class="ghead"><i class="dot"></i><h3>Roadmap</h3><span class="cnt">4</span></div>
+        <p class="note">Next up, by demand.</p>
+        <div class="db-chips">
+          <span class="db-chip">Oracle</span><span class="db-chip">Snowflake</span><span class="db-chip">BigQuery</span><span class="db-chip">Elasticsearch</span>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="mcp" style="border-top:1px solid var(--border)">
+  <div class="wrap">
+    <div class="center">
+      <span class="eyebrow">MCP server</span>
+      <h2>A read-only MCP server,<em>built right in.</em></h2>
+      <p class="sub">Rowhouse bundles <code>rowhouse-mcp</code> as a sidecar. It shares your connections, so an assistant explores your real data — safely.</p>
+    </div>
+    <div class="mcp-split">
+      <article class="card mcp-tools">
+        <div class="row"><code>list_connections</code><small>Saved connections visible to MCP</small></div>
+        <div class="row"><code>list_tables</code><small>Tables &amp; views</small></div>
+        <div class="row"><code>describe_table</code><small>Columns, types, nullability, defaults, PK</small></div>
+        <div class="row"><code>sample_rows</code><small>First N rows of a table</small></div>
+        <div class="row"><code>run_query</code><small>Read-only SQL; reads for Redis, find/aggregate for MongoDB</small></div>
+        <div class="row"><code>execute_sql</code><small>A write — only after you approve it in Rowhouse</small></div>
+      </article>
+      <article class="card mcp-aside">
+        <h3>Safe by construction</h3>
+        <ul>
+          <li><i data-lucide="check"></i>Every query passes a keyword guard <em>and</em> runs in a read-only transaction.</li>
+          <li><i data-lucide="check"></i>Writes always wait for your approval; destructive ones need the table name typed.</li>
+          <li><i data-lucide="check"></i>Only profiles you mark “Expose to AI” are visible.</li>
+        </ul>
+        <p style="margin-top:4px">Point any MCP client (Claude Desktop, Cursor, …) at the bundled binary:</p>
+        <pre class="code"><span class="p">{</span> <span class="k">"mcpServers"</span>: <span class="p">{</span> <span class="k">"rowhouse"</span>: <span class="p">{</span>
+    <span class="k">"command"</span>: <span class="s">"/path/to/rowhouse-mcp"</span>
+<span class="p">} } }</span></pre>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="border-top:1px solid var(--border)">
+  <div class="wrap faq">
+    <div>
+      <span class="eyebrow">FAQ</span>
+      <h2>Questions,<em>answered.</em></h2>
+      <p class="sub">Rowhouse is free, open and compact. If something isn't covered here, <a href="https://github.com/giankbr/rowhouse/issues" style="color:var(--accent)">open an issue on GitHub</a>.</p>
+    </div>
+    <div>
+      <details open><summary>Is Rowhouse really free?<i data-lucide="chevron-down"></i></summary><p>Yes. The client is MIT-licensed and free — no tab limits, no connection limits. You can build it yourself and use it commercially.</p></details>
+      <details><summary>What does the AI see?<i data-lucide="chevron-down"></i></summary><p>Only the schema (names and types) and the SQL you wrote. Rows never leave your machine. Bring your own model — any OpenAI-compatible API (OpenAI, OpenRouter, Ollama, LM Studio) or Anthropic.</p></details>
+      <details><summary>How does the MCP server stay safe?<i data-lucide="chevron-down"></i></summary><p>Reads pass a keyword guard and run inside a read-only transaction (<code>BEGIN READ ONLY</code> on Postgres, <code>START TRANSACTION READ ONLY</code> on MySQL, <code>PRAGMA query_only</code> on SQLite). Writes always wait for your approval in the app.</p></details>
+      <details><summary>Why does macOS say the app can't be opened?<i data-lucide="chevron-down"></i></summary><p>The builds aren't code-signed yet. Right-click the app and choose Open once, or run <code>xattr -dr com.apple.quarantine /Applications/Rowhouse.app</code>.</p></details>
+      <details><summary>Which platforms are supported?<i data-lucide="chevron-down"></i></summary><p>macOS (universal — Apple silicon &amp; Intel), Windows (x64) and Linux (AppImage, .deb, .rpm). Installers for all three are built on every release.</p></details>
+      <details><summary>Which databases work today?<i data-lucide="chevron-down"></i></summary><p>Postgres, MySQL/MariaDB, SQLite, DuckDB, ClickHouse, Redis, Neon, Supabase, Turso/libSQL and Cloudflare D1 are integration-tested. SQL Server, MongoDB, Cassandra/ScyllaDB and more are in beta. See the <a href="#databases" style="color:var(--accent)">full list</a>.</p></details>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="center">
+      <span class="eyebrow">Get Rowhouse</span>
+      <h2>Download for your OS.<em>All free, no account.</em></h2>
+      <p class="sub">Open source, no tracking. Grab the installer for your platform from GitHub Releases.</p>
+    </div>
+    <div class="get-grid">
+      <article class="card get">
+        <div class="title"><b><i data-lucide="apple"></i>macOS</b></div>
+        <p class="meta-line"><span class="ver">v0.6.0</span> · universal · Apple silicon &amp; Intel</p>
+        <div class="files"><span>.dmg</span><span>.app.tar.gz</span></div>
+        <a class="btn btn-primary" href="https://github.com/giankbr/rowhouse/releases/latest"><i data-lucide="download"></i>Download .dmg</a>
+        <div class="term"><span>$</span><code id="cmd">xattr -dr com.apple.quarantine /Applications/Rowhouse.app</code><button id="copy" aria-label="Copy command"><i data-lucide="copy"></i></button></div>
+      </article>
+      <article class="card get">
+        <div class="title"><b><svg class="lucide" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.1 10.4 4v7.2H3zm8.4-1.2L21 2.5v8.7h-9.6zM3 12.6h7.4v7.3L3 18.8zm8.4 0H21v8.9l-9.6-1.4z"/></svg>Windows</b></div>
+        <p class="meta-line"><span class="ver">v0.6.0</span> · Windows 10 and 11 · x64</p>
+        <div class="files"><span>_x64-setup.exe</span><span>_x64_en-US.msi</span></div>
+        <a class="btn btn-primary" href="https://github.com/giankbr/rowhouse/releases/latest"><i data-lucide="download"></i>Download .exe</a>
+        <div class="term"><span>→</span><code>More info › Run anyway (not signed yet)</code></div>
+      </article>
+      <article class="card get">
+        <div class="title"><b><i data-lucide="box"></i>Linux</b></div>
+        <p class="meta-line"><span class="ver">v0.6.0</span> · x86_64 · GTK / WebKit</p>
+        <div class="files"><span>.AppImage</span><span>.deb</span><span>.rpm</span></div>
+        <a class="btn btn-primary" href="https://github.com/giankbr/rowhouse/releases/latest"><i data-lucide="download"></i>Download AppImage</a>
+        <div class="term"><span>$</span><code>chmod +x Rowhouse_*.AppImage &amp;&amp; ./Rowhouse_*.AppImage</code></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot">
+    <div class="running">Local-first · your data stays on your machine</div>
+    <div class="foot-top">
+      <img src="rowhouse-icon.png" alt="">
+      <div><h4>Rowhouse</h4><p>A fast database client with an AI copilot built in.</p></div>
+      <div class="cta-row">
+        <a class="btn btn-ghost" href="https://github.com/giankbr/rowhouse"><i data-lucide="github"></i>Star on GitHub</a>
+        <a class="btn btn-primary" href="#download"><i data-lucide="download"></i>Download</a>
+      </div>
+    </div>
+    <div class="cols">
+      <div><h5>PRODUCT</h5><a href="#features">Features</a><a href="#databases">Databases</a><a href="#mcp">MCP server</a><a href="#capabilities">Capabilities</a><a href="https://github.com/giankbr/rowhouse/releases">Releases</a></div>
+      <div><h5>PROJECT</h5><a href="https://github.com/giankbr/rowhouse">GitHub</a><a href="https://github.com/giankbr/rowhouse#build">Build from source</a><a href="https://github.com/giankbr/rowhouse/releases">Changelog</a><a href="https://github.com/giankbr/rowhouse/issues">Report an issue</a><a href="https://github.com/giankbr/rowhouse/discussions">Discussions</a></div>
+      <div><h5>PRIVACY</h5><span>No tracking</span><span>Rows never sent to AI</span><span>Passwords in the keychain</span><a href="https://github.com/giankbr/rowhouse#mcp">MCP safety</a></div>
+      <div><h5>REQUIREMENTS</h5><span>macOS 14 or later</span><span>Windows 10 or later</span><span>Linux (GTK/WebKit)</span><span id="version">v0.6.0</span></div>
+    </div>
+    <div class="credits">
+      <div><span class="eyebrow">Credits</span><h4>Standing on open source.</h4><p>The engine that makes Rowhouse possible. Rowhouse's own code is written from scratch.</p></div>
+      <div class="chips" id="chips"></div>
+      <div class="font-note"><i data-lucide="type"></i>Be Vietnam Pro, Inter &amp; JetBrains Mono · SIL Open Font License</div>
+    </div>
+    <div class="bottom"><span>© 2026 <a href="https://www.novagen.id/" style="color:var(--text-2)">Novagen</a> · MIT licensed</span><span>Built with Tauri, Rust &amp; React · no analytics</span></div>
+  </div>
+  <div class="watermark" aria-hidden="true"><span>R</span><span>O</span><span>W</span><span>H</span><span>O</span><span>U</span><span>S</span><span>E</span></div>
+</footer>
+
 <script>
-  (function () {
-    var root = document.documentElement;
+(function () {
+  var root = document.documentElement;
+  function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { return null; } }
 
-    /* theme toggle (initial state already applied in <head>) */
-    var btn = document.getElementById("theme");
-    function current() {
-      if (root.dataset.theme) return root.dataset.theme;
-      return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    }
-    btn.addEventListener("click", function () {
-      var next = current() === "dark" ? "light" : "dark";
-      root.dataset.theme = next;
-      try { localStorage.setItem("rh-theme", next); } catch (e) {}
+  // Credits — the open-source engine Rowhouse builds on
+  var projects = [["Tauri","tauri-apps/tauri"],["sqlx","launchbadge/sqlx"],["rmcp (MCP)","modelcontextprotocol/rust-sdk"],["CodeMirror","codemirror/dev"],["React","facebook/react"],["Tokio","tokio-rs/tokio"],["russh","Eugeny/russh"],["DuckDB","duckdb/duckdb"],["tiberius","prisma/tiberius"],["mongodb","mongodb/mongo-rust-driver"],["scylla","scylladb/scylla-rust-driver"]];
+  document.getElementById("chips").innerHTML = projects.map(function (p) {
+    return '<a href="https://github.com/' + p[1] + '"><i data-lucide="github"></i>' + p[0] + '</a>';
+  }).join("");
+
+  // Theme
+  function setTheme(mode, save) {
+    root.setAttribute("data-theme", mode);
+    var btn = document.getElementById("themeBtn");
+    btn.innerHTML = '<i data-lucide="' + (mode === "dark" ? "sun" : "moon") + '"></i>';
+    if (window.lucide) lucide.createIcons();
+    if (save) store("theme", mode);
+  }
+  var saved = store("theme");
+  setTheme((saved ? saved === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light", false);
+  document.getElementById("themeBtn").addEventListener("click", function () {
+    setTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+  });
+
+  // Copy the xattr command
+  var copyBtn = document.getElementById("copy");
+  if (copyBtn) copyBtn.addEventListener("click", function () {
+    var text = document.getElementById("cmd").textContent, btn = this;
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      btn.innerHTML = '<i data-lucide="check"></i>'; lucide.createIcons();
+      setTimeout(function () { btn.innerHTML = '<i data-lucide="copy"></i>'; lucide.createIcons(); }, 1500);
+    }).catch(function () {});
+  });
+
+  // Latest version from GitHub (public repo)
+  fetch("https://api.github.com/repos/giankbr/rowhouse/releases/latest").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (j && j.tag_name) { document.getElementById("version").textContent = j.tag_name; document.querySelectorAll(".ver").forEach(function (v) { v.textContent = j.tag_name; }); }
+  }).catch(function () {});
+
+  // Headline words rise in
+  var h = document.getElementById("headline");
+  var i = 0;
+  h.innerHTML = h.innerHTML.split("<br>").map(function (line) {
+    return line.replace(/(<span[^>]*>.*?<\/span>|[^\s]+)/g, function (w) { return '<span class="w" style="--i:' + (i++) + '">' + w + '</span>'; });
+  }).join("<br>");
+
+  var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Reveal on scroll
+  var targets = document.querySelectorAll("section h2, section .eyebrow, section .sub, .card, .feature, .stat, details, .foot");
+  targets.forEach(function (el) {
+    el.classList.add("reveal");
+    var siblings = el.parentElement ? Array.prototype.indexOf.call(el.parentElement.children, el) : 0;
+    if (el.matches(".card, .feature, .stat")) el.style.setProperty("--d", (Math.min(siblings, 6) * 0.07) + "s");
+  });
+  if (still || !("IntersectionObserver" in window)) {
+    targets.forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add("in");
+        if (e.target.classList.contains("stat")) count(e.target.querySelector("strong"));
+        seen.unobserve(e.target);
+      });
+    }, { rootMargin: "0px 0px -10% 0px", threshold: 0.12 });
+    targets.forEach(function (el) { seen.observe(el); });
+  }
+
+  // Count up numbers
+  function count(el) {
+    var text = el.textContent, m = text.match(/[\d.]+/);
+    if (!m || still) return;
+    var target = parseFloat(m[0]), decimals = (m[0].split(".")[1] || "").length, start = performance.now();
+    (function step(t) {
+      var k = Math.min(1, (t - start) / 1100), eased = 1 - Math.pow(1 - k, 3);
+      el.textContent = text.replace(m[0], (target * eased).toFixed(decimals));
+      if (k < 1) requestAnimationFrame(step);
+    })(start);
+  }
+
+  // Parallax: hero flattens out of its tilt, glow and watermark drift
+  var shot = document.querySelector(".hero-shot"), shotImg = shot.querySelector("img"), heroEl = document.querySelector(".hero");
+  var wm = document.querySelector(".watermark"), navEl = document.querySelector("nav"), ticking = false;
+  function frame() {
+    ticking = false;
+    var y = window.scrollY, vh = window.innerHeight;
+    navEl.classList.toggle("scrolled", y > 8);
+    if (still) return;
+    var p = Math.min(1, Math.max(0, y / (vh * 0.6)));
+    shot.style.setProperty("--tilt", (18 * (1 - p)).toFixed(2) + "deg");
+    shot.style.setProperty("--zoom", (0.92 + 0.08 * p).toFixed(3));
+    shotImg.style.setProperty("--shift", (-24 * p).toFixed(1) + "px");
+    heroEl.style.setProperty("--glow", (y * 0.35).toFixed(1) + "px");
+    var r = wm.getBoundingClientRect();
+    wm.style.setProperty("--wm", ((r.top - vh) * -0.18).toFixed(1) + "px");
+  }
+
+  // Watermark
+  var letters = wm.querySelectorAll("span");
+  if (!still && "IntersectionObserver" in window) {
+    wm.classList.add("idle");
+    new IntersectionObserver(function (entries, o) {
+      if (entries[0].isIntersecting) { wm.classList.remove("idle"); o.disconnect(); }
+    }, { threshold: 0.25 }).observe(wm);
+  }
+  wm.addEventListener("pointermove", function (e) {
+    letters.forEach(function (l) {
+      var r = l.getBoundingClientRect();
+      l.style.setProperty("--mx", (e.clientX - r.left) + "px");
+      l.style.setProperty("--my", (e.clientY - r.top) + "px");
     });
+  });
+  wm.addEventListener("pointerleave", function () {
+    letters.forEach(function (l) { l.style.removeProperty("--mx"); l.style.removeProperty("--my"); });
+  });
+  window.addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(frame); } }, { passive: true });
+  frame();
 
-    var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (window.lucide) lucide.createIcons();
+})();
 
-    /* scroll-reveal */
-    var targets = document.querySelectorAll(".reveal, .stagger");
-    if (reduce || !("IntersectionObserver" in window)) {
-      targets.forEach(function (el) { el.classList.add("in"); });
-    } else {
-      var io = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
-        });
-      }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });
-      targets.forEach(function (el) { io.observe(el); });
-    }
+// Smooth scrolling + anchor glide
+(function () {
+  if (!window.Lenis || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var lenis = new Lenis({ duration: 1.15, easing: function (t) { return Math.min(1, 1.001 - Math.pow(2, -10 * t)); } });
+  function raf(time) { lenis.raf(time); requestAnimationFrame(raf); }
+  requestAnimationFrame(raf);
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var id = a.getAttribute("href"), target = id === "#" ? 0 : document.querySelector(id);
+    if (target === null) return;
+    e.preventDefault();
+    var nav = document.querySelector("nav");
+    lenis.scrollTo(target, { offset: target === 0 ? 0 : -((nav ? nav.offsetHeight : 0) + 12) });
+    if (id !== "#") history.replaceState(null, "", id);
+  });
+})();
 
-    /* active nav link while scrolling */
-    var links = {};
-    document.querySelectorAll(".nav-links a.txt").forEach(function (a) {
-      var id = a.getAttribute("href").slice(1);
-      if (id) links[id] = a;
-    });
-    var sections = ["features", "mcp", "databases", "download"]
-      .map(function (id) { return document.getElementById(id); })
-      .filter(Boolean);
-    if ("IntersectionObserver" in window && sections.length) {
-      var navio = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (e.isIntersecting) {
-            Object.keys(links).forEach(function (k) { links[k].classList.remove("active"); });
-            var cur = links[e.target.id];
-            if (cur) cur.classList.add("active");
-          }
-        });
-      }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
-      sections.forEach(function (s) { navio.observe(s); });
-    }
-  })();
+// Nav lights the section in view
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll(".nav-links a"));
+  var sections = links.map(function (a) { return document.querySelector(a.getAttribute("href")); });
+  if (!("IntersectionObserver" in window)) return;
+  var shown = new Map();
+  var watch = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { shown.set(e.target, e.isIntersecting ? e.intersectionRect.height : 0); });
+    var best = null, most = 0;
+    sections.forEach(function (sec, i) { var h = shown.get(sec) || 0; if (h > most) { most = h; best = i; } });
+    links.forEach(function (a, i) { a.classList.toggle("on", i === best); });
+  }, { threshold: [0, .1, .25, .5, .75, 1], rootMargin: "-80px 0px -35% 0px" });
+  sections.forEach(function (sec) { if (sec) watch.observe(sec); });
+})();
 </script>
 </body>
 </html>
