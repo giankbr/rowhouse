@@ -261,7 +261,13 @@ fn snippet_key(s: &Snippet) -> String {
     )
 }
 fn dash_fp(d: &crate::dashboards::Dashboard) -> String {
-    fp(&(&d.name, &d.connection_id, &d.tiles, d.refresh_secs))
+    fp(&(
+        &d.name,
+        &d.connection_id,
+        &d.tiles,
+        d.refresh_secs,
+        &d.filters,
+    ))
 }
 fn snippet_fp(s: &Snippet) -> String {
     fp(&(&s.name, &s.sql, &s.connection_id))
@@ -531,14 +537,22 @@ impl Syncer<'_> {
                 let rfp = dash_fp(rd);
                 match dashes.iter().position(|d| d.id == rd.id) {
                     None if base.is_none() => {
-                        let saved = ds.save(rd.clone())?;
+                        // snapshot schedules are per machine (their folders differ)
+                        let saved = ds.save(crate::dashboards::Dashboard {
+                            snapshot: None,
+                            ..rd.clone()
+                        })?;
                         dashes.push(saved);
                         report.pulled_dashboards += 1;
                     }
                     Some(i) => {
                         let lfp = dash_fp(&dashes[i]);
                         if lfp != rfp && base.as_deref() == Some(lfp.as_str()) {
-                            dashes[i] = ds.save(rd.clone())?;
+                            let snapshot = dashes[i].snapshot.clone();
+                            dashes[i] = ds.save(crate::dashboards::Dashboard {
+                                snapshot,
+                                ..rd.clone()
+                            })?;
                             report.pulled_dashboards += 1;
                         }
                     }
@@ -601,7 +615,13 @@ impl Syncer<'_> {
                 at: now(),
                 connections: sorted.clone(),
                 snippets: snips.clone(),
-                dashboards: dashes.clone(),
+                dashboards: dashes
+                    .iter()
+                    .map(|d| crate::dashboards::Dashboard {
+                        snapshot: None,
+                        ..d.clone()
+                    })
+                    .collect(),
             };
             let env = seal(pass, &serde_json::to_vec(&payload)?, salt)?;
             let tmp = folder.join(format!(".{FILE_NAME}.tmp"));

@@ -92,6 +92,40 @@ fn yes() -> bool {
     true
 }
 
+/// The first run of `every` strictly after `since` (unix seconds).
+pub fn next_after(every: &Every, since: i64) -> Option<i64> {
+    match every {
+        Every::Minutes { n } => Some(since + i64::from((*n).max(1)) * 60),
+        Every::Daily { at } => {
+            let t = parse_hm(at).ok()?;
+            let base = local(since);
+            let mut cand = base.date_naive().and_time(t);
+            if Local.from_local_datetime(&cand).earliest()? <= base {
+                cand += chrono::Duration::days(1);
+            }
+            Local
+                .from_local_datetime(&cand)
+                .earliest()
+                .map(|d| d.timestamp())
+        }
+        Every::Weekly { weekday, at } => {
+            let t = parse_hm(at).ok()?;
+            let base = local(since);
+            let today = base.weekday().num_days_from_monday() as i64;
+            let mut days = (i64::from(*weekday) - today).rem_euclid(7);
+            let mut cand = (base.date_naive() + chrono::Duration::days(days)).and_time(t);
+            if Local.from_local_datetime(&cand).earliest()? <= base {
+                days += 7;
+                cand = (base.date_naive() + chrono::Duration::days(days)).and_time(t);
+            }
+            Local
+                .from_local_datetime(&cand)
+                .earliest()
+                .map(|d| d.timestamp())
+        }
+    }
+}
+
 fn parse_hm(s: &str) -> Result<NaiveTime> {
     NaiveTime::parse_from_str(s.trim(), "%H:%M")
         .map_err(|_| Error::Other(format!("time must be HH:MM (got `{s}`)")))
@@ -147,36 +181,7 @@ impl Schedule {
             return None;
         }
         let since = self.last_run_at().unwrap_or(0).max(self.created_at);
-        match &self.every {
-            Every::Minutes { n } => Some(since + i64::from((*n).max(1)) * 60),
-            Every::Daily { at } => {
-                let t = parse_hm(at).ok()?;
-                let base = local(since);
-                let mut cand = base.date_naive().and_time(t);
-                if Local.from_local_datetime(&cand).earliest()? <= base {
-                    cand += chrono::Duration::days(1);
-                }
-                Local
-                    .from_local_datetime(&cand)
-                    .earliest()
-                    .map(|d| d.timestamp())
-            }
-            Every::Weekly { weekday, at } => {
-                let t = parse_hm(at).ok()?;
-                let base = local(since);
-                let today = base.weekday().num_days_from_monday() as i64;
-                let mut days = (i64::from(*weekday) - today).rem_euclid(7);
-                let mut cand = (base.date_naive() + chrono::Duration::days(days)).and_time(t);
-                if Local.from_local_datetime(&cand).earliest()? <= base {
-                    days += 7;
-                    cand = (base.date_naive() + chrono::Duration::days(days)).and_time(t);
-                }
-                Local
-                    .from_local_datetime(&cand)
-                    .earliest()
-                    .map(|d| d.timestamp())
-            }
-        }
+        next_after(&self.every, since)
     }
 
     pub fn is_due(&self, now: i64) -> bool {

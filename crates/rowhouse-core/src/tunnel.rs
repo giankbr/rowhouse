@@ -146,7 +146,7 @@ impl Drop for Tunnel {
     }
 }
 
-pub(crate) fn expand_home(path: &str) -> String {
+pub fn expand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = directories::BaseDirs::new() {
             return home.home_dir().join(rest).to_string_lossy().into_owned();

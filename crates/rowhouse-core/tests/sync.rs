@@ -132,6 +132,8 @@ async fn two_devices_converge() {
         }],
         refresh_secs: 0,
         updated_at: 0,
+        filters: Default::default(),
+        snapshot: None,
     })
     .unwrap();
     assert!(a.syncer().sync(folder, PASS, false).await.unwrap().pushed);
