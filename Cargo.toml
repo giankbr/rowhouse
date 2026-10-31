@@ -23,3 +23,12 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Release: tuned for build time over the last few % of runtime speed. For a desktop
+# DB client the difference is imperceptible, but opt-level 2 + many codegen units cut
+# CI compile time noticeably (and keep local release builds quick too).
+[profile.release]
+opt-level = 2
+codegen-units = 256
+lto = false
+strip = true
