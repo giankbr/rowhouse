@@ -32,6 +32,7 @@ impl Device {
             history: &self.history,
             state_path: self.state.clone(),
             keychain: false,
+            dashboards: Some(self.state.with_file_name("dashboards.json")),
         }
     }
 }
@@ -110,6 +111,49 @@ async fn two_devices_converge() {
     // steady state: nothing moves
     let r = a.syncer().sync(folder, PASS, false).await.unwrap();
     assert!(!r.pushed && r.pulled_connections == 0 && r.pulled_snippets == 0);
+
+    // dashboards travel too, and edits on one side win over an unchanged other side
+    use rowhouse_core::dashboards::{Dashboard, DashboardStore, Tile};
+    let da = DashboardStore::at(a.state.with_file_name("dashboards.json"));
+    let db = DashboardStore::at(b.state.with_file_name("dashboards.json"));
+    da.save(Dashboard {
+        id: "d1".into(),
+        name: "Sales".into(),
+        connection_id: pg.id.clone(),
+        tiles: vec![Tile {
+            id: "t1".into(),
+            title: "Orders".into(),
+            sql: "SELECT 1".into(),
+            snippet_id: None,
+            view: "number".into(),
+            chart: None,
+            w: 3,
+            h: 1,
+        }],
+        refresh_secs: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+    assert!(a.syncer().sync(folder, PASS, false).await.unwrap().pushed);
+    let r = b.syncer().sync(folder, PASS, false).await.unwrap();
+    assert_eq!(r.pulled_dashboards, 1);
+    let mut d = db.list().unwrap().remove(0);
+    d.name = "Sales (team)".into();
+    db.save(d).unwrap();
+    assert!(b.syncer().sync(folder, PASS, false).await.unwrap().pushed);
+    assert_eq!(
+        a.syncer()
+            .sync(folder, PASS, false)
+            .await
+            .unwrap()
+            .pulled_dashboards,
+        1
+    );
+    assert_eq!(da.list().unwrap()[0].name, "Sales (team)");
+    assert!(
+        !a.syncer().sync(folder, PASS, false).await.unwrap().pushed,
+        "steady"
+    );
 
     // deleting locally doesn't resurrect from the file
     a.store.delete(&pg.id).unwrap();
