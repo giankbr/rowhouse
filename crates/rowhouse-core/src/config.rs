@@ -43,6 +43,7 @@ pub enum DbKind {
     Mongodb,
     Cassandra,
     Scylla,
+    Oracle,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -57,10 +58,11 @@ pub enum Driver {
     Redis,
     Mongo,
     Cassandra,
+    Oracle,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 21] = [
+    pub const ALL: [DbKind; 22] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -82,6 +84,7 @@ impl DbKind {
         DbKind::Mongodb,
         DbKind::Cassandra,
         DbKind::Scylla,
+        DbKind::Oracle,
     ];
 
     pub fn driver(self) -> Driver {
@@ -97,6 +100,7 @@ impl DbKind {
             Redis | Upstash => Driver::Redis,
             Mongodb => Driver::Mongo,
             Cassandra | Scylla => Driver::Cassandra,
+            Oracle => Driver::Oracle,
         }
     }
 
@@ -123,6 +127,7 @@ impl DbKind {
             Redis | Upstash => Some(6379),
             Mongodb => Some(27017),
             Cassandra | Scylla => Some(9042),
+            Oracle => Some(1521),
             Sqlite | Duckdb | Turso | D1 => None,
         }
     }
@@ -166,6 +171,9 @@ pub struct ConnectionConfig {
     /// Optional SSH tunnel (bastion / jump host).
     #[serde(default)]
     pub ssh: Option<SshConfig>,
+    /// Oracle: folder with the Instant Client libraries (empty = auto-detect)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_dir: Option<String>,
 }
 
 /// Same names as libpq's `sslmode`.
@@ -269,6 +277,7 @@ impl ConnectionConfig {
                 _ => None,
             },
             ssh: None,
+            client_dir: None,
         }
     }
 

@@ -56,7 +56,7 @@ impl Connection {
         match v {
             Value::Null => "NULL".into(),
             Value::Bool(b) => match self.driver() {
-                Driver::Sqlite | Driver::Mssql | Driver::Clickhouse => {
+                Driver::Sqlite | Driver::Mssql | Driver::Clickhouse | Driver::Oracle => {
                     (if *b { "1" } else { "0" }).into()
                 }
                 _ => (if *b { "TRUE" } else { "FALSE" }).into(),

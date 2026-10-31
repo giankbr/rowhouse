@@ -85,6 +85,7 @@ impl Connection {
             Driver::Mssql => format!("CAST({col} AS NVARCHAR(MAX))"),
             Driver::Clickhouse => format!("toString({col})"),
             Driver::Duckdb => format!("CAST({col} AS VARCHAR)"),
+            Driver::Oracle => format!("TO_CHAR({col})"),
             _ => format!("CAST({col} AS TEXT)"),
         }
     }
@@ -171,6 +172,14 @@ impl Connection {
             return format!(
                 "SELECT * FROM {t}{w}{order} OFFSET {} ROWS FETCH NEXT {} ROWS ONLY",
                 r.offset, r.limit
+            );
+        }
+        if self.driver() == Driver::Oracle {
+            return format!(
+                "SELECT * FROM {t}{w}{} OFFSET {} ROWS FETCH NEXT {} ROWS ONLY",
+                order.unwrap_or_default(),
+                r.offset,
+                r.limit
             );
         }
         let mut sql = format!(

@@ -27,7 +27,7 @@ pub enum Source {
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
     pub config: ConnectionConfig,
-    /// e.g. "Oracle is not supported yet" — shown greyed out in the UI.
+    /// e.g. "Snowflake is not supported yet" — shown greyed out in the UI.
     pub skipped_reason: Option<String>,
 }
 
@@ -86,6 +86,8 @@ fn kind_from(name: &str) -> Option<DbKind> {
         DbKind::Turso
     } else if has("cloudflared1") || n == "d1" {
         DbKind::D1
+    } else if has("oracle") {
+        DbKind::Oracle
     } else {
         return None;
     })
@@ -524,12 +526,14 @@ mod tests {
             (lite.config.kind, lite.config.file.as_deref()),
             (DbKind::Sqlite, Some("/data/app.db"))
         );
-        assert!(c
-            .iter()
-            .find(|x| x.config.name == "Ora")
-            .unwrap()
-            .skipped_reason
-            .is_some());
+        assert_eq!(
+            c.iter()
+                .find(|x| x.config.name == "Ora")
+                .unwrap()
+                .config
+                .kind,
+            DbKind::Oracle
+        );
         assert_eq!(
             c.iter()
                 .find(|x| x.config.name == "CH")
@@ -584,6 +588,7 @@ mod tests {
   <Connection ConnectionName="Maria" ConnType="MARIADB" Host="m" Port="3306" UserName="root" SSH="false"/>
   <Connection ConnectionName="Mongo" ConnType="MONGODB" Host="mg" Port="27017"/>
   <Connection ConnectionName="Ora" ConnType="ORACLE" Host="o" Port="1521"/>
+  <Connection ConnectionName="Snow" ConnType="SNOWFLAKE" Host="s" Port="443"/>
 </Connections>"#;
         let c = parse_navicat(xml).unwrap();
         assert_eq!(c[0].config.kind, DbKind::Postgres);
@@ -595,7 +600,12 @@ mod tests {
         assert_eq!(c[1].config.kind, DbKind::Mariadb);
         assert!(c[1].config.ssh.is_none());
         assert_eq!(c[2].config.kind, DbKind::Mongodb);
-        assert!(c[3].skipped_reason.as_deref().unwrap().contains("ORACLE"));
+        assert_eq!(c[3].config.kind, DbKind::Oracle);
+        assert!(c[4]
+            .skipped_reason
+            .as_deref()
+            .unwrap()
+            .contains("SNOWFLAKE"));
     }
 
     #[test]

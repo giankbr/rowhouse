@@ -47,6 +47,13 @@ jobs:
       mongo:
         image: mongo:7
         ports: ["27017:27017"]
+      oracle:
+        image: gvenzl/oracle-free:23-slim-faststart
+        env: { ORACLE_PASSWORD: rowhouse, APP_USER: rh, APP_USER_PASSWORD: rh }
+        ports: ["1521:1521"]
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s --health-timeout 5s --health-retries 30
       cassandra:
         image: cassandra:5
         env: { MAX_HEAP_SIZE: 512M, HEAP_NEWSIZE: 128M }
@@ -66,6 +73,12 @@ jobs:
       - run: cargo fmt --all --check
       - name: Start CockroachDB
         run: docker run -d --name crdb -p 26257:26257 cockroachdb/cockroach:latest-v24.3 start-single-node --insecure
+      - name: Oracle Instant Client
+        run: |
+          sudo apt-get install -y libaio1t64 || sudo apt-get install -y libaio1
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 || true
+          curl -sSL -o /tmp/ic.zip https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
+          sudo mkdir -p /opt/oracle && sudo unzip -q /tmp/ic.zip -d /opt/oracle
       - name: Wait for SQL Server
         run: |
           for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/1433) 2>/dev/null && break; sleep 2; done
@@ -81,6 +94,7 @@ jobs:
           ROWHOUSE_TEST_MONGO: localhost:27017
           ROWHOUSE_TEST_CASSANDRA: localhost:9042
           ROWHOUSE_TEST_COCKROACH: localhost:26257:root
+          ROWHOUSE_TEST_ORACLE: localhost:1521:rh:rh:FREEPDB1
 
   desktop:
     strategy:

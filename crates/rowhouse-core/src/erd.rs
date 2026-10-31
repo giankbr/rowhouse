@@ -88,6 +88,16 @@ impl Connection {
                  ORDER BY 1, 8"
                     .to_string(),
             ),
+            Driver::Oracle => Some(
+                "SELECT c.constraint_name, c.owner, c.table_name, cc.column_name, r.owner, r.table_name, rc.column_name, cc.position
+                 FROM all_constraints c
+                 JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name
+                 JOIN all_constraints r ON r.owner = c.r_owner AND r.constraint_name = c.r_constraint_name
+                 JOIN all_cons_columns rc ON rc.owner = r.owner AND rc.constraint_name = r.constraint_name AND rc.position = cc.position
+                 WHERE c.constraint_type = 'R' AND c.owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N')
+                 ORDER BY 1, 8"
+                    .to_string(),
+            ),
             Driver::Duckdb => Some(
                 // one row per constraint; columns arrive as lists
                 "SELECT constraint_name, schema_name, table_name, constraint_column_names,

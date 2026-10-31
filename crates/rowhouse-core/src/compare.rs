@@ -264,6 +264,12 @@ impl Connection {
                                 out.push(format!("-- default of {col} differs ({:?}); SQL Server defaults are named constraints — change by hand", to.default));
                             }
                         }
+                        Driver::Oracle => {
+                            let null = if has("nullable") { if to.nullable { " NULL" } else { " NOT NULL" } } else { "" };
+                            let dflt = if has("default") { format!(" DEFAULT {}", to.default.clone().unwrap_or_else(|| "NULL".into())) } else { String::new() };
+                            let ty = if has("type") { format!(" {}", to.data_type) } else { String::new() };
+                            out.push(format!("ALTER TABLE {tb} MODIFY ({col}{ty}{dflt}{null});"));
+                        }
                         Driver::Redis | Driver::Mongo => out.push("-- no column schema to alter".into()),
                         Driver::Cassandra => out.push(format!("-- CQL can't change {col} in place ({}); add a new column and copy the data", aspects.join(", "))),
                         Driver::Sqlite => out.push(format!(

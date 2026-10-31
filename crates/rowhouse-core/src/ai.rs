@@ -153,6 +153,7 @@ fn dialect_name(kind: DbKind) -> &'static str {
         Duckdb => "DuckDB",
         Mssql => "Microsoft SQL Server (T-SQL)",
         Clickhouse => "ClickHouse",
+        Oracle => "Oracle Database (Oracle SQL: FETCH FIRST n ROWS ONLY, no LIMIT; DUAL for scalar selects)",
         Redis | Upstash => "Redis (reply with Redis commands, one per line, instead of SQL)",
         Cassandra => "Apache Cassandra (CQL; filter on partition/clustering keys, no JOINs)",
         Scylla => "ScyllaDB (CQL, Cassandra-compatible; filter on partition/clustering keys, no JOINs)",

@@ -9,6 +9,7 @@ pub mod libsql;
 pub mod mongo;
 pub mod mongo_shell;
 pub mod mssql;
+pub mod oracle;
 pub mod redis;
 
 /// What a statement in `exec_tx` must affect.

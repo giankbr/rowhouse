@@ -243,6 +243,29 @@ impl Connection {
                     .unwrap_or_default();
                 Ok((!parts.is_empty()).then(|| parts.join("\n\n")))
             }
+            Driver::Oracle => {
+                let kind = if first_cell(
+                    self.query_admin(&format!(
+                        "SELECT 1 FROM all_views WHERE owner = {s} AND view_name = {t}"
+                    ))
+                    .await?,
+                    0,
+                )
+                .is_some()
+                {
+                    "VIEW"
+                } else {
+                    "TABLE"
+                };
+                Ok(first_cell(
+                    self.query_admin(&format!(
+                        "SELECT DBMS_METADATA.GET_DDL('{kind}', {t}, {s}) FROM dual"
+                    ))
+                    .await?,
+                    0,
+                )
+                .map(|d| ensure_semicolon(d.trim())))
+            }
             Driver::Mssql => {
                 let view = first_cell(
                     self.query_admin(&format!(
@@ -476,6 +499,12 @@ impl Connection {
                             Error::Other("couldn't read the table definition".into())
                         })?;
                         vec![create]
+                    }
+                    Driver::Oracle => {
+                        return Ok(vec![format!(
+                            "CREATE TABLE {nt} AS SELECT * FROM {t}{}",
+                            if *with_data { "" } else { " WHERE 1 = 0" }
+                        )])
                     }
                     Driver::Duckdb => {
                         return Ok(vec![format!(

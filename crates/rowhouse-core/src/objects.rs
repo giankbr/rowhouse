@@ -91,6 +91,12 @@ impl Connection {
             Driver::Clickhouse => {
                 "SELECT '', name, 'function', NULL FROM system.functions WHERE origin = 'SQLUserDefined' ORDER BY 2"
             }
+            Driver::Oracle => {
+                "SELECT owner, object_name, CASE object_type WHEN 'MATERIALIZED VIEW' THEN 'matview' ELSE LOWER(object_type) END, \
+                   CASE WHEN object_type = 'TRIGGER' THEN (SELECT table_name FROM all_triggers t WHERE t.owner = o.owner AND t.trigger_name = o.object_name) END \
+                 FROM all_objects o WHERE object_type IN ('FUNCTION','PROCEDURE','PACKAGE','TRIGGER','SEQUENCE','TYPE','MATERIALIZED VIEW') \
+                   AND owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N') ORDER BY 3, 1, 2"
+            }
             Driver::Mongo | Driver::Redis | Driver::Cassandra => return Ok(vec![]),
         };
         Ok(self
@@ -125,6 +131,17 @@ impl Connection {
             }
         };
         match (self.driver(), o.kind.as_str()) {
+            (Driver::Oracle, k) => {
+                let ty = match k {
+                    "matview" => "MATERIALIZED_VIEW".to_string(),
+                    other => other.to_uppercase(),
+                };
+                first(
+                    self.rows(&format!("SELECT DBMS_METADATA.GET_DDL('{ty}', {nm}, {sc}) FROM dual")).await?,
+                    0,
+                )
+                .map(|d| d.trim().to_string())
+            }
             (_, "matview") => self.table_ddl(&o.schema, &o.name).await,
             (Driver::Postgres, "function" | "procedure") => first(
                 self.rows(&format!(

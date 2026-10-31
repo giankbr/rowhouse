@@ -89,7 +89,7 @@ impl Connection {
                     if column.name.trim().is_empty() || column.data_type.trim().is_empty() {
                         return Err(Error::Other("a new column needs a name and a type".into()));
                     }
-                    let kw = if d == Driver::Mssql {
+                    let kw = if d == Driver::Mssql || d == Driver::Oracle {
                         "ADD"
                     } else {
                         "ADD COLUMN"
@@ -310,6 +310,17 @@ impl Connection {
                     ]);
                 }
                 rows
+            }
+            Driver::Oracle => {
+                let sql = format!(
+                    "SELECT i.index_name, CASE i.uniqueness WHEN 'UNIQUE' THEN 1 ELSE 0 END, \
+                       CASE WHEN EXISTS (SELECT 1 FROM all_constraints k WHERE k.owner = i.table_owner \
+                         AND k.index_name = i.index_name AND k.constraint_type = 'P') THEN 1 ELSE 0 END, \
+                       (SELECT LISTAGG(c.column_name, ',') WITHIN GROUP (ORDER BY c.column_position) \
+                          FROM all_ind_columns c WHERE c.index_owner = i.owner AND c.index_name = i.index_name), NULL \
+                     FROM all_indexes i WHERE i.table_owner = {s} AND i.table_name = {t} AND i.index_type <> 'LOB'"
+                );
+                self.query_admin(&sql).await?.results.remove(0).rows
             }
             Driver::Duckdb => {
                 let sql = format!(

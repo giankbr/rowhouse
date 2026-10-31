@@ -117,6 +117,7 @@ enum Pool {
     Lite(SqlitePool),
     Duck(backend::duck::Client),
     Mssql(backend::mssql::Client),
+    Oracle(backend::oracle::Client),
     Ch(backend::clickhouse::Client),
     Redis(backend::redis::Client),
     Mongo(backend::mongo::Client),
@@ -304,6 +305,17 @@ impl Connection {
                 )
                 .await?,
             ),
+            Driver::Oracle => Pool::Oracle(
+                backend::oracle::Client::connect(
+                    &host,
+                    port,
+                    user,
+                    password,
+                    db,
+                    config.client_dir.as_deref(),
+                )
+                .await?,
+            ),
             Driver::Redis => Pool::Redis(
                 backend::redis::Client::connect(
                     &host,
@@ -390,6 +402,7 @@ impl Connection {
             Pool::Pg(p) => p.close().await,
             Pool::My(p) => p.close().await,
             Pool::Lite(p) => p.close().await,
+            Pool::Oracle(c) => c.close(),
             _ => {}
         }
     }
@@ -471,6 +484,10 @@ impl Connection {
     /// Ask the server to stop the query started with `tag`. `Ok(false)` when the
     /// engine can't cancel server-side (dropping the future is all there is).
     pub async fn cancel(&self, tag: &str) -> Result<bool> {
+        if let Pool::Oracle(c) = &self.pool {
+            c.cancel()?;
+            return Ok(true);
+        }
         let id = self.running.lock().ok().and_then(|mut m| m.remove(tag));
         let Some(id) = id else { return Ok(false) };
         match &self.pool {
@@ -497,6 +514,7 @@ impl Connection {
             Pool::Lite(p) => run_script!(p, sql, limit, lite_value),
             Pool::Duck(c) => c.run(sql, limit, false).await?,
             Pool::Mssql(c) => c.run(sql, limit, false).await?,
+            Pool::Oracle(c) => c.run(sql, limit, false).await?,
             Pool::Ch(c) => c.run(sql, limit, false).await?,
             Pool::Redis(c) => c.run(sql, limit, false).await?,
             Pool::Mongo(c) => c.run(sql, limit, false).await?,
@@ -574,6 +592,7 @@ impl Connection {
             }
             Pool::Duck(c) => c.run(sql, limit, true).await?,
             Pool::Mssql(c) => c.run(sql, limit, true).await?,
+            Pool::Oracle(c) => c.run(sql, limit, true).await?,
             Pool::Ch(c) => c.run(sql, limit, true).await?,
             Pool::Libsql(c) => c.run(sql, limit, true).await?,
             Pool::D1(c) => c.run(sql, limit, true).await?,
@@ -615,6 +634,7 @@ impl Connection {
             Pool::Lite(p) => sqlx_tx!(p),
             Pool::Duck(c) => c.exec_tx(stmts).await,
             Pool::Mssql(c) => c.exec_tx(stmts).await,
+            Pool::Oracle(c) => c.exec_tx(stmts).await,
             Pool::Libsql(c) => c.exec_tx(stmts).await,
             Pool::D1(c) => c.exec_tx(stmts).await,
             Pool::Cql(c) => c.exec_tx(stmts).await,
@@ -643,6 +663,9 @@ impl Connection {
             return c.raw(&["PING".into()]).await.map(|_| ());
         }
         if let Pool::Mongo(c) = &self.pool {
+            return c.ping().await;
+        }
+        if let Pool::Oracle(c) = &self.pool {
             return c.ping().await;
         }
         self.meta("SELECT 1").await.map(|_| ())
@@ -730,6 +753,11 @@ impl Connection {
                  WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY 1, 2",
             Driver::Mssql => "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES \
                  WHERE TABLE_SCHEMA NOT IN ('sys','INFORMATION_SCHEMA') ORDER BY 1, 2",
+            Driver::Oracle => "SELECT owner, table_name, 'table' FROM all_tables \
+                 WHERE owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N') AND nested = 'NO' \
+                 AND (iot_type IS NULL OR iot_type = 'IOT') \
+                 UNION ALL SELECT owner, view_name, 'view' FROM all_views \
+                 WHERE owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N') ORDER BY 1, 2",
             Driver::Clickhouse => "SELECT database, name, engine FROM system.tables \
                  WHERE database = currentDatabase() ORDER BY name",
         };
@@ -824,6 +852,21 @@ impl Connection {
                 );
                 self.meta(&sql).await?.rows
             }
+            Driver::Oracle => {
+                let sql = format!(
+                    "SELECT c.column_name, \
+                       CASE WHEN c.data_type IN ('VARCHAR2','NVARCHAR2','CHAR','NCHAR','RAW') THEN c.data_type || '(' || c.char_length || ')' \
+                            WHEN c.data_type = 'NUMBER' AND c.data_precision IS NOT NULL THEN 'NUMBER(' || c.data_precision || ',' || c.data_scale || ')' \
+                            ELSE c.data_type END, \
+                       CASE c.nullable WHEN 'Y' THEN 'YES' ELSE 'NO' END, c.data_default, \
+                       CASE WHEN EXISTS (SELECT 1 FROM all_constraints k JOIN all_cons_columns kc \
+                         ON kc.owner = k.owner AND kc.constraint_name = k.constraint_name \
+                         WHERE k.constraint_type = 'P' AND k.owner = c.owner AND k.table_name = c.table_name \
+                         AND kc.column_name = c.column_name) THEN 1 ELSE 0 END \
+                     FROM all_tab_columns c WHERE c.owner = {s} AND c.table_name = {t} ORDER BY c.column_id"
+                );
+                self.meta(&sql).await?.rows
+            }
             Driver::Clickhouse => {
                 let sql = format!(
                     "SELECT name, type, if(startsWith(type, 'Nullable'), 'YES', 'NO'), \
@@ -875,6 +918,12 @@ impl Connection {
         }
         if self.driver() == Driver::Mssql {
             return format!("SELECT TOP {limit} * FROM {}", self.target(schema, table));
+        }
+        if self.driver() == Driver::Oracle {
+            return format!(
+                "{} FETCH FIRST {limit} ROWS ONLY",
+                self.select_all_sql(schema, table)
+            );
         }
         format!("{} LIMIT {limit}", self.select_all_sql(schema, table))
     }
