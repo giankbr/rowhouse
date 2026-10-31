@@ -8,22 +8,40 @@ on:
 permissions:
   contents: write
 
+# Re-pushing the same tag cancels an in-flight build for it; different tags don't
+# cancel each other.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: "--target universal-apple-darwin"
+          # macOS is built per-arch in parallel (native, no cross-compile) instead of
+          # one universal job compiling both arches — roughly halves the macOS wall time.
+          - platform: macos-latest      # Apple silicon runner
+            args: "--target aarch64-apple-darwin"
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-13          # Intel runner
+            args: "--target x86_64-apple-darwin"
+            rust-targets: x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
+            rust-targets: ""
           - platform: windows-latest
             args: ""
+            rust-targets: ""
 
     runs-on: ${{ matrix.platform }}
     env:
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      # sccache caches individual compiler outputs in the GitHub Actions cache, so a
+      # version bump that busts the target cache still reuses most compilation.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@v4
 
@@ -36,11 +54,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust-targets }}
 
+      - name: Set up sccache
+        uses: mozilla/sccache-action@v0.0.6
+
+      # One rolling cache per runner (shared-key) instead of a new key per release:
+      # stays well under the 10 GB repo limit, so the previous build's dependency
+      # artifacts (DuckDB and friends) are always restored instead of recompiled.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./ -> target"
+          shared-key: "release-${{ matrix.platform }}"
+          cache-all-crates: true
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
