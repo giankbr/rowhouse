@@ -5123,7 +5123,7 @@ dependencies = [
 
 [[package]]
 name = "rowhouse-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "csv",
@@ -5158,7 +5158,7 @@ dependencies = [
 
 [[package]]
 name = "rowhouse-desktop"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rowhouse-core",
  "serde",
@@ -5175,7 +5175,7 @@ dependencies = [
 
 [[package]]
 name = "rowhouse-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "rmcp",
