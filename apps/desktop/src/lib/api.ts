@@ -26,9 +26,10 @@ export type DbKind =
   | "scylla"
   | "elasticsearch"
   | "opensearch"
-  | "bigquery";
+  | "bigquery"
+  | "snowflake";
 
-export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql" | "oracle" | "elastic" | "bigquery";
+export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb" | "mssql" | "clickhouse" | "redis" | "mongodb" | "cql" | "oracle" | "elastic" | "bigquery" | "snowflake";
 
 export interface KindInfo {
   kind: DbKind;
@@ -69,6 +70,7 @@ export const KINDS: KindInfo[] = [
   { kind: "elasticsearch", label: "Elasticsearch", abbr: "Es", color: "#00a3a3", dialect: "elastic", port: 9200, user: null, beta: true },
   { kind: "opensearch", label: "OpenSearch", abbr: "Os", color: "#005eb8", dialect: "elastic", port: 9200, user: null, beta: true },
   { kind: "bigquery", label: "BigQuery", abbr: "Bq", color: "#4285f4", dialect: "bigquery", port: null, user: null, api: true, beta: true },
+  { kind: "snowflake", label: "Snowflake", abbr: "Sf", color: "#29b5e8", dialect: "snowflake", port: null, user: null, api: true, beta: true },
   { kind: "cockroach", label: "CockroachDB", abbr: "Cr", color: "#6933ff", dialect: "postgres", port: 26257, user: "root", beta: true },
   { kind: "redshift", label: "Redshift", abbr: "Rs", color: "#205b97", dialect: "postgres", port: 5439, user: "awsuser", beta: true },
   { kind: "greenplum", label: "Greenplum", abbr: "Gp", color: "#3f8f3f", dialect: "postgres", port: 5432, user: "gpadmin", beta: true },
@@ -125,6 +127,9 @@ export interface ConnectionConfig {
   ssh?: SshConfig | null;
   /** Oracle: Instant Client folder (empty = auto-detect) */
   clientDir?: string | null;
+  /** Snowflake */
+  warehouse?: string | null;
+  role?: string | null;
   env?: Environment;
   tls?: TlsConfig | null;
 }

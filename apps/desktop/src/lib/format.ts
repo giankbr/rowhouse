@@ -11,6 +11,7 @@ const LANG: Partial<Record<Dialect, string>> = {
   cql: "sql",
   oracle: "plsql",
   bigquery: "bigquery",
+  snowflake: "snowflake",
   elastic: "sql",
 };
 

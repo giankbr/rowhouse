@@ -250,6 +250,39 @@ export function ConnectionDialog({
                       <Input type="password" value={password} placeholder={isNew ? "optional" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
                     </Field>
                   </>
+                ) : c.kind === "snowflake" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="Account identifier" hint="From the account URL: <identifier>.snowflakecomputing.com">
+                        <Input value={c.host ?? ""} placeholder="myorg-myaccount" onChange={(e) => set({ host: e.target.value || null })} />
+                      </Field>
+                      <Field label="User">
+                        <Input value={c.user ?? ""} placeholder="ANALYST" onChange={(e) => set({ user: e.target.value || null })} />
+                      </Field>
+                    </div>
+                    <Field label="Private key (key-pair auth)" hint="Unencrypted PKCS#8 .p8 whose public key is set on the user (ALTER USER … SET RSA_PUBLIC_KEY).">
+                      <div className="flex gap-2">
+                        <Input value={c.file ?? ""} placeholder="~/.snowflake/rsa_key.p8" className="font-mono" onChange={(e) => set({ file: e.target.value || null })} />
+                        <Button type="button" onClick={() => dialogs.openAny("Private key", ["p8", "pem"]).then((f) => f && set({ file: f }))}>
+                          Browse…
+                        </Button>
+                      </div>
+                    </Field>
+                    <Field label="Programmatic access token" hint="Instead of a key: a PAT from Snowsight → your profile → Programmatic access tokens.">
+                      <Input type="password" value={password} placeholder={isNew ? "optional" : "•••••• (unchanged)"} onChange={(e) => setPassword(e.target.value)} />
+                    </Field>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="Database">
+                        <Input value={c.database ?? ""} placeholder="SALES or SALES.PUBLIC" onChange={(e) => set({ database: e.target.value || null })} />
+                      </Field>
+                      <Field label="Warehouse">
+                        <Input value={c.warehouse ?? ""} placeholder="COMPUTE_WH" onChange={(e) => set({ warehouse: e.target.value || null })} />
+                      </Field>
+                      <Field label="Role">
+                        <Input value={c.role ?? ""} placeholder="default role" onChange={(e) => set({ role: e.target.value || null })} />
+                      </Field>
+                    </div>
+                  </>
                 ) : c.kind === "d1" ? (
                   <>
                     <div className="grid grid-cols-2 gap-2">
@@ -425,7 +458,7 @@ export function ConnectionDialog({
 const KIND_GROUPS: { label: string; kinds: DbKind[] }[] = [
   { label: "Relational", kinds: ["postgres", "mysql", "mariadb", "mssql", "oracle", "sqlite", "duckdb"] },
   { label: "Cloud", kinds: ["neon", "supabase", "turso", "d1", "upstash", "cockroach", "redshift", "tidb", "singlestore", "greenplum"] },
-  { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "bigquery", "elasticsearch", "opensearch", "cassandra", "scylla"] },
+  { label: "NoSQL & analytics", kinds: ["mongodb", "redis", "clickhouse", "bigquery", "snowflake", "elasticsearch", "opensearch", "cassandra", "scylla"] },
 ];
 
 /** Empty host / port / user fall back to the placeholders' defaults. */
@@ -440,6 +473,7 @@ function defaultName(c: ConnectionConfig) {
   if (kindInfo(c.kind).file) return c.file?.split(/[\\/]/).pop() || kindInfo(c.kind).label;
   if (c.kind === "turso") return c.host?.replace(/^\w+:\/\//, "").split(".")[0] || "Turso";
   if (c.kind === "d1") return `D1 · ${c.database?.slice(0, 8) || "database"}`;
+  if (c.kind === "snowflake") return `Snowflake · ${c.database || c.host || "account"}`;
   if (c.kind === "bigquery") return `BigQuery · ${c.database || c.file?.split(/[\\/]/).pop()?.replace(/\.json$/, "") || "project"}`;
   return `${c.database || kindInfo(c.kind).label}@${c.host || "localhost"}`;
 }

@@ -78,6 +78,7 @@ export function literal(v: string, dialect: string): string {
   const t = v.trim();
   if (/^-?\d+(\.\d+)?$/.test(t) || /^(null|true|false)$/i.test(t)) return t;
   const q = v.replace(/'/g, "''");
+  if (dialect === "snowflake") return `'${q.replace(/\\/g, "\\\\")}'`;
   if (dialect === "bigquery") return `'${v.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
   return dialect === "mysql" || dialect === "clickhouse" ? `'${q.replace(/\\/g, "\\\\")}'` : `'${q}'`;
 }

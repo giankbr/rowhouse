@@ -200,7 +200,7 @@ export function buildSql(state: QbState, d: Dialect): BuiltSql {
     : [state.tables.length > 1 ? state.tables.map((t) => `${t.alias}.*`).join(", ") : "*"];
 
   // WHERE
-  const like = d === "postgres" || d === "duckdb" || d === "clickhouse" ? "ILIKE" : "LIKE";
+  const like = d === "postgres" || d === "duckdb" || d === "clickhouse" || d === "snowflake" ? "ILIKE" : "LIKE";
   const where = state.filters
     .filter((f) => f.col)
     .map((f) => {
