@@ -1,10 +1,12 @@
 //! Drivers that are not sqlx-based. Each exposes the same small surface:
 //! `run` (script → result sets), `exec_tx` (statements in one transaction).
 
+pub mod bigquery;
 pub mod cassandra;
 pub mod clickhouse;
 pub mod d1;
 pub mod duck;
+pub mod elastic;
 pub mod libsql;
 pub mod mongo;
 pub mod mongo_shell;

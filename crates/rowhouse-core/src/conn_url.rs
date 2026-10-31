@@ -62,6 +62,8 @@ pub fn parse_connection_url(input: &str) -> Result<(ConnectionConfig, Option<Str
         "clickhouse" | "ch" => DbKind::Clickhouse,
         "sqlite" | "file" => DbKind::Sqlite,
         "duckdb" => DbKind::Duckdb,
+        "elasticsearch" | "es" => DbKind::Elasticsearch,
+        "opensearch" => DbKind::Opensearch,
         "redis" | "rediss" => {
             if host.ends_with(".upstash.io") {
                 DbKind::Upstash

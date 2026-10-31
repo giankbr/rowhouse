@@ -44,6 +44,9 @@ pub enum DbKind {
     Cassandra,
     Scylla,
     Oracle,
+    Elasticsearch,
+    Opensearch,
+    Bigquery,
 }
 
 /// The engine actually used to talk to a [`DbKind`].
@@ -59,10 +62,12 @@ pub enum Driver {
     Mongo,
     Cassandra,
     Oracle,
+    Elastic,
+    Bigquery,
 }
 
 impl DbKind {
-    pub const ALL: [DbKind; 22] = [
+    pub const ALL: [DbKind; 25] = [
         DbKind::Postgres,
         DbKind::Neon,
         DbKind::Supabase,
@@ -85,6 +90,9 @@ impl DbKind {
         DbKind::Cassandra,
         DbKind::Scylla,
         DbKind::Oracle,
+        DbKind::Elasticsearch,
+        DbKind::Opensearch,
+        DbKind::Bigquery,
     ];
 
     pub fn driver(self) -> Driver {
@@ -101,6 +109,8 @@ impl DbKind {
             Mongodb => Driver::Mongo,
             Cassandra | Scylla => Driver::Cassandra,
             Oracle => Driver::Oracle,
+            Elasticsearch | Opensearch => Driver::Elastic,
+            Bigquery => Driver::Bigquery,
         }
     }
 
@@ -111,7 +121,7 @@ impl DbKind {
 
     /// Talks HTTP to a hosted API (no host/port, no SSH tunnel).
     pub fn is_http_api(self) -> bool {
-        matches!(self, DbKind::Turso | DbKind::D1)
+        matches!(self, DbKind::Turso | DbKind::D1 | DbKind::Bigquery)
     }
 
     pub fn default_port(self) -> Option<u16> {
@@ -128,7 +138,8 @@ impl DbKind {
             Mongodb => Some(27017),
             Cassandra | Scylla => Some(9042),
             Oracle => Some(1521),
-            Sqlite | Duckdb | Turso | D1 => None,
+            Elasticsearch | Opensearch => Some(9200),
+            Sqlite | Duckdb | Turso | D1 | Bigquery => None,
         }
     }
 }

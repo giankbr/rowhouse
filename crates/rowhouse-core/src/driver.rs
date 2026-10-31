@@ -124,6 +124,8 @@ enum Pool {
     Libsql(backend::libsql::Client),
     D1(backend::d1::Client),
     Cql(backend::cassandra::Client),
+    Es(backend::elastic::Client),
+    Bq(backend::bigquery::Client),
 }
 
 pub(crate) enum PoolRef<'a> {
@@ -188,6 +190,39 @@ impl Connection {
         let pool = match config.kind.driver() {
             _ if config.kind == DbKind::Turso => Pool::Libsql(
                 backend::libsql::Client::connect(config.host.as_deref().unwrap_or(""), password)
+                    .await?,
+            ),
+            Driver::Bigquery => {
+                let key = match config
+                    .file
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|f| !f.is_empty())
+                {
+                    Some(f) => Some(
+                        std::fs::read_to_string(crate::tunnel::expand_home(f)).map_err(|e| {
+                            Error::Other(format!("couldn't read the key file {f}: {e}"))
+                        })?,
+                    ),
+                    // a pasted key in the password field works too
+                    None => password
+                        .filter(|p| p.trim_start().starts_with('{'))
+                        .map(str::to_string),
+                };
+                let token = password.filter(|p| !p.trim_start().starts_with('{'));
+                Pool::Bq(
+                    backend::bigquery::Client::connect(
+                        config.host.as_deref(),
+                        db,
+                        user,
+                        key.as_deref(),
+                        token,
+                    )
+                    .await?,
+                )
+            }
+            Driver::Elastic => Pool::Es(
+                backend::elastic::Client::connect(&host, port, user, password, config.tls.as_ref())
                     .await?,
             ),
             _ if config.kind == DbKind::D1 => Pool::D1(
@@ -521,6 +556,8 @@ impl Connection {
             Pool::Libsql(c) => c.run(sql, limit, false).await?,
             Pool::D1(c) => c.run(sql, limit, false).await?,
             Pool::Cql(c) => c.run(sql, limit, false).await?,
+            Pool::Es(c) => c.run(sql, limit).await?,
+            Pool::Bq(c) => c.run(sql, limit, false).await?,
         })
     }
 
@@ -596,6 +633,8 @@ impl Connection {
             Pool::Ch(c) => c.run(sql, limit, true).await?,
             Pool::Libsql(c) => c.run(sql, limit, true).await?,
             Pool::D1(c) => c.run(sql, limit, true).await?,
+            Pool::Es(c) => c.run(sql, limit).await?,
+            Pool::Bq(c) => c.run(sql, limit, true).await?,
             Pool::Redis(_) | Pool::Mongo(_) | Pool::Cql(_) => unreachable!("handled above"),
         };
         Ok(QueryOutput {
@@ -638,6 +677,10 @@ impl Connection {
             Pool::Libsql(c) => c.exec_tx(stmts).await,
             Pool::D1(c) => c.exec_tx(stmts).await,
             Pool::Cql(c) => c.exec_tx(stmts).await,
+            Pool::Bq(c) => c.exec_tx(stmts).await,
+            Pool::Es(_) => Err(Error::Other(
+                "Elasticsearch SQL is read-only — edit documents with the REST API".into(),
+            )),
             Pool::Redis(_) => Err(Error::Other(
                 "editing isn't supported for Redis — use commands in a query tab".into(),
             )),
@@ -667,6 +710,9 @@ impl Connection {
         }
         if let Pool::Oracle(c) = &self.pool {
             return c.ping().await;
+        }
+        if let Pool::Es(c) = &self.pool {
+            return c.tables().await.map(|_| ());
         }
         self.meta("SELECT 1").await.map(|_| ())
     }
@@ -700,6 +746,9 @@ impl Connection {
         }
         if self.redis().is_some() {
             return Ok((0..16).map(|i| i.to_string()).collect());
+        }
+        if matches!(self.pool, Pool::Es(_) | Pool::Bq(_)) {
+            return Ok(vec![]);
         }
         let sql = match self.driver() {
             Driver::Postgres => {
@@ -738,8 +787,18 @@ impl Connection {
         if let Pool::Cql(c) = &self.pool {
             return c.tables().await;
         }
+        if let Pool::Es(c) = &self.pool {
+            return c.tables().await;
+        }
+        if let Pool::Bq(c) = &self.pool {
+            return c.tables().await;
+        }
         let sql = match self.driver() {
-            Driver::Redis | Driver::Mongo | Driver::Cassandra => unreachable!("handled above"),
+            Driver::Redis
+            | Driver::Mongo
+            | Driver::Cassandra
+            | Driver::Elastic
+            | Driver::Bigquery => unreachable!("handled above"),
             Driver::Postgres => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
                  WHERE table_schema NOT IN ('pg_catalog','information_schema','crdb_internal','pg_extension','pg_internal','gp_toolkit') \
                  AND table_schema NOT LIKE 'pg_toast%' ORDER BY 1, 2",
@@ -787,6 +846,12 @@ impl Connection {
         if let Pool::Cql(c) = &self.pool {
             return c.describe(schema, table).await;
         }
+        if let Pool::Es(c) = &self.pool {
+            return c.describe(table).await;
+        }
+        if let Pool::Bq(c) = &self.pool {
+            return c.describe(schema, table).await;
+        }
         if let Pool::Redis(c) = &self.pool {
             // a key has no schema; report the value's type as a single pseudo column
             let ty = c.raw(&["TYPE".into(), table.into()]).await?;
@@ -819,7 +884,11 @@ impl Connection {
             )
         };
         let rows = match self.driver() {
-            Driver::Redis | Driver::Mongo | Driver::Cassandra => unreachable!("handled above"),
+            Driver::Redis
+            | Driver::Mongo
+            | Driver::Cassandra
+            | Driver::Elastic
+            | Driver::Bigquery => unreachable!("handled above"),
             // Redshift's catalog is too old for this query; it uses information_schema below.
             Driver::Postgres if self.kind() != DbKind::Redshift => {
                 // pg_catalog gives full types (varchar(64), numeric(12,2), text[]) and real defaults
@@ -947,6 +1016,7 @@ impl Connection {
     pub fn ident(&self, name: &str) -> String {
         match self.driver() {
             Driver::Mysql | Driver::Clickhouse => format!("`{}`", name.replace('`', "``")),
+            Driver::Bigquery => format!("`{}`", name.replace('\\', "\\\\").replace('`', "\\`")),
             Driver::Mssql => format!("[{}]", name.replace(']', "]]")),
             _ => format!("\"{}\"", name.replace('"', "\"\"")),
         }
@@ -957,6 +1027,7 @@ impl Connection {
             Driver::Mysql | Driver::Clickhouse => {
                 format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
             }
+            Driver::Bigquery => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
             Driver::Mssql => format!("N'{}'", s.replace('\'', "''")),
             _ => format!("'{}'", s.replace('\'', "''")),
         }

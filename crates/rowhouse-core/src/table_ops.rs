@@ -282,7 +282,16 @@ impl Connection {
                     .await?,
                 3,
             )),
-            Driver::Mongo | Driver::Redis => Ok(None),
+            Driver::Bigquery => Ok(first_cell(
+                self.query_admin(&format!(
+                    "SELECT ddl FROM {}.INFORMATION_SCHEMA.TABLES WHERE table_name = {t}",
+                    self.ident(schema)
+                ))
+                .await?,
+                0,
+            )
+            .map(|s| ensure_semicolon(&s))),
+            Driver::Mongo | Driver::Redis | Driver::Elastic => Ok(None),
         }
     }
 
@@ -321,7 +330,7 @@ impl Connection {
             return Err(Error::Other("add at least one column".into()));
         }
         let d = self.driver();
-        if matches!(d, Driver::Mongo | Driver::Redis) {
+        if matches!(d, Driver::Mongo | Driver::Redis | Driver::Elastic) {
             return Err(Error::Other("not available for this database".into()));
         }
         let mut lines = Vec::new();
@@ -440,6 +449,11 @@ impl Connection {
         if d == Driver::Redis {
             return Err(Error::Other("not available for Redis".into()));
         }
+        if d == Driver::Elastic {
+            return Err(Error::Other(
+                "Elasticsearch SQL is read-only — manage indices with the REST API".into(),
+            ));
+        }
         Ok(match action {
             TableAction::Drop => vec![format!("DROP {obj} {t}")],
             TableAction::Truncate => {
@@ -523,7 +537,8 @@ impl Connection {
                             "copy the DDL (Show DDL) to duplicate a Cassandra table".into(),
                         ))
                     }
-                    Driver::Mongo | Driver::Redis => unreachable!(),
+                    Driver::Bigquery => vec![format!("CREATE TABLE {nt} LIKE {t}")],
+                    Driver::Mongo | Driver::Redis | Driver::Elastic => unreachable!(),
                 };
                 if *with_data {
                     v.push(copy);

@@ -97,7 +97,11 @@ impl Connection {
                  FROM all_objects o WHERE object_type IN ('FUNCTION','PROCEDURE','PACKAGE','TRIGGER','SEQUENCE','TYPE','MATERIALIZED VIEW') \
                    AND owner IN (SELECT username FROM all_users WHERE oracle_maintained = 'N') ORDER BY 3, 1, 2"
             }
-            Driver::Mongo | Driver::Redis | Driver::Cassandra => return Ok(vec![]),
+            Driver::Mongo
+            | Driver::Redis
+            | Driver::Cassandra
+            | Driver::Elastic
+            | Driver::Bigquery => return Ok(vec![]),
         };
         Ok(self
             .rows(sql)

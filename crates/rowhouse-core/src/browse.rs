@@ -86,6 +86,8 @@ impl Connection {
             Driver::Clickhouse => format!("toString({col})"),
             Driver::Duckdb => format!("CAST({col} AS VARCHAR)"),
             Driver::Oracle => format!("TO_CHAR({col})"),
+            Driver::Elastic => format!("CAST({col} AS VARCHAR)"),
+            Driver::Bigquery => format!("CAST({col} AS STRING)"),
             _ => format!("CAST({col} AS TEXT)"),
         }
     }
@@ -182,6 +184,14 @@ impl Connection {
                 r.limit
             );
         }
+        if self.driver() == Driver::Elastic {
+            // no OFFSET in Elasticsearch SQL: fetch through the page, table_page skips ahead
+            return format!(
+                "SELECT * FROM {t}{w}{} LIMIT {}",
+                order.unwrap_or_default(),
+                r.offset + r.limit
+            );
+        }
         let mut sql = format!(
             "SELECT * FROM {t}{w}{} LIMIT {}",
             order.unwrap_or_default(),
@@ -224,8 +234,16 @@ impl Connection {
             });
         }
         let sql = self.page_sql(r);
-        let out = self.query(&sql, r.limit).await?;
-        let result = out.results.into_iter().next().unwrap_or_default();
+        let skip = if self.driver() == Driver::Elastic {
+            r.offset
+        } else {
+            0
+        };
+        let out = self.query(&sql, r.limit + skip).await?;
+        let mut result = out.results.into_iter().next().unwrap_or_default();
+        if skip > 0 {
+            result.rows.drain(..skip.min(result.rows.len()));
+        }
         let total = if r.count {
             let count_sql = format!(
                 "SELECT COUNT(*) FROM {}{}",

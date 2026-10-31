@@ -270,7 +270,21 @@ impl Connection {
                             let ty = if has("type") { format!(" {}", to.data_type) } else { String::new() };
                             out.push(format!("ALTER TABLE {tb} MODIFY ({col}{ty}{dflt}{null});"));
                         }
-                        Driver::Redis | Driver::Mongo => out.push("-- no column schema to alter".into()),
+                        Driver::Redis | Driver::Mongo | Driver::Elastic => out.push("-- no column schema to alter".into()),
+                        Driver::Bigquery => {
+                            if has("type") {
+                                out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} SET DATA TYPE {};", to.data_type));
+                            }
+                            if has("nullable") && to.nullable {
+                                out.push(format!("ALTER TABLE {tb} ALTER COLUMN {col} DROP NOT NULL;"));
+                            }
+                            if has("default") {
+                                out.push(match &to.default {
+                                    Some(v) => format!("ALTER TABLE {tb} ALTER COLUMN {col} SET DEFAULT {v};"),
+                                    None => format!("ALTER TABLE {tb} ALTER COLUMN {col} DROP DEFAULT;"),
+                                });
+                            }
+                        }
                         Driver::Cassandra => out.push(format!("-- CQL can't change {col} in place ({}); add a new column and copy the data", aspects.join(", "))),
                         Driver::Sqlite => out.push(format!(
                             "-- SQLite can't alter {col} in place ({}); recreate {tb} with the new definition",

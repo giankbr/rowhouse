@@ -40,7 +40,7 @@ enum Kind {
 
 impl Connection {
     pub(crate) fn target(&self, schema: &str, table: &str) -> String {
-        if self.driver() == Driver::Sqlite {
+        if matches!(self.driver(), Driver::Sqlite | Driver::Elastic) || schema.is_empty() {
             self.ident(table)
         } else {
             format!("{}.{}", self.ident(schema), self.ident(table))

@@ -88,6 +88,12 @@ fn kind_from(name: &str) -> Option<DbKind> {
         DbKind::D1
     } else if has("oracle") {
         DbKind::Oracle
+    } else if has("opensearch") {
+        DbKind::Opensearch
+    } else if has("elastic") {
+        DbKind::Elasticsearch
+    } else if has("bigquery") {
+        DbKind::Bigquery
     } else {
         return None;
     })
