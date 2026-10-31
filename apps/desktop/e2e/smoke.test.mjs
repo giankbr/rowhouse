@@ -76,6 +76,24 @@ describe("Rowhouse UI", () => {
     await p.close();
   });
 
+  test("wide results only render the columns in view", async () => {
+    const p = await fresh();
+    await p.keyboard.press("Control+t");
+    await p.locator(".cm-content").first().click();
+    await p.keyboard.press("Control+a");
+    await p.keyboard.type("SELECT * FROM wide_table");
+    await p.keyboard.press("Control+Enter");
+    await p.locator("text=col_0").first().waitFor();
+    const headers = await p.locator("text=/^col_\\d+$/").count();
+    assert.ok(headers > 5 && headers < 60, `rendered ${headers} of 300 column headers`);
+    // keyboard navigation brings far columns into view
+    await p.locator("text=/^value 0-1$/").first().click();
+    for (let i = 0; i < 40; i++) await p.keyboard.press("ArrowRight");
+    await p.locator("text=col_41").first().waitFor();
+    noErrors();
+    await p.close();
+  });
+
   test("dashboard: filters, snapshot to a destination", async () => {
     const p = await fresh();
     await p.keyboard.press("Control+k");

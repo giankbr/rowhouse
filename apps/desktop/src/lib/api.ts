@@ -1352,6 +1352,12 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
           if (Date.now() > limitAt) throw `query timed out after ${Number(a.timeoutMs) / 1000} s (Settings → Query timeout)`;
         }
       }
+      if (sql.includes("from wide_table")) {
+        // 300 columns × 2000 rows: for checking grid performance in the preview
+        const columns = Array.from({ length: 300 }, (_, i) => ({ name: `col_${i}`, data_type: i % 3 ? "TEXT" : "INT8" }));
+        const rows = Array.from({ length: 2000 }, (_, r) => columns.map((_, c) => (c % 3 ? `value ${r}-${c}` : r * c)));
+        return { elapsed_ms: 40, results: [{ columns, rows, rows_affected: 0, truncated: false }] } satisfies QueryOutput;
+      }
       if ((sql.startsWith("select") || sql.startsWith("with")) && sql.includes("group by")) {
         const rows = Array.from({ length: 14 }, (_, i) => {
           const d = new Date(Date.UTC(2026, 9, 17 + i));

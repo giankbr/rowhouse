@@ -9,6 +9,8 @@ import { rowHeight, useAppearance } from "../lib/appearance";
 import { Button, Kbd, cx } from "./ui";
 
 const INDEX_W = 44;
+/** above this many columns only the ones in view are rendered */
+const WIDE_COLS = 40;
 
 /** A row on screen: an existing result row (by original index) or a new, unsaved one. */
 type DRow = { kind: "orig"; i: number } | { kind: "new"; i: number };
@@ -184,6 +186,24 @@ export function ResultsGrid({
     overscan: 20,
   });
   useEffect(() => virt.measure(), [ROW_H]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wide results: only render the columns in view (300 columns × visible rows
+  // otherwise means thousands of cells per scroll frame).
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+  const colVirt = useVirtualizer({
+    horizontal: true,
+    count: result.columns.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (i) => widthsRef.current[i] ?? 120,
+    paddingStart: INDEX_W,
+    scrollPaddingStart: INDEX_W,
+    overscan: 4,
+  });
+  useEffect(() => colVirt.measure(), [widths]); // eslint-disable-line react-hooks/exhaustive-deps
+  const virtCols = result.columns.length > WIDE_COLS;
+  const visibleCols: number[] = virtCols ? colVirt.getVirtualItems().map((c) => c.index) : result.columns.map((_, i) => i);
+  const leadW = virtCols && visibleCols.length ? colVirt.getVirtualItems()[0].start - INDEX_W : 0;
 
   const total = INDEX_W + widths.reduce((a, b) => a + b, 0);
   const numeric = result.columns.map((c) => isNumericType(c.data_type));
@@ -390,6 +410,7 @@ export function ResultsGrid({
     else setAnchor(null);
     setSel({ r: nr, c: nc });
     virt.scrollToIndex(nr);
+    colVirt.scrollToIndex(nc);
   }
 
   // Keyboard nav, copy, edit shortcuts.
@@ -493,7 +514,8 @@ export function ResultsGrid({
           {/* header */}
           <div className="sticky top-0 z-10 flex border-b border-line bg-panel" style={{ height: ROW_H }}>
             <div className="sticky left-0 z-10 shrink-0 border-r border-line bg-panel" style={{ width: INDEX_W }} />
-            {result.columns.map((col, ci) => (
+            {leadW > 0 && <div className="shrink-0" style={{ width: leadW }} />}
+            {visibleCols.map((ci) => { const col = result.columns[ci]; return (
               <div
                 key={ci}
                 onClick={() =>
@@ -521,7 +543,7 @@ export function ResultsGrid({
                   className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
                 />
               </div>
-            ))}
+            ); })}
           </div>
 
           {/* body */}
@@ -551,7 +573,8 @@ export function ResultsGrid({
                   >
                     {isNew ? "+" : deleted ? "−" : row.i + 1}
                   </div>
-                  {result.columns.map((_, ci) => {
+                  {leadW > 0 && <div className="shrink-0" style={{ width: leadW }} />}
+                  {visibleCols.map((ci) => {
                     const v = valueAt(row, ci);
                     const selected = sel?.r === vr.index && sel?.c === ci;
                     const ranged = rangeCells > 1 && inRange(vr.index, ci);
