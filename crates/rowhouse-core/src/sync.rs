@@ -180,6 +180,8 @@ pub struct Payload {
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub dashboards: Vec<crate::dashboards::Dashboard>,
+    #[serde(default)]
+    pub notebooks: Vec<crate::notebooks::Notebook>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +219,9 @@ pub struct SyncState {
     /// dashboard id → fingerprint at last sync
     #[serde(default)]
     pub dashboards: HashMap<String, String>,
+    /// notebook id → fingerprint at last sync
+    #[serde(default)]
+    pub notebooks: HashMap<String, String>,
 }
 
 impl SyncState {
@@ -244,6 +249,7 @@ pub struct SyncReport {
     pub pulled_connections: usize,
     pub pulled_snippets: usize,
     pub pulled_dashboards: usize,
+    pub pulled_notebooks: usize,
     pub pushed: bool,
     pub remote_device: Option<String>,
 }
@@ -259,6 +265,9 @@ fn snippet_key(s: &Snippet) -> String {
         s.connection_id.as_deref().unwrap_or(""),
         s.name
     )
+}
+fn nb_fp(n: &crate::notebooks::Notebook) -> String {
+    fp(&(&n.name, &n.connection_id, &n.cells, &n.params))
 }
 fn dash_fp(d: &crate::dashboards::Dashboard) -> String {
     fp(&(
@@ -358,6 +367,7 @@ pub fn disable() -> Result<()> {
     st.conns.clear();
     st.snippets.clear();
     st.dashboards.clear();
+    st.notebooks.clear();
     st.save_to(&p)
 }
 
@@ -369,6 +379,8 @@ pub struct Syncer<'a> {
     pub keychain: bool,
     /// dashboards file to sync (None: leave the file's dashboards untouched)
     pub dashboards: Option<PathBuf>,
+    /// notebooks file to sync (None: leave the file's notebooks untouched)
+    pub notebooks: Option<PathBuf>,
 }
 
 impl Syncer<'_> {
@@ -563,6 +575,41 @@ impl Syncer<'_> {
         dashes.sort_by(|a, b| a.id.cmp(&b.id));
         let dash_fps: Vec<String> = dashes.iter().map(dash_fp).collect();
 
+        // ---- notebooks (same rule)
+        let nstore = self
+            .notebooks
+            .clone()
+            .map(crate::notebooks::NotebookStore::at);
+        let mut books = match &nstore {
+            Some(ns) => ns.list()?,
+            None => remote
+                .as_ref()
+                .map(|r| r.0.notebooks.clone())
+                .unwrap_or_default(),
+        };
+        if let (Some(ns), Some((payload, _))) = (&nstore, &remote) {
+            for rn in &payload.notebooks {
+                let base = state.notebooks.get(&rn.id).cloned();
+                let rfp = nb_fp(rn);
+                match books.iter().position(|n| n.id == rn.id) {
+                    None if base.is_none() => {
+                        books.push(ns.save(rn.clone())?);
+                        report.pulled_notebooks += 1;
+                    }
+                    Some(i) => {
+                        let lfp = nb_fp(&books[i]);
+                        if lfp != rfp && base.as_deref() == Some(lfp.as_str()) {
+                            books[i] = ns.save(rn.clone())?;
+                            report.pulled_notebooks += 1;
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        books.sort_by(|a, b| a.id.cmp(&b.id));
+        let nb_fps: Vec<String> = books.iter().map(nb_fp).collect();
+
         // ---- push when our view differs from the file
         if include_secrets {
             if let Some((p, _)) = &remote {
@@ -603,7 +650,10 @@ impl Syncer<'_> {
                 rs.sort_by_key(snippet_key);
                 let mut rd = p.dashboards.clone();
                 rd.sort_by(|a, b| a.id.cmp(&b.id));
+                let mut rn = p.notebooks.clone();
+                rn.sort_by(|a, b| a.id.cmp(&b.id));
                 rd.iter().map(dash_fp).collect::<Vec<_>>() != dash_fps
+                    || rn.iter().map(nb_fp).collect::<Vec<_>>() != nb_fps
                     || serde_json::to_vec(&rc)? != serde_json::to_vec(&sorted)?
                     || fp(&rs.iter().map(snippet_fp).collect::<Vec<_>>())
                         != fp(&snips.iter().map(snippet_fp).collect::<Vec<_>>())
@@ -622,6 +672,7 @@ impl Syncer<'_> {
                         ..d.clone()
                     })
                     .collect(),
+                notebooks: books.clone(),
             };
             let env = seal(pass, &serde_json::to_vec(&payload)?, salt)?;
             let tmp = folder.join(format!(".{FILE_NAME}.tmp"));
@@ -639,6 +690,7 @@ impl Syncer<'_> {
             .map(|s| (snippet_key(s), snippet_fp(s)))
             .collect();
         state.dashboards = dashes.iter().map(|d| (d.id.clone(), dash_fp(d))).collect();
+        state.notebooks = books.iter().map(|n| (n.id.clone(), nb_fp(n))).collect();
         state.last_sync = Some(now());
         state.last_error = None;
         state.folder = Some(folder.to_string_lossy().into());

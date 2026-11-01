@@ -31,6 +31,7 @@ pub mod io;
 pub mod license;
 pub mod mcp_clients;
 pub mod model;
+pub mod notebooks;
 pub mod notify;
 pub mod objects;
 pub mod plan;

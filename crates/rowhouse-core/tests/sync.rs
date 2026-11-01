@@ -33,6 +33,7 @@ impl Device {
             state_path: self.state.clone(),
             keychain: false,
             dashboards: Some(self.state.with_file_name("dashboards.json")),
+            notebooks: Some(self.state.with_file_name("notebooks.json")),
         }
     }
 }
@@ -156,6 +157,36 @@ async fn two_devices_converge() {
         !a.syncer().sync(folder, PASS, false).await.unwrap().pushed,
         "steady"
     );
+
+    // notebooks too
+    use rowhouse_core::notebooks::{NbCell, Notebook, NotebookStore};
+    let na = NotebookStore::at(a.state.with_file_name("notebooks.json"));
+    let nb = NotebookStore::at(b.state.with_file_name("notebooks.json"));
+    na.save(Notebook {
+        id: "nb1".into(),
+        name: "Weekly review".into(),
+        connection_id: pg.id.clone(),
+        cells: vec![NbCell {
+            id: "c1".into(),
+            kind: "sql".into(),
+            source: "SELECT 1".into(),
+            view: None,
+            chart: None,
+        }],
+        params: Default::default(),
+        updated_at: 0,
+    })
+    .unwrap();
+    assert!(a.syncer().sync(folder, PASS, false).await.unwrap().pushed);
+    assert_eq!(
+        b.syncer()
+            .sync(folder, PASS, false)
+            .await
+            .unwrap()
+            .pulled_notebooks,
+        1
+    );
+    assert_eq!(nb.list().unwrap()[0].cells[0].source, "SELECT 1");
 
     // deleting locally doesn't resurrect from the file
     a.store.delete(&pg.id).unwrap();
