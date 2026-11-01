@@ -351,8 +351,9 @@ impl Client {
             script.push_str(";\n");
             let cond = match expect {
                 Expect::Any => None,
-                Expect::One => Some("SQLROWCOUNT <> 1"),
-                Expect::AtMostOne => Some("SQLROWCOUNT > 1"),
+                Expect::One => Some("SQLROWCOUNT <> 1".to_string()),
+                Expect::AtMostOne => Some("SQLROWCOUNT > 1".to_string()),
+                Expect::Exactly(n) => Some(format!("SQLROWCOUNT <> {n}")),
             };
             if let Some(c) = cond {
                 script.push_str(&format!(

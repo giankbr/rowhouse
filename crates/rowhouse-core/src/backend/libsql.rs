@@ -21,16 +21,16 @@ fn err(msg: impl std::fmt::Display) -> Error {
 
 /// Fails the batch (integer overflow) unless the previous statement changed the
 /// expected number of rows.
-pub(crate) fn changes_guard(e: Expect) -> Option<&'static str> {
-    match e {
-        Expect::Any => None,
-        Expect::One => {
-            Some("SELECT CASE WHEN changes() = 1 THEN 1 ELSE abs(-9223372036854775808) END")
-        }
-        Expect::AtMostOne => {
-            Some("SELECT CASE WHEN changes() <= 1 THEN 1 ELSE abs(-9223372036854775808) END")
-        }
-    }
+pub(crate) fn changes_guard(e: Expect) -> Option<String> {
+    let cond = match e {
+        Expect::Any => return None,
+        Expect::One => "= 1".to_string(),
+        Expect::AtMostOne => "<= 1".to_string(),
+        Expect::Exactly(n) => format!("= {n}"),
+    };
+    Some(format!(
+        "SELECT CASE WHEN changes() {cond} THEN 1 ELSE abs(-9223372036854775808) END"
+    ))
 }
 
 impl Client {
@@ -206,7 +206,8 @@ impl Client {
                     .unwrap_or(0);
                 let _ = e;
                 return Err(Error::Other(format!(
-                    "expected 1 row, {n} affected — rolled back.\n{sql}"
+                    "expected {}, {n} affected — rolled back.\n{sql}",
+                    expect.describe()
                 )));
             }
             total += results

@@ -121,14 +121,15 @@ impl Client {
             positions.push(script.len());
             script.push(s.clone());
             if let Some(g) = changes_guard(*e) {
-                script.push(g.to_string());
+                script.push(g);
             }
         }
         let results = self.raw(&script.join(";\n")).await.map_err(|e| {
             let m = e.to_string();
             if m.contains("integer overflow") {
                 Error::Other(
-                    "expected 1 row, a different number would be affected — rolled back".into(),
+                    "a different number of rows than expected would be affected — rolled back"
+                        .into(),
                 )
             } else {
                 e

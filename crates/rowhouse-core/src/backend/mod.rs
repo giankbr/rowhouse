@@ -21,6 +21,8 @@ pub enum Expect {
     Any,
     One,
     AtMostOne,
+    /// exactly this many (committing a previewed statement)
+    Exactly(u64),
 }
 
 impl Expect {
@@ -29,6 +31,18 @@ impl Expect {
             Expect::Any => true,
             Expect::One => n == 1,
             Expect::AtMostOne => n <= 1,
+            Expect::Exactly(x) => n == x,
+        }
+    }
+
+    /// "1 row", "at most 1 row", "12 rows"
+    pub fn describe(self) -> String {
+        match self {
+            Expect::Any => "any number of rows".into(),
+            Expect::One => "1 row".into(),
+            Expect::AtMostOne => "at most 1 row".into(),
+            Expect::Exactly(1) => "1 row".into(),
+            Expect::Exactly(n) => format!("{n} rows"),
         }
     }
 }

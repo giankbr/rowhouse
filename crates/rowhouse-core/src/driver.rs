@@ -706,7 +706,8 @@ impl Connection {
                     if !expect.check(n) {
                         tx.rollback().await?;
                         return Err(Error::Other(format!(
-                            "expected 1 row, {n} affected — rolled back.\n{s}"
+                            "expected {}, {n} affected — rolled back.\n{s}",
+                            expect.describe()
                         )));
                     }
                     total += n;
@@ -747,6 +748,151 @@ impl Connection {
                     .await
             }
         }
+    }
+
+    /// Run an UPDATE / DELETE in a transaction that is rolled back, and report
+    /// the rows it touches (see [`crate::impact`]). Postgres family, MySQL
+    /// family and SQLite files.
+    pub async fn preview_dml(&self, sql: &str) -> Result<crate::impact::Impact> {
+        use crate::impact::{parse, DmlKind, Impact, PREVIEW_ROWS};
+        if self.config.read_only {
+            return Err(Error::ReadOnly(
+                "this connection is read-only — turn that off to change data".into(),
+            ));
+        }
+        let dml = parse(sql)?.ok_or_else(|| {
+            Error::Other("preview works on a single UPDATE or DELETE statement".into())
+        })?;
+        if !matches!(self.pool, Pool::Pg(_) | Pool::My(_) | Pool::Lite(_)) {
+            return Err(Error::Other(format!(
+                "preview isn't available for {:?} yet",
+                self.kind()
+            )));
+        }
+        let (schema, table) = match dml.table.as_slice() {
+            [t] => {
+                let s = match self.driver() {
+                    Driver::Postgres => self.meta("SELECT current_schema()").await?,
+                    Driver::Mysql => self.meta("SELECT DATABASE()").await?,
+                    _ => QueryResult::default(),
+                };
+                let s = s
+                    .rows
+                    .first()
+                    .and_then(|r| r.first())
+                    .map(text)
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| "main".into());
+                (s, t.clone())
+            }
+            [s, t] => (s.clone(), t.clone()),
+            [_, s, t] => (s.clone(), t.clone()),
+            _ => {
+                return Err(Error::Other(
+                    "couldn't tell which table this changes".into(),
+                ))
+            }
+        };
+        let key: Vec<String> = self
+            .describe_table(&schema, &table)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|c| c.primary_key)
+            .map(|c| c.name)
+            .collect();
+        let select = dml.select_sql();
+        let update = dml.kind == DmlKind::Update;
+        let after_sql = |before: &QueryResult| -> Option<String> {
+            if !update || key.is_empty() || before.rows.is_empty() {
+                return None;
+            }
+            let idx: Vec<usize> = key
+                .iter()
+                .map(|k| before.columns.iter().position(|c| &c.name == k))
+                .collect::<Option<_>>()?;
+            let conds: Vec<String> = before
+                .rows
+                .iter()
+                .map(|r| {
+                    let parts: Vec<String> = key
+                        .iter()
+                        .zip(&idx)
+                        .map(|(k, &i)| format!("{} = {}", self.ident(k), self.sql_value(&r[i])))
+                        .collect();
+                    format!("({})", parts.join(" AND "))
+                })
+                .collect();
+            Some(format!(
+                "SELECT * FROM {} WHERE {}",
+                dml.target,
+                conds.join(" OR ")
+            ))
+        };
+        macro_rules! preview_tx {
+            ($pool:expr, $decode:ident) => {{
+                let mut c = $pool.acquire().await?;
+                sqlx::raw_sql("BEGIN").execute(&mut *c).await?;
+                let r: Result<(QueryResult, u64, Option<QueryResult>)> = async {
+                    let before = run_script!(&mut *c, &select, PREVIEW_ROWS + 2, $decode)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_default();
+                    let n = sqlx::raw_sql(AssertSqlSafe(sql.to_string()))
+                        .execute(&mut *c)
+                        .await?
+                        .rows_affected();
+                    let after = match after_sql(&before) {
+                        Some(q) => run_script!(&mut *c, &q, PREVIEW_ROWS + 2, $decode)
+                            .into_iter()
+                            .next(),
+                        None => None,
+                    };
+                    Ok((before, n, after))
+                }
+                .await;
+                let _ = sqlx::raw_sql("ROLLBACK").execute(&mut *c).await;
+                r?
+            }};
+        }
+        let (mut before, affected, mut after) = match &self.pool {
+            Pool::Pg(p) => preview_tx!(p, pg_value),
+            Pool::My(p) => preview_tx!(p, my_value),
+            Pool::Lite(p) => preview_tx!(p, lite_value),
+            _ => unreachable!("checked above"),
+        };
+        for r in [Some(&mut before), after.as_mut()].into_iter().flatten() {
+            if r.rows.len() > PREVIEW_ROWS {
+                r.rows.truncate(PREVIEW_ROWS);
+                r.truncated = true;
+            }
+        }
+        Ok(Impact {
+            kind: if update { "update" } else { "delete" }.into(),
+            schema,
+            table,
+            affected,
+            before,
+            after,
+            key,
+        })
+    }
+
+    /// Run a previewed statement for real; rolls back unless exactly
+    /// `expected` rows change.
+    pub async fn commit_dml(&self, sql: &str, expected: u64) -> Result<u64> {
+        if self.config.read_only {
+            return Err(Error::ReadOnly(
+                "this connection is read-only — turn that off to change data".into(),
+            ));
+        }
+        if crate::impact::parse(sql)?.is_none() {
+            return Err(Error::Other(
+                "commit works on a single UPDATE or DELETE statement".into(),
+            ));
+        }
+        self.exec_tx(vec![(Expect::Exactly(expected), sql.to_string())])
+            .await
     }
 
     /// Quick health check.

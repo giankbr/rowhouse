@@ -25,6 +25,7 @@ pub mod fakegen;
 pub mod federation;
 pub mod guard;
 pub mod history;
+pub mod impact;
 pub mod import;
 pub mod io;
 pub mod license;

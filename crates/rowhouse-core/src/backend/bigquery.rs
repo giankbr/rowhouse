@@ -339,6 +339,9 @@ impl Client {
                 Expect::One => script.push_str(
                     "ASSERT @@row_count = 1 AS 'expected 1 row to change — rolled back';\n",
                 ),
+                Expect::Exactly(n) => script.push_str(&format!(
+                    "ASSERT @@row_count = {n} AS 'expected {n} rows to change — rolled back';\n"
+                )),
                 Expect::AtMostOne => script.push_str(
                     "ASSERT @@row_count <= 1 AS 'expected at most 1 row to change — rolled back';\n",
                 ),

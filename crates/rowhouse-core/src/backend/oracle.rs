@@ -397,7 +397,8 @@ impl Client {
                 if !expect.check(n) {
                     let _ = c.rollback();
                     return Err(Error::Other(format!(
-                        "expected 1 row, {n} affected — rolled back.\n{s}"
+                        "expected {}, {n} affected — rolled back.\n{s}",
+                        expect.describe()
                     )));
                 }
                 total += n;
