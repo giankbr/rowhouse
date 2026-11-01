@@ -119,6 +119,18 @@ impl Connection {
         path: &Path,
         table: Option<(&str, &str)>,
     ) -> Result<u64> {
+        self.export_with(sql, format, path, table, false).await
+    }
+
+    /// Like [`export`](Self::export); `mask` masks personal data (see [`crate::mask`]).
+    pub async fn export_with(
+        &self,
+        sql: &str,
+        format: ExportFormat,
+        path: &Path,
+        table: Option<(&str, &str)>,
+        mask: bool,
+    ) -> Result<u64> {
         let file = BufWriter::new(File::create(path)?);
         let mut sink = match format {
             ExportFormat::Csv => Sink::Csv {
@@ -138,7 +150,12 @@ impl Connection {
                 },
             },
         };
-        let mut f = |c: &Vec<ResultColumn>, v: Vec<Value>| sink.row(c, v);
+        let mut f = |c: &Vec<ResultColumn>, mut v: Vec<Value>| {
+            if mask {
+                crate::mask::mask_row(c, &mut v);
+            }
+            sink.row(c, v)
+        };
         let n = match self.pool() {
             PoolRef::Pg(p) => for_each_row!(p, sql, pg_value, f),
             PoolRef::My(p) => for_each_row!(p, sql, my_value, f),

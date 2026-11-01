@@ -29,6 +29,7 @@ pub mod impact;
 pub mod import;
 pub mod io;
 pub mod license;
+pub mod mask;
 pub mod mcp_clients;
 pub mod model;
 pub mod notebooks;

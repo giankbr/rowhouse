@@ -198,6 +198,10 @@ pub struct ConnectionConfig {
     /// Snowflake: role to use
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Mask personal data and secrets (grid screenshot mode, MCP results).
+    /// `None` = on for production connections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_pii: Option<bool>,
     /// DuckDB workspace: other connections and files to attach (cross-database queries)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attach: Vec<crate::federation::Attachment>,
@@ -281,6 +285,11 @@ fn yes() -> bool {
 }
 
 impl ConnectionConfig {
+    /// Whether results from this connection are masked (see [`crate::mask`]).
+    pub fn masks(&self) -> bool {
+        self.mask_pii.unwrap_or(self.env == Environment::Production)
+    }
+
     pub fn new(name: impl Into<String>, kind: DbKind) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -308,6 +317,7 @@ impl ConnectionConfig {
             warehouse: None,
             role: None,
             attach: vec![],
+            mask_pii: None,
         }
     }
 
