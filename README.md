@@ -18,6 +18,15 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 
 ## Features
 
+### What other clients don't do
+
+- **Cross-database queries** — a workspace attaches saved Postgres / MySQL / SQLite / DuckDB connections and CSV, Parquet or JSON files to an embedded DuckDB, so one query joins them: `SELECT … FROM prod.public.orders o JOIN targets t ON …`. Attachments are read-only.
+- **Preview changes before committing** — an UPDATE / DELETE runs in a transaction that is rolled back, and you see every touched row as before → after. Commit re-runs it and rolls back unless exactly the previewed number of rows changes (Postgres family, MySQL family, SQLite).
+- **Changes since the last run** — re-run a query and see which rows were added, removed or changed (matched by `id`, or a key you pick). Scheduled queries keep their last results too, so the notification says “3 added · 1 changed” and the schedule shows the diff.
+- **Notebooks** — SQL and Markdown cells with tables and charts on one connection, shared parameters (`:from`), saved and synced like dashboards; export to Markdown with the results as tables.
+- **Mask personal data** — emails, phone numbers, card numbers, national IDs, passwords and tokens are masked in the grid, exports and in results sent to AI assistants over MCP. On by default for production connections; `⌘/Ctrl+Shift+M` turns on screenshot mode everywhere.
+- **Schema timeline** — a snapshot whenever the schema changes (checked on connect and after DDL): what changed when, and the migration SQL between any two points.
+
 ### Connect
 
 - Connection manager — passwords live in the OS keychain (Keychain / Credential Manager), never in a plaintext file.
@@ -27,7 +36,7 @@ Rowhouse is built with Tauri 2 (Rust engine, React UI) — a small native downlo
 - Paste a connection URL (`postgresql://…`, `mysql://…`, `mongodb+srv://…`); Neon and Supabase are recognised and use TLS by default.
 - Import connections from **DBeaver, TablePlus and Navicat** (auto-detected; passwords re-entered once).
 - Auto-reconnect after the machine wakes from sleep.
-- **Folder sync** (Pro) — connections, saved queries and dashboards follow you across machines through a folder you already sync (iCloud Drive, Dropbox, OneDrive, Syncthing). One file, encrypted with your passphrase (PBKDF2 + AES-256-GCM); no Rowhouse server.
+- **Folder sync** (Pro) — connections, saved queries, dashboards and notebooks follow you across machines through a folder you already sync (iCloud Drive, Dropbox, OneDrive, Syncthing). One file, encrypted with your passphrase (PBKDF2 + AES-256-GCM); no Rowhouse server.
 
 ### Browse & edit
 
