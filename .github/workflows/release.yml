@@ -20,12 +20,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS is built per-arch in parallel (native, no cross-compile) instead of
-          # one universal job compiling both arches — roughly halves the macOS wall time.
-          - platform: macos-latest      # Apple silicon runner
+          # macOS is built per-arch in parallel on Apple-silicon runners (plentiful).
+          # The x86_64 slice cross-compiles on the arm runner — the old universal job
+          # did exactly that — so we never wait on the scarce Intel (macos-13) runners.
+          - platform: macos-latest      # Apple silicon — native arm64
             args: "--target aarch64-apple-darwin"
             rust-targets: aarch64-apple-darwin
-          - platform: macos-13          # Intel runner
+          - platform: macos-latest      # Apple silicon — cross-compiles x86_64
             args: "--target x86_64-apple-darwin"
             rust-targets: x86_64-apple-darwin
           - platform: ubuntu-22.04
@@ -63,7 +64,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./ -> target"
-          shared-key: "release-${{ matrix.platform }}"
+          shared-key: "release-${{ matrix.platform }}-${{ matrix.rust-targets }}"
           cache-all-crates: true
 
       - name: Install Linux dependencies
