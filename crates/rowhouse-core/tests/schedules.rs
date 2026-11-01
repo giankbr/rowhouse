@@ -43,6 +43,7 @@ fn next_run_timing() {
         changed: false,
         file: None,
         hash: None,
+        diff: None,
     });
     assert_eq!(s.next_run(), Some(5_900));
     assert!(s.is_due(5_900) && !s.is_due(5_899));
@@ -106,6 +107,7 @@ fn store_keeps_runs_and_resets_timing() {
         changed: false,
         file: None,
         hash: Some("a".into()),
+        diff: None,
     };
     for _ in 0..25 {
         store.record(&s.id, run.clone()).unwrap();
@@ -167,4 +169,38 @@ async fn runs_detect_changes_and_export() {
     let bad = run_on(&c, &s).await;
     assert!(!bad.ok && bad.error.is_some());
     assert!(s.should_notify(&bad));
+}
+
+#[tokio::test]
+async fn runs_report_row_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("ROWHOUSE_CONFIG_DIR", dir.path());
+    let db = dir.path().join("d.db");
+    std::fs::File::create(&db).unwrap();
+    let mut cfg = ConnectionConfig::new("lite", DbKind::Sqlite);
+    cfg.file = Some(db.to_string_lossy().into());
+    let c = Connection::connect(&cfg).await.unwrap();
+    c.query("CREATE TABLE o (id INTEGER PRIMARY KEY, status TEXT); INSERT INTO o VALUES (1, 'new'), (2, 'new');", 10)
+        .await
+        .unwrap();
+    let mut s = sched(Every::Minutes { n: 1 });
+    s.id = "sched-diff".into();
+    s.sql = "SELECT id, status FROM o ORDER BY id".into();
+    let r1 = run_on(&c, &s).await;
+    assert_eq!(r1.diff, None, "nothing to compare with yet");
+    c.query("UPDATE o SET status = 'paid' WHERE id = 1; DELETE FROM o WHERE id = 2; INSERT INTO o VALUES (3, 'new');", 10)
+        .await
+        .unwrap();
+    let r2 = run_on(&c, &s).await;
+    let d = r2.diff.unwrap();
+    assert_eq!((d.added, d.removed, d.changed), (1, 1, 1));
+    assert_eq!(d.text(), "1 added · 1 removed · 1 changed");
+    let full = rowhouse_core::schedules::last_diff("sched-diff")
+        .unwrap()
+        .unwrap();
+    assert_eq!(full.key, ["id"]);
+    assert_eq!(
+        full.changed[0].after,
+        vec![serde_json::json!(1), serde_json::json!("paid")]
+    );
 }

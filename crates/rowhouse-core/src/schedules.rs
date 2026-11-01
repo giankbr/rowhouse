@@ -62,6 +62,9 @@ pub struct Run {
     pub file: Option<String>,
     #[serde(default)]
     pub hash: Option<String>,
+    /// row changes since the previous run (results kept in `schedule-results/`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<crate::diff::Summary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -326,6 +329,7 @@ pub async fn run_on(conn: &Connection, s: &Schedule) -> Run {
     let at = now();
     let started = std::time::Instant::now();
     let prev_hash = s.runs.iter().find(|r| r.ok).and_then(|r| r.hash.clone());
+    let mut summary: Option<crate::diff::Summary> = None;
     let result: Result<(u64, String, Option<String>)> = async {
         s.validate()?;
         match &s.export {
@@ -351,6 +355,9 @@ pub async fn run_on(conn: &Connection, s: &Schedule) -> Run {
                         .map(|r| (&r.columns, &r.rows))
                         .collect::<Vec<_>>(),
                 )?;
+                if let Some(r) = out.results.iter().rev().find(|r| !r.columns.is_empty()) {
+                    summary = keep_result(&s.id, r).ok().flatten();
+                }
                 Ok((rows, fnv(&body), None))
             }
         }
@@ -367,6 +374,7 @@ pub async fn run_on(conn: &Connection, s: &Schedule) -> Run {
             changed: prev_hash.is_some_and(|p| p != hash),
             file,
             hash: Some(hash),
+            diff: summary,
         },
         Err(e) => Run {
             at,
@@ -377,6 +385,7 @@ pub async fn run_on(conn: &Connection, s: &Schedule) -> Run {
             changed: false,
             file: None,
             hash: None,
+            diff: None,
         },
     }
 }
@@ -403,6 +412,7 @@ pub async fn run_with_store(store: &ConnectionStore, s: &Schedule) -> Run {
             changed: false,
             file: None,
             hash: None,
+            diff: None,
         },
     }
 }
@@ -419,4 +429,56 @@ pub fn describe(e: &Every) -> String {
             format!("{} at {at}", DAYS.get(*weekday as usize).unwrap_or(&"?"))
         }
     }
+}
+
+fn results_dir() -> std::path::PathBuf {
+    ConnectionStore::default_dir().join("schedule-results")
+}
+
+fn result_path(id: &str, prev: bool) -> std::path::PathBuf {
+    let safe: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    results_dir().join(if prev {
+        format!("{safe}.prev.json")
+    } else {
+        format!("{safe}.json")
+    })
+}
+
+/// Keep this run's result (and the one before it) and diff them.
+fn keep_result(id: &str, r: &crate::QueryResult) -> Result<Option<crate::diff::Summary>> {
+    if id.is_empty() {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(results_dir())?;
+    let (last, prev) = (result_path(id, false), result_path(id, true));
+    let before: Option<crate::QueryResult> = std::fs::read(&last)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    if last.exists() {
+        std::fs::rename(&last, &prev)?;
+    }
+    std::fs::write(&last, serde_json::to_vec(r)?)?;
+    Ok(before.map(|b| crate::diff::diff(&b, r, None).summary()))
+}
+
+/// Row changes between a schedule's last two runs.
+pub fn last_diff(id: &str) -> Result<Option<crate::diff::RowDiff>> {
+    let read = |p: std::path::PathBuf| -> Option<crate::QueryResult> {
+        serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+    };
+    Ok(
+        match (read(result_path(id, true)), read(result_path(id, false))) {
+            (Some(a), Some(b)) => Some(crate::diff::diff(&a, &b, None)),
+            _ => None,
+        },
+    )
 }

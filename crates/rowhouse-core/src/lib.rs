@@ -15,6 +15,7 @@ pub mod compare;
 pub mod config;
 pub mod conn_url;
 pub mod dashboards;
+pub mod diff;
 pub mod driver;
 pub mod dump;
 pub mod erd;
