@@ -189,7 +189,13 @@ impl Rowhouse {
                 })
                 .await;
         }
-        let out = res.map_err(|e| e.to_string())?;
+        let mut out = res.map_err(|e| e.to_string())?;
+        if c.config.masks() {
+            // personal data and secrets stay on this machine
+            for r in &mut out.results {
+                rowhouse_core::mask::mask_result(r);
+            }
+        }
         Ok(serde_json::to_string(&out).unwrap_or_default())
     }
 
@@ -240,6 +246,7 @@ impl Rowhouse {
             .filter(|c| c.mcp_enabled)
             .map(|c| {
                 json!({
+                    "masked": if c.masks() { "yes: emails, phones, card numbers, IDs and secrets come back masked" } else { "no" },
                     "name": c.name, "id": c.id, "kind": c.kind, "database": c.database.or(c.file),
                     "environment": c.env,
                     "writes": if c.mcp_writes && !c.read_only { "with user approval (execute_sql)" } else { "no" },
@@ -586,11 +593,16 @@ impl Rowhouse {
             let started = std::time::Instant::now();
             let res = c.query_read_only(&sql, limit).await;
             let err = res.as_ref().err().map(|e| e.to_string());
-            let result = res.ok().and_then(|o| {
+            let mut result = res.ok().and_then(|o| {
                 let mut r = o.results;
                 let i = r.iter().rposition(|x| !x.columns.is_empty()).unwrap_or(0);
                 (!r.is_empty()).then(|| r.swap_remove(i))
             });
+            if c.config.masks() {
+                if let Some(r) = result.as_mut() {
+                    rowhouse_core::mask::mask_result(r);
+                }
+            }
             self.log(
                 &c,
                 &sql,
