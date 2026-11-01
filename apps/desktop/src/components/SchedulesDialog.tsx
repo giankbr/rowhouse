@@ -12,6 +12,8 @@ import {
   type Schedule,
 } from "../lib/api";
 import { KindBadge } from "./KindBadge";
+import { DiffView } from "./DiffView";
+import { summaryText, type RowDiff } from "../lib/rowdiff";
 import { Button, Field, Input, Modal, Segmented, Switch, cx } from "./ui";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -65,6 +67,7 @@ export function SchedulesDialog({
   const [sel, setSel] = useState<Schedule | null>(null);
   const [busy, setBusy] = useState<"save" | "run" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [diff, setDiff] = useState<RowDiff | null>(null);
   const [, tick] = useState(0);
 
   const reload = useCallback(() => api.schedules.list().then(setList), []);
@@ -390,7 +393,17 @@ export function SchedulesDialog({
                           <>
                             <span className="w-16 shrink-0 tabular-nums">{r.rows} rows</span>
                             <span className="w-14 shrink-0 text-subtle tabular-nums">{r.elapsedMs} ms</span>
-                            {r.changed && <span className="rounded bg-accent/12 px-1.5 py-px text-2xs font-medium text-accent">changed</span>}
+                            {r.diff && (r.diff.added || r.diff.removed || r.diff.changed) ? (
+                              i === 0 ? (
+                                <button type="button" onClick={() => api.schedules.diff(sel.id).then(setDiff).catch(() => {})} className="rounded bg-accent/12 px-1.5 py-px text-2xs font-medium text-accent hover:bg-accent/20" title="Show the row changes">
+                                  {summaryText(r.diff)}
+                                </button>
+                              ) : (
+                                <span className="rounded bg-accent/12 px-1.5 py-px text-2xs font-medium text-accent">{summaryText(r.diff)}</span>
+                              )
+                            ) : (
+                              r.changed && <span className="rounded bg-accent/12 px-1.5 py-px text-2xs font-medium text-accent">changed</span>
+                            )}
                             {r.file && <span className="min-w-0 truncate font-mono text-2xs text-subtle" title={r.file}>{r.file.split(/[\\/]/).pop()}</span>}
                           </>
                         ) : (
@@ -409,6 +422,13 @@ export function SchedulesDialog({
           <div className="flex flex-1 items-center justify-center text-xs text-subtle">Pick a schedule or create one</div>
         )}
       </div>
+      {diff && (
+        <Modal open onClose={() => setDiff(null)} width={860} title={`Changes in the last run · ${sel?.name ?? ""}`} footer={<Button onClick={() => setDiff(null)}>Close</Button>}>
+          <div className="-m-4 h-[420px]">
+            <DiffView diff={diff} empty="Same rows as the run before" />
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

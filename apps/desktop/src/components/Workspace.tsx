@@ -1,9 +1,11 @@
-import { AlertCircle, AlignLeft, BarChart3, Pin, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, AlignLeft, BarChart3, GitCompareArrows, Pin, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { canFormat, formatSql } from "../lib/format";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type Filter, type Relations, type TableInfo } from "../lib/api";
 import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
+import { diffResults, summaryText } from "../lib/rowdiff";
+import { DiffView } from "./DiffView";
 import { AiPanel, type AiState } from "./AiPanel";
 import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
@@ -94,6 +96,11 @@ export function Workspace({
   const results = tab.output?.results ?? [];
   const idx = Math.min(tab.resultIndex ?? 0, Math.max(0, results.length - 1));
   const result = results[idx];
+  const prevResult = tab.prev?.results[Math.min(idx, (tab.prev?.results.length ?? 1) - 1)];
+  const rowDiff = useMemo(
+    () => (result && prevResult && prevResult.columns.length && result.columns.length ? diffResults(prevResult, result, tab.diffKey) : null),
+    [result, prevResult, tab.diffKey],
+  );
 
   // ---- inline editing (table tabs) ----------------------------------------
   const isTable = tab.kind === "table";
@@ -343,6 +350,20 @@ export function Workspace({
             >
               <BarChart3 size={11} /> Chart
             </Button>
+            {rowDiff && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => onChange({ showDiff: !tab.showDiff, showChart: false, showPlan: false })}
+                title={`Changes since the previous run${tab.prevAt ? ` (${new Date(tab.prevAt).toLocaleTimeString()})` : ""}: ${summaryText({ added: rowDiff.added.length, removed: rowDiff.removed.length, changed: rowDiff.changed.length })}`}
+                className={cx(tab.showDiff && "bg-selected text-fg")}
+              >
+                <GitCompareArrows size={11} /> Changes
+                {rowDiff.added.length + rowDiff.removed.length + rowDiff.changed.length > 0 && (
+                  <span className="rounded-full bg-warning/20 px-1.5 text-[10px] font-semibold text-warning tabular-nums">{rowDiff.added.length + rowDiff.removed.length + rowDiff.changed.length}</span>
+                )}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="xs"
@@ -485,6 +506,14 @@ export function Workspace({
               </Button>
             )}
           </div>
+        ) : rowDiff && tab.showDiff ? (
+          <DiffView
+            diff={rowDiff}
+            keyOptions={rowDiff.columns}
+            onKey={(diffKey) => onChange({ diffKey })}
+            title={<span className="text-2xs text-muted">Since {tab.prevAt ? new Date(tab.prevAt).toLocaleTimeString() : "the previous run"}</span>}
+            empty="Same rows as the previous run"
+          />
         ) : result && tab.showChart && result.columns.length > 0 ? (
           <ResultsChart
             result={result}

@@ -1036,7 +1036,10 @@ async fn run_schedule(app: &tauri::AppHandle, s: Schedule) -> Option<Run> {
         use tauri_plugin_notification::NotificationExt;
         let body = match (&run.error, run.changed) {
             (Some(e), _) => format!("Failed: {}", e.lines().next().unwrap_or(e)),
-            (None, true) => format!("Result changed · {} rows", run.rows),
+            (None, true) => match &run.diff {
+                Some(d) => format!("{} · {} rows", d.text(), run.rows),
+                None => format!("Result changed · {} rows", run.rows),
+            },
             (None, false) => format!("{} rows in {} ms", run.rows, run.elapsed_ms),
         };
         let _ = app
@@ -1083,6 +1086,12 @@ fn schedule_save(schedule: Schedule) -> CmdResult<Schedule> {
         rowhouse_core::license::require_pro("Scheduled queries")?;
     }
     ScheduleStore::open_default().save(schedule)
+}
+
+/// Row changes between a schedule's last two runs.
+#[tauri::command]
+fn schedule_diff(schedule_id: String) -> CmdResult<Option<rowhouse_core::diff::RowDiff>> {
+    schedules::last_diff(&schedule_id)
 }
 
 #[tauri::command]
@@ -1681,6 +1690,7 @@ pub fn run() {
             license_deactivate,
             schedule_save,
             schedule_delete,
+            schedule_diff,
             schedule_run_now,
         ])
         .run(tauri::generate_context!())

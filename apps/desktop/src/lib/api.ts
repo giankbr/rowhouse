@@ -492,6 +492,8 @@ export interface ScheduleRun {
   error?: string | null;
   changed: boolean;
   file?: string | null;
+  /** row changes since the previous run */
+  diff?: { added: number; removed: number; changed: number } | null;
 }
 
 export interface Schedule {
@@ -690,6 +692,8 @@ export const api = {
     save: (schedule: Schedule) => call<Schedule>("schedule_save", { schedule }),
     remove: (scheduleId: string) => call<void>("schedule_delete", { scheduleId }),
     runNow: (scheduleId: string) => call<ScheduleRun>("schedule_run_now", { scheduleId }),
+    /** row diff between the last two runs */
+    diff: (scheduleId: string) => call<import("./rowdiff").RowDiff | null>("schedule_diff", { scheduleId }),
     /** Fires after every run (scheduled or manual). */
     async onRun(fn: (e: { schedule: Schedule; run: ScheduleRun }) => void): Promise<() => void> {
       if (!isTauri) {

@@ -8,7 +8,7 @@ interface Saved {
   active: [string | null, string | null];
 }
 
-const KEEP: (keyof Tab)[] = ["id", "kind", "pane", "title", "connId", "sql", "schema", "table", "view", "filters", "sort", "pageSize", "snippetId", "qb"];
+const KEEP: (keyof Tab)[] = ["id", "kind", "pane", "title", "connId", "sql", "schema", "table", "view", "filters", "sort", "pageSize", "snippetId", "qb", "dashboardId", "notebookId"];
 
 export function saveSession(tabs: Tab[], active: [string | null, string | null]) {
   const slim = tabs.map((t) => Object.fromEntries(KEEP.filter((k) => t[k] !== undefined).map((k) => [k, t[k]])) as unknown as Tab);

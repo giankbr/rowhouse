@@ -300,9 +300,22 @@ export default function App() {
       patchTab(t.id, { runId, runStarted: Date.now() });
       try {
         const timeout = loadAppearance().queryTimeoutSec;
-        const output = await api.runQuery(t.connId, sqlOverride ?? t.sql, undefined, runId, timeout ? timeout * 1000 : undefined);
+        const sql = sqlOverride ?? t.sql;
+        const output = await api.runQuery(t.connId, sql, undefined, runId, timeout ? timeout * 1000 : undefined);
         setConnected((c) => ({ ...c, [t.connId]: true }));
-        patchTab(t.id, { output, running: false, resultIndex: 0, pending: undefined });
+        // same SQL as last time: keep the previous result to diff against
+        const same = !!t.output && !t.error && t.lastRunSql?.trim() === sql.trim();
+        patchTab(t.id, {
+          output,
+          running: false,
+          resultIndex: 0,
+          pending: undefined,
+          prev: same ? t.output : undefined,
+          prevAt: same ? t.lastRunAt : undefined,
+          lastRunSql: sql,
+          lastRunAt: Date.now(),
+          showDiff: same ? t.showDiff : false,
+        });
         // DDL may have changed the schema.
         if (/^\s*(create|drop|alter)\b/i.test(sqlOverride ?? t.sql)) loadTables(t.connId);
       } catch (e) {
