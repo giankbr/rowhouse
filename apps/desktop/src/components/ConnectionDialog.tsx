@@ -1,6 +1,6 @@
-import { CheckCircle2, Link2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, Combine, FileText, Link2, Loader2, Plus, ShieldCheck, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, dialogs, ENVIRONMENTS, kindInfo, KINDS, newConnection, type ConnectionConfig, type DbKind, type Environment, type TlsMode } from "../lib/api";
+import { api, ATTACHABLE, dialogs, ENVIRONMENTS, kindInfo, KINDS, newConnection, type Attachment, type ConnectionConfig, type DbKind, type Environment, type TlsMode } from "../lib/api";
 import { KindBadge } from "./KindBadge";
 import { Button, Field, Input, Modal, Segmented, Switch, TAG_COLORS, cx } from "./ui";
 
@@ -11,9 +11,14 @@ export function ConnectionDialog({
   onSaved,
   onDeleted,
   initialKind,
+  workspace: startWorkspace,
+  connections = [],
 }: {
   open: boolean;
   initial: ConnectionConfig | null;
+  /** start as a cross-database workspace */
+  workspace?: boolean;
+  connections?: ConnectionConfig[];
   /** kind preselected for a new connection */
   initialKind?: DbKind;
   onClose: () => void;
@@ -28,7 +33,7 @@ export function ConnectionDialog({
 
   useEffect(() => {
     if (open) {
-      setC(initial ?? { ...newConnection(initialKind), host: null, port: null, user: null });
+      setC(initial ?? (startWorkspace ? { ...newConnection("duckdb"), name: "", attach: [] } : { ...newConnection(initialKind), host: null, port: null, user: null }));
       setTabSel("general");
       setKindFilter("");
       setPassword("");
@@ -40,6 +45,7 @@ export function ConnectionDialog({
   }, [open, initial]);
 
   const set = (patch: Partial<ConnectionConfig>) => setC((x) => ({ ...x, ...patch }));
+  const isWorkspace = c.kind === "duckdb" && Array.isArray(c.attach);
   const info = kindInfo(c.kind);
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -131,6 +137,18 @@ export function ConnectionDialog({
               />
             </div>
             <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+              {(!kindFilter || "workspace cross-database".includes(kindFilter.toLowerCase())) && (
+                <button
+                  type="button"
+                  onClick={() => setC((x) => ({ ...newConnection("duckdb"), id: x.id, name: x.name, env: x.env, color: x.color, readOnly: x.readOnly, mcpEnabled: x.mcpEnabled, attach: x.attach ?? [] }))}
+                  className={cx("mb-1.5 flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs", isWorkspace ? "bg-selected text-fg" : "text-fg/80 hover:bg-hover")}
+                >
+                  <span className="grid size-4 place-items-center rounded bg-accent/15 text-accent">
+                    <Combine size={11} />
+                  </span>
+                  <span className="truncate">Cross-database workspace</span>
+                </button>
+              )}
               {KIND_GROUPS.map((g) => {
                 const list = shownKinds.filter((k) => g.kinds.includes(k.kind));
                 if (!list.length) return null;
@@ -144,7 +162,7 @@ export function ConnectionDialog({
                         onClick={() => setC((x) => ({ ...blank(k.kind), id: x.id, name: x.name, env: x.env, color: x.color, readOnly: x.readOnly, mcpEnabled: x.mcpEnabled, ssh: k.file || k.api ? null : x.ssh, tls: k.api ? null : (newConnection(k.kind).tls ?? x.tls ?? null) }))}
                         className={cx(
                           "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs",
-                          c.kind === k.kind ? "bg-selected text-fg" : "text-fg/80 hover:bg-hover",
+                          c.kind === k.kind && !isWorkspace ? "bg-selected text-fg" : "text-fg/80 hover:bg-hover",
                         )}
                       >
                         <KindBadge kind={k.kind} size={16} />
@@ -215,7 +233,9 @@ export function ConnectionDialog({
                     {urlError && <span className="text-2xs text-danger">{urlError}</span>}
                   </div>
                 )}
-                {info.file ? (
+                {isWorkspace ? (
+                  <WorkspaceEditor list={c.attach ?? []} onChange={(attach) => set({ attach })} connections={connections.filter((x) => x.id !== c.id && ATTACHABLE.includes(x.kind) && !x.attach?.length)} />
+                ) : info.file ? (
                   <Field label="Database file" hint={c.kind === "duckdb" ? "Created if missing" : "An existing .db / .sqlite file"}>
                     <Input value={c.file ?? ""} placeholder={c.kind === "duckdb" ? "~/data/warehouse.duckdb" : "~/data/app.db"} onChange={(e) => set({ file: e.target.value })} />
                   </Field>
@@ -470,6 +490,7 @@ export function withDefaults(c: ConnectionConfig): ConnectionConfig {
 }
 
 function defaultName(c: ConnectionConfig) {
+  if (c.kind === "duckdb" && Array.isArray(c.attach)) return `Workspace · ${c.attach.map((a) => a.alias).join(", ") || "empty"}`;
   if (kindInfo(c.kind).file) return c.file?.split(/[\\/]/).pop() || kindInfo(c.kind).label;
   if (c.kind === "turso") return c.host?.replace(/^\w+:\/\//, "").split(".")[0] || "Turso";
   if (c.kind === "d1") return `D1 · ${c.database?.slice(0, 8) || "database"}`;
@@ -495,5 +516,71 @@ function TestStatus({ state, msg }: { state: string; msg?: string }) {
       {state === "err" && <XCircle size={12} />}
       <span className="truncate">{state === "busy" ? "Testing…" : msg}</span>
     </span>
+  );
+}
+
+/** Attachments of a cross-database workspace (DuckDB). */
+function WorkspaceEditor({ list, onChange, connections }: { list: Attachment[]; onChange: (l: Attachment[]) => void; connections: ConnectionConfig[] }) {
+  const field = "h-7 rounded-md border border-line bg-elevated px-2 text-xs text-fg outline-none focus:border-accent";
+  const patch = (i: number, p: Partial<Attachment>) => onChange(list.map((a, j) => (j === i ? { ...a, ...p } : a)));
+  const suggest = (base: string) => {
+    const clean = base.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").replace(/^(\d)/, "_$1") || "src";
+    let n = clean;
+    for (let k = 2; list.some((a) => a.alias === n); k++) n = `${clean}${k}`;
+    return n;
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-2xs text-muted">
+        Attach saved connections and files, then join them in one query — e.g. <code className="font-mono">SELECT … FROM pg.public.orders o JOIN sales s ON …</code>. Databases attach read-only; files become views. DuckDB downloads its connector
+        extensions the first time (needs internet once).
+      </p>
+      {list.map((a, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input value={a.alias} onChange={(e) => patch(i, { alias: e.target.value })} placeholder="alias" className={cx(field, "w-28 font-mono")} />
+          <select
+            value={a.connectionId ?? "file"}
+            onChange={(e) => (e.target.value === "file" ? patch(i, { connectionId: null, path: a.path ?? "" }) : patch(i, { connectionId: e.target.value, path: null }))}
+            className={cx(field, "w-44")}
+          >
+            {connections.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+            <option value="file">File (CSV, Parquet, JSON…)</option>
+          </select>
+          {a.connectionId ? (
+            <span className="min-w-0 flex-1 truncate text-2xs text-subtle">{kindInfo(connections.find((x) => x.id === a.connectionId)?.kind ?? "postgres").label} · read-only</span>
+          ) : (
+            <span className="flex min-w-0 flex-1 gap-1">
+              <input value={a.path ?? ""} onChange={(e) => patch(i, { path: e.target.value })} placeholder="~/data/sales/*.parquet" className={cx(field, "min-w-0 flex-1 font-mono")} />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() =>
+                  dialogs.openAny("Data file", ["csv", "tsv", "parquet", "json", "ndjson", "jsonl", "duckdb", "sqlite", "db"]).then((f) => f && patch(i, { path: f, alias: a.alias || suggest(f.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "")) }))
+                }
+              >
+                <FileText size={12} />
+              </Button>
+            </span>
+          )}
+          <button type="button" title="Remove" className="text-subtle hover:text-danger" onClick={() => onChange(list.filter((_, j) => j !== i))}>
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        {connections.length > 0 && (
+          <Button type="button" size="sm" onClick={() => onChange([...list, { alias: suggest(connections[0].name), connectionId: connections[0].id }])}>
+            <Plus size={12} /> Connection
+          </Button>
+        )}
+        <Button type="button" size="sm" onClick={() => onChange([...list, { alias: suggest("file"), connectionId: null, path: "" }])}>
+          <Plus size={12} /> File
+        </Button>
+      </div>
+    </div>
   );
 }

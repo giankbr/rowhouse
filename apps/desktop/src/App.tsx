@@ -132,7 +132,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [inlineAi, setInlineAi] = useState(false);
-  const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null; kind?: DbKind }>({ open: false, edit: null });
+  const [dialog, setDialog] = useState<{ open: boolean; edit: ConnectionConfig | null; kind?: DbKind; workspace?: boolean }>({ open: false, edit: null });
   const [toast, setToastState] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const setToast = useCallback(
     (msg: string | null, kind: "ok" | "err" = "err") => setToastState(msg ? { msg, kind } : null),
@@ -930,6 +930,8 @@ export default function App() {
         open={dialog.open}
         initial={dialog.edit}
         initialKind={dialog.kind}
+        workspace={dialog.workspace}
+        connections={connections}
         onClose={() => setDialog({ open: false, edit: null })}
         onSaved={(c) => {
           setConnections((cs) => (cs.some((x) => x.id === c.id) ? cs.map((x) => (x.id === c.id ? c : x)) : [...cs, c]));
@@ -1077,6 +1079,7 @@ export default function App() {
           showActivity: () => setActivityOpen(true),
           showRoles: () => setRolesOpen(true),
           runFile: () => setRunFileOpen(true),
+          newWorkspace: () => setDialog({ open: true, edit: null, workspace: true }),
           showExtensions: () => setExtensionsOpen(true),
           showDashboards: () => setDashboardsOpen(true),
           backup: () => setBackup("backup"),

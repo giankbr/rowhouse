@@ -127,6 +127,8 @@ export interface ConnectionConfig {
   ssh?: SshConfig | null;
   /** Oracle: Instant Client folder (empty = auto-detect) */
   clientDir?: string | null;
+  /** DuckDB workspace: connections and files attached for cross-database queries */
+  attach?: Attachment[];
   /** Snowflake */
   warehouse?: string | null;
   role?: string | null;
@@ -317,6 +319,15 @@ export interface Dashboard {
   filters?: Record<string, string>;
   snapshot?: DashSnapshot | null;
 }
+export interface Attachment {
+  alias: string;
+  connectionId?: string | null;
+  path?: string | null;
+}
+
+/** kinds a workspace can attach */
+export const ATTACHABLE: DbKind[] = ["postgres", "neon", "supabase", "cockroach", "greenplum", "mysql", "mariadb", "tidb", "singlestore", "sqlite", "duckdb"];
+
 export type DeliveryKind = "slack" | "discord" | "webhook";
 export interface Delivery {
   id: string;
