@@ -83,7 +83,7 @@ const META: Record<SchemaChange["kind"], { icon: typeof Plus; cls: string; text:
   tableRemoved: { icon: Minus, cls: "text-danger", text: "only in target" },
 };
 
-function describe(c: SchemaChange) {
+export function describeChange(c: SchemaChange) {
   switch (c.kind) {
     case "tableAdded":
       return `${c.columns.length} columns`;
@@ -231,7 +231,7 @@ export function CompareView({
                       <div key={i} className="flex items-start gap-1.5 py-0.5 text-xs">
                         <Icon size={12} className={cx("mt-0.5 shrink-0", m.cls)} />
                         <span className={cx("shrink-0 text-2xs", m.cls)}>{m.text}</span>
-                        <span className="selectable min-w-0 font-mono text-[11px] break-all text-muted">{describe(c)}</span>
+                        <span className="selectable min-w-0 font-mono text-[11px] break-all text-muted">{describeChange(c)}</span>
                       </div>
                     );
                   })}

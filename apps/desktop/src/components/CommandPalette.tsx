@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Activity, Blocks, Combine, EyeOff, NotebookPen, FileCode2, LayoutGrid, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Activity, Blocks, Combine, EyeOff, NotebookPen, History as HistoryIcon, FileCode2, LayoutGrid, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -42,6 +42,7 @@ export function CommandPalette({
     newWorkspace: () => void;
     newNotebook: () => void;
     toggleMask: () => void;
+    schemaTimeline: () => void;
     showExtensions: () => void;
     showDashboards: () => void;
     backup: () => void;
@@ -121,6 +122,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.showRoles)} className={item}>
               <UsersRound size={13} className="text-subtle" /> Users & roles (privileges)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.schemaTimeline)} className={item} keywords={["history", "migration", "changes", "ddl"]}>
+              <HistoryIcon size={13} className="text-subtle" /> Schema timeline
             </Command.Item>
             <Command.Item onSelect={run(actions.toggleMask)} className={item} keywords={["pii", "privacy", "mask", "demo", "share"]}>
               <EyeOff size={13} className="text-subtle" /> Toggle screenshot mode (mask personal data)

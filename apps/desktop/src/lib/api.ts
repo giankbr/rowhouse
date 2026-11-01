@@ -347,6 +347,25 @@ export interface Notebook {
   updatedAt: number;
 }
 
+export interface TimelineEntry {
+  at: number;
+  tables: number;
+  columns: number;
+  tablesAdded: number;
+  tablesRemoved: number;
+  columnsAdded: number;
+  columnsRemoved: number;
+  columnsChanged: number;
+  initial: boolean;
+}
+
+export interface TimelineDiff {
+  from: number;
+  to: number;
+  schemas: { schema: string; changes: SchemaChange[] }[];
+  sql: string;
+}
+
 export interface Impact {
   kind: "update" | "delete";
   schema: string;
@@ -785,6 +804,12 @@ export const api = {
     list: () => call<Notebook[]>("notebooks_list"),
     save: (notebook: Notebook) => call<Notebook>("notebook_save", { notebook }),
     remove: (notebookId: string) => call<void>("notebook_delete", { notebookId }),
+  },
+  timeline: {
+    record: (id: string, force = false) => call<TimelineEntry | null>("schema_record", { id, force }),
+    list: (id: string) => call<TimelineEntry[]>("schema_timeline", { id }),
+    diff: (id: string, from: number, to?: number | null) => call<TimelineDiff>("schema_timeline_diff", { id, from, to: to ?? null }),
+    forget: (id: string) => call<void>("schema_timeline_forget", { id }),
   },
   previewDml: (id: string, sql: string) => call<Impact>("preview_dml", { id, sql }),
   commitDml: (id: string, sql: string, expected: number) => call<number>("commit_dml", { id, sql, expected }),
@@ -1288,6 +1313,36 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       console.info("[rowhouse] snapshot done", { dashboardId: a.dashboardId, bytes: a.data ? String(a.data).length : 0, error: a.error });
       return null;
     }
+    case "schema_record":
+      return null;
+    case "schema_timeline": {
+      const d = (h: number) => Math.floor(Date.now() / 1000) - h * 3600;
+      return [
+        { at: d(2), tables: 10, columns: 71, tablesAdded: 1, tablesRemoved: 0, columnsAdded: 2, columnsRemoved: 0, columnsChanged: 1, initial: false },
+        { at: d(50), tables: 9, columns: 64, tablesAdded: 0, tablesRemoved: 1, columnsAdded: 0, columnsRemoved: 0, columnsChanged: 0, initial: false },
+        { at: d(170), tables: 10, columns: 66, tablesAdded: 0, tablesRemoved: 0, columnsAdded: 0, columnsRemoved: 0, columnsChanged: 0, initial: true },
+      ] satisfies TimelineEntry[];
+    }
+    case "schema_timeline_diff":
+      await sleep(120);
+      return {
+        from: Number(a.from),
+        to: Number(a.to ?? Math.floor(Date.now() / 1000)),
+        schemas: [
+          {
+            schema: "public",
+            changes: [
+              { kind: "tableAdded", table: "refunds", columns: [{ name: "id", data_type: "bigint", nullable: false, default: null, primary_key: true }, { name: "order_id", data_type: "bigint", nullable: false, default: null, primary_key: false }, { name: "amount", data_type: "numeric(12,2)", nullable: false, default: null, primary_key: false }] },
+              { kind: "columnAdded", table: "orders", column: { name: "refunded_at", data_type: "timestamptz", nullable: true, default: null, primary_key: false } },
+              { kind: "columnAdded", table: "users", column: { name: "phone", data_type: "text", nullable: true, default: null, primary_key: false } },
+              { kind: "columnChanged", table: "orders", column: "status", from: { name: "status", data_type: "varchar(16)", nullable: true, default: null, primary_key: false }, to: { name: "status", data_type: "varchar(32)", nullable: false, default: "'pending'", primary_key: false }, aspects: ["type", "nullable", "default"] },
+            ],
+          },
+        ],
+        sql: "-- schema public\nCREATE TABLE \"public\".\"refunds\" (\n  \"id\" bigint NOT NULL,\n  \"order_id\" bigint NOT NULL,\n  \"amount\" numeric(12,2) NOT NULL,\n  PRIMARY KEY (\"id\")\n);\nALTER TABLE \"public\".\"orders\" ADD COLUMN \"refunded_at\" timestamptz;\nALTER TABLE \"public\".\"users\" ADD COLUMN \"phone\" text;\nALTER TABLE \"public\".\"orders\" ALTER COLUMN \"status\" TYPE varchar(32) USING \"status\"::varchar(32);\nALTER TABLE \"public\".\"orders\" ALTER COLUMN \"status\" SET NOT NULL;\nALTER TABLE \"public\".\"orders\" ALTER COLUMN \"status\" SET DEFAULT 'pending';",
+      } satisfies TimelineDiff;
+    case "schema_timeline_forget":
+      return null;
     case "notebooks_list":
       return mockNotebooks.map((n) => structuredClone(n));
     case "notebook_save": {

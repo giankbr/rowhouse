@@ -22,6 +22,7 @@ import { ExtensionPanel } from "./components/ExtensionPanel";
 import { DashboardView } from "./components/DashboardView";
 import { SnapshotRunner } from "./components/SnapshotRunner";
 import { NotebookView } from "./components/NotebookView";
+import { SchemaTimeline } from "./components/SchemaTimeline";
 import { DashboardsDialog, PinDialog } from "./components/DashboardsDialog";
 import { RunFileDialog } from "./components/RunFileDialog";
 import { FakeDataDialog } from "./components/FakeDataDialog";
@@ -264,6 +265,8 @@ export default function App() {
       setTables((t) => ({ ...t, [id]: [] }));
       const list = await api.listTables(id);
       setTables((t) => ({ ...t, [id]: list }));
+      // schema timeline: keep a snapshot when the schema changed (throttled in the backend)
+      api.timeline.record(id).catch(() => {});
       api
         .listObjects(id)
         .then((o) => setObjects((m) => ({ ...m, [id]: o })))
@@ -326,7 +329,10 @@ export default function App() {
           showDiff: same ? t.showDiff : false,
         });
         // DDL may have changed the schema.
-        if (/^\s*(create|drop|alter)\b/i.test(sqlOverride ?? t.sql)) loadTables(t.connId);
+        if (/^\s*(create|drop|alter)\b/i.test(sqlOverride ?? t.sql)) {
+          loadTables(t.connId);
+          api.timeline.record(t.connId, true).catch(() => {});
+        }
       } catch (e) {
         patchTab(t.id, { error: String(e), running: false, output: undefined });
       }
@@ -755,6 +761,8 @@ export default function App() {
               onRunSql={(sql) => openQuery(t.connId, sql, true)}
               onToast={setToast}
             />
+          ) : t.kind === "timeline" && connections.some((c) => c.id === t.connId) ? (
+            <SchemaTimeline key={t.id} conn={connections.find((c) => c.id === t.connId)!} onOpenSql={(sql) => openQuery(t.connId, sql, false)} onToast={setToast} />
           ) : t.kind === "notebook" && t.notebookId ? (
             <NotebookView
               key={t.id}
@@ -1152,6 +1160,12 @@ export default function App() {
           runFile: () => setRunFileOpen(true),
           newWorkspace: () => setDialog({ open: true, edit: null, workspace: true }),
           newNotebook,
+          schemaTimeline: () => {
+            if (!activeConn) return setToast("Open a connection first");
+            const existing = tabs.find((t) => t.kind === "timeline" && t.connId === activeConn);
+            if (existing) return selectTab(existing.id);
+            addTab({ id: uid(), kind: "timeline", title: "Schema timeline", connId: activeConn, sql: "" });
+          },
           toggleMask: () => {
             const a = loadAppearance();
             saveAppearance({ ...a, maskAll: !a.maskAll });

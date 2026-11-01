@@ -565,6 +565,40 @@ fn dashboard_snapshot_now(app: tauri::AppHandle, dashboard_id: String) -> CmdRes
 
 use rowhouse_core::notebooks::{Notebook, NotebookStore};
 
+/// Snapshot the schema if it changed (on connect and after DDL).
+#[tauri::command]
+async fn schema_record(
+    state: State<'_, AppState>,
+    id: String,
+    force: Option<bool>,
+) -> CmdResult<Option<rowhouse_core::timeline::Entry>> {
+    state
+        .conn(&id)
+        .await?
+        .record_schema(force.unwrap_or(false))
+        .await
+}
+
+#[tauri::command]
+fn schema_timeline(id: String) -> Vec<rowhouse_core::timeline::Entry> {
+    rowhouse_core::timeline::entries(&id)
+}
+
+#[tauri::command]
+async fn schema_timeline_diff(
+    state: State<'_, AppState>,
+    id: String,
+    from: i64,
+    to: Option<i64>,
+) -> CmdResult<rowhouse_core::timeline::TimelineDiff> {
+    state.conn(&id).await?.schema_timeline_diff(from, to)
+}
+
+#[tauri::command]
+fn schema_timeline_forget(id: String) -> CmdResult<()> {
+    rowhouse_core::timeline::forget(&id)
+}
+
 #[tauri::command]
 fn notebooks_list() -> CmdResult<Vec<Notebook>> {
     NotebookStore::default().list()
@@ -1671,6 +1705,10 @@ pub fn run() {
             dashboard_query,
             preview_dml,
             notebooks_list,
+            schema_record,
+            schema_timeline,
+            schema_timeline_diff,
+            schema_timeline_forget,
             notebook_save,
             notebook_delete,
             commit_dml,

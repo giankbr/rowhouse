@@ -543,7 +543,7 @@ function WorkspaceEditor({ list, onChange, connections }: { list: Attachment[]; 
       </p>
       {list.map((a, i) => (
         <div key={i} className="flex items-center gap-2">
-          <input value={a.alias} onChange={(e) => patch(i, { alias: e.target.value })} placeholder="alias" className={cx(field, "w-28 font-mono")} />
+          <input value={a.alias} onChange={(e) => patch(i, { alias: e.target.value })} placeholder="alias" className={cx(field, "w-36 font-mono")} />
           <select
             value={a.connectionId ?? "file"}
             onChange={(e) => (e.target.value === "file" ? patch(i, { connectionId: null, path: a.path ?? "" }) : patch(i, { connectionId: e.target.value, path: null }))}
