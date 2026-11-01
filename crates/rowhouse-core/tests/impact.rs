@@ -69,6 +69,8 @@ async fn exercise(c: &Connection, t: &str) {
     );
     assert!(p.after.is_none());
     assert!(c.preview_dml("SELECT 1").await.is_err());
+    // leave the database as we found it (other tests back it up and restore it)
+    c.query(&format!("DROP TABLE {t}"), 1).await.unwrap();
 }
 
 #[tokio::test]

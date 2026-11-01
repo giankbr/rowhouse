@@ -216,17 +216,21 @@ async fn live_postgres_attach() {
         att("pg", None, Some(&pg.id)),
         att("extra", Some(csv.to_str().unwrap()), None),
     ];
-    let c = Connection::connect_with(&ws, None).await.unwrap();
-    let r = &c
-        .query(
-            "SELECT f.name, e.score FROM pg.public.rh_fed f JOIN extra e USING (id) ORDER BY 1",
-            10,
-        )
-        .await
-        .unwrap()
-        .results[0];
+    let rows = async {
+        let c = Connection::connect_with(&ws, None).await?;
+        let out = c
+            .query(
+                "SELECT f.name, e.score FROM pg.public.rh_fed f JOIN extra e USING (id) ORDER BY 1",
+                10,
+            )
+            .await?;
+        Ok::<_, rowhouse_core::Error>(out.results[0].rows.clone())
+    }
+    .await;
+    // clean up before asserting: other tests back this database up and restore it
+    direct.query("DROP TABLE rh_fed", 1).await.unwrap();
     assert_eq!(
-        r.rows,
+        rows.unwrap(),
         vec![vec![json!("a"), json!(5)], vec![json!("b"), json!(9)]]
     );
 }
