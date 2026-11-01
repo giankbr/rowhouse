@@ -328,6 +328,23 @@ export interface Attachment {
 /** kinds a workspace can attach */
 export const ATTACHABLE: DbKind[] = ["postgres", "neon", "supabase", "cockroach", "greenplum", "mysql", "mariadb", "tidb", "singlestore", "sqlite", "duckdb"];
 
+export interface NbCell {
+  id: string;
+  kind: "sql" | "markdown";
+  source: string;
+  view?: "table" | "chart" | null;
+  chart?: import("../components/ResultsChart").ChartSpec | null;
+}
+
+export interface Notebook {
+  id: string;
+  name: string;
+  connectionId: string;
+  cells: NbCell[];
+  params?: Record<string, string>;
+  updatedAt: number;
+}
+
 export interface Impact {
   kind: "update" | "delete";
   schema: string;
@@ -762,6 +779,11 @@ export const api = {
       return listen<Dashboard>("dashboard-snapshot-due", (e) => fn(e.payload));
     },
   },
+  notebooks: {
+    list: () => call<Notebook[]>("notebooks_list"),
+    save: (notebook: Notebook) => call<Notebook>("notebook_save", { notebook }),
+    remove: (notebookId: string) => call<void>("notebook_delete", { notebookId }),
+  },
   previewDml: (id: string, sql: string) => call<Impact>("preview_dml", { id, sql }),
   commitDml: (id: string, sql: string, expected: number) => call<number>("commit_dml", { id, sql, expected }),
   listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
@@ -900,6 +922,21 @@ const mockMcpClients: McpClient[] = [
   { id: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", detected: false, status: "missing" },
 ];
 let mockSnapshotDue: ((d: Dashboard) => void) | undefined;
+const mockNotebooks: Notebook[] = [
+  {
+    id: "nb1",
+    name: "Weekly sales review",
+    connectionId: "local-pg",
+    updatedAt: Math.floor(Date.now() / 1000) - 7200,
+    params: { from: "2026-10-01" },
+    cells: [
+      { id: "c1", kind: "markdown", source: "# Weekly sales review\n\nRevenue since **:from**, orders by status, and the customers to call. Change the date above and press **Run all**." },
+      { id: "c2", kind: "sql", source: "SELECT date_trunc('day', created_at) AS day, sum(total) AS revenue, count(*) AS orders\nFROM orders\nWHERE created_at >= :from\nGROUP BY 1 ORDER BY 1", view: "chart", chart: { type: "area", x: "day", y: ["revenue"] } },
+      { id: "c3", kind: "markdown", source: "Paid orders dominate; **refunds stay under 6%**. Pending orders older than 3 days need a nudge:\n\n- check payment links\n- follow up with the top 10 by value" },
+      { id: "c4", kind: "sql", source: "SELECT id, email, created_at FROM users ORDER BY created_at DESC LIMIT 10", view: "table" },
+    ],
+  },
+];
 const mockDashboards: Dashboard[] = [
   {
     id: "d1",
@@ -1249,6 +1286,20 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       console.info("[rowhouse] snapshot done", { dashboardId: a.dashboardId, bytes: a.data ? String(a.data).length : 0, error: a.error });
       return null;
     }
+    case "notebooks_list":
+      return mockNotebooks.map((n) => structuredClone(n));
+    case "notebook_save": {
+      const n = structuredClone(a.notebook as Notebook);
+      if (!n.name.trim()) throw "give the notebook a name";
+      n.updatedAt = nowS();
+      const i = mockNotebooks.findIndex((x) => x.id === n.id);
+      if (i >= 0) mockNotebooks[i] = n;
+      else mockNotebooks.push(n);
+      return n;
+    }
+    case "notebook_delete":
+      mockNotebooks.splice(mockNotebooks.findIndex((x) => x.id === a.notebookId), 1);
+      return null;
     case "preview_dml": {
       const sql = String(a.sql).trim();
       const m = /^(update|delete\s+from)\s+([\w."]+)/i.exec(sql);

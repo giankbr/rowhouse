@@ -21,6 +21,7 @@ import { ExtensionsDialog } from "./components/ExtensionsDialog";
 import { ExtensionPanel } from "./components/ExtensionPanel";
 import { DashboardView } from "./components/DashboardView";
 import { SnapshotRunner } from "./components/SnapshotRunner";
+import { NotebookView } from "./components/NotebookView";
 import { DashboardsDialog, PinDialog } from "./components/DashboardsDialog";
 import { RunFileDialog } from "./components/RunFileDialog";
 import { FakeDataDialog } from "./components/FakeDataDialog";
@@ -35,7 +36,7 @@ import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
 import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Dashboard, type DashTile, type DbObject, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Dashboard, type DashTile, type DbObject, type Notebook, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 import { findVars, type VarRef } from "./lib/vars";
@@ -117,6 +118,14 @@ export default function App() {
     window.addEventListener("rh-dashboards-changed", on);
     return () => window.removeEventListener("rh-dashboards-changed", on);
   }, [refreshDashList]);
+  const [nbList, setNbList] = useState<Notebook[]>([]);
+  const refreshNbList = useCallback(() => {
+    api.notebooks
+      .list()
+      .then(setNbList)
+      .catch(() => {});
+  }, []);
+  useEffect(refreshNbList, [refreshNbList]);
   const [exts, setExts] = useState<ExtensionInfo[]>([]);
   useEffect(() => {
     api.ext
@@ -608,6 +617,39 @@ export default function App() {
     [tabs, activeConn, connections, selectConnection, patchTab, selectTab, addTab, refreshDashList],
   );
 
+  const openNotebook = useCallback(
+    (n: Notebook) => {
+      refreshNbList();
+      if (n.connectionId !== activeConn && connections.some((c) => c.id === n.connectionId)) selectConnection(n.connectionId);
+      const existing = tabs.find((t) => t.kind === "notebook" && t.notebookId === n.id);
+      if (existing) {
+        patchTab(existing.id, { title: n.name });
+        return selectTab(existing.id);
+      }
+      addTab({ id: uid(), kind: "notebook", title: n.name, connId: n.connectionId, sql: "", notebookId: n.id });
+    },
+    [tabs, activeConn, connections, selectConnection, patchTab, selectTab, addTab, refreshNbList],
+  );
+  const newNotebook = useCallback(async () => {
+    if (!activeConn) return setToast("Open a connection first");
+    try {
+      const n = await api.notebooks.save({
+        id: uid(),
+        name: `Notebook ${nbList.length + 1}`,
+        connectionId: activeConn,
+        cells: [
+          { id: uid(), kind: "markdown", source: "# Notes\n\nWhat this notebook answers." },
+          { id: uid(), kind: "sql", source: "", view: "table" },
+        ],
+        params: {},
+        updatedAt: 0,
+      });
+      openNotebook(n);
+    } catch (e) {
+      setToast(String(e));
+    }
+  }, [activeConn, nbList.length, openNotebook]);
+
   /** Open (or focus) an extension panel tab, optionally delivering an event to it. */
   const openExtPanel = useCallback(
     (x: ExtensionInfo, panel: string, event?: { event: string; data: unknown }) => {
@@ -706,6 +748,15 @@ export default function App() {
               onOpenSql={(sql) => openQuery(t.connId, sql, false)}
               onRunSql={(sql) => openQuery(t.connId, sql, true)}
               onToast={setToast}
+            />
+          ) : t.kind === "notebook" && t.notebookId ? (
+            <NotebookView
+              key={t.id}
+              notebookId={t.notebookId}
+              conn={connections.find((c) => c.id === t.connId)}
+              tables={tables[t.connId] ?? []}
+              onToast={setToast}
+              onDeleted={() => (closeTab(t.id), refreshNbList(), setToast("Notebook deleted", "ok"))}
             />
           ) : t.kind === "dashboard" && t.dashboardId ? (
             <DashboardView
@@ -1071,6 +1122,7 @@ export default function App() {
         connections={connections}
         tables={connTables}
         dashboards={dashList.map((d) => ({ label: `Dashboard: ${d.name}`, run: () => openDashboard(d) }))}
+        notebooks={nbList.map((n) => ({ label: `Notebook: ${n.name}`, run: () => openNotebook(n) }))}
         extensions={exts
           .filter((x) => x.enabled)
           .flatMap((x) => x.manifest.contributes.panels.map((p) => ({ label: `${x.manifest.name}: ${p.title}`, run: () => openExtPanel(x, p.id) })))}
@@ -1093,6 +1145,7 @@ export default function App() {
           showRoles: () => setRolesOpen(true),
           runFile: () => setRunFileOpen(true),
           newWorkspace: () => setDialog({ open: true, edit: null, workspace: true }),
+          newNotebook,
           showExtensions: () => setExtensionsOpen(true),
           showDashboards: () => setDashboardsOpen(true),
           backup: () => setBackup("backup"),

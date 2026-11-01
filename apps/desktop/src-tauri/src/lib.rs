@@ -563,6 +563,23 @@ fn dashboard_snapshot_now(app: tauri::AppHandle, dashboard_id: String) -> CmdRes
     Ok(())
 }
 
+use rowhouse_core::notebooks::{Notebook, NotebookStore};
+
+#[tauri::command]
+fn notebooks_list() -> CmdResult<Vec<Notebook>> {
+    NotebookStore::default().list()
+}
+
+#[tauri::command]
+fn notebook_save(notebook: Notebook) -> CmdResult<Notebook> {
+    NotebookStore::default().save(notebook)
+}
+
+#[tauri::command]
+fn notebook_delete(notebook_id: String) -> CmdResult<()> {
+    NotebookStore::default().delete(&notebook_id)
+}
+
 /// Run an UPDATE / DELETE in a rolled-back transaction and show what it would change.
 #[tauri::command]
 async fn preview_dml(
@@ -1321,6 +1338,7 @@ async fn do_sync(
         state_path: fsync::SyncState::path(),
         keychain: true,
         dashboards: Some(rowhouse_core::dashboards::DashboardStore::default_path()),
+        notebooks: Some(rowhouse_core::notebooks::NotebookStore::default_path()),
     }
     .sync(std::path::Path::new(folder), pass, include_secrets)
     .await
@@ -1354,6 +1372,7 @@ async fn sync_setup(
         state_path: path,
         keychain: true,
         dashboards: Some(rowhouse_core::dashboards::DashboardStore::default_path()),
+        notebooks: Some(rowhouse_core::notebooks::NotebookStore::default_path()),
     }
     .check(std::path::Path::new(&folder), &passphrase)?;
     fsync::save_passphrase(Some(&passphrase))?;
@@ -1594,7 +1613,13 @@ pub fn run() {
                     };
                     let state = handle.state::<AppState>();
                     match do_sync(&state, &folder, &pass, st.state.include_secrets).await {
-                        Ok(r) if r.pulled_connections + r.pulled_snippets > 0 => {
+                        Ok(r)
+                            if r.pulled_connections
+                                + r.pulled_snippets
+                                + r.pulled_dashboards
+                                + r.pulled_notebooks
+                                > 0 =>
+                        {
                             let _ = handle.emit("sync-pulled", r);
                         }
                         Ok(_) => {}
@@ -1638,6 +1663,9 @@ pub fn run() {
             dashboard_delete,
             dashboard_query,
             preview_dml,
+            notebooks_list,
+            notebook_save,
+            notebook_delete,
             commit_dml,
             dashboard_snapshot_done,
             dashboard_snapshot_now,
