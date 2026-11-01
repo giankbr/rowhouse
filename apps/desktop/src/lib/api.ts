@@ -328,6 +328,16 @@ export interface Attachment {
 /** kinds a workspace can attach */
 export const ATTACHABLE: DbKind[] = ["postgres", "neon", "supabase", "cockroach", "greenplum", "mysql", "mariadb", "tidb", "singlestore", "sqlite", "duckdb"];
 
+export interface Impact {
+  kind: "update" | "delete";
+  schema: string;
+  table: string;
+  affected: number;
+  before: QueryResult;
+  after?: QueryResult | null;
+  key: string[];
+}
+
 export type DeliveryKind = "slack" | "discord" | "webhook";
 export interface Delivery {
   id: string;
@@ -752,6 +762,8 @@ export const api = {
       return listen<Dashboard>("dashboard-snapshot-due", (e) => fn(e.payload));
     },
   },
+  previewDml: (id: string, sql: string) => call<Impact>("preview_dml", { id, sql }),
+  commitDml: (id: string, sql: string, expected: number) => call<number>("commit_dml", { id, sql, expected }),
   listRoles: (id: string) => call<RoleInfo[]>("list_roles", { id }),
   roleGrants: (id: string, role: string) => call<RoleGrant[]>("role_grants", { id, role }),
   roleAction: (id: string, op: RoleOp, preview: boolean) => call<string[]>("role_action", { id, op, preview }),
@@ -1237,6 +1249,28 @@ async function mock(cmd: string, a: Record<string, unknown>): Promise<unknown> {
       console.info("[rowhouse] snapshot done", { dashboardId: a.dashboardId, bytes: a.data ? String(a.data).length : 0, error: a.error });
       return null;
     }
+    case "preview_dml": {
+      const sql = String(a.sql).trim();
+      const m = /^(update|delete\s+from)\s+([\w."]+)/i.exec(sql);
+      if (!m) throw "preview works on a single UPDATE or DELETE statement";
+      await sleep(250);
+      const table = m[2].replace(/"/g, "").split(".").pop()!;
+      const columns = [{ name: "id", data_type: "INT8" }, { name: "status", data_type: "TEXT" }, { name: "total", data_type: "NUMERIC" }];
+      const before = [[101, "pending", 49.9], [102, "pending", 12.5], [107, "pending", 220]];
+      const upd = /^update/i.test(sql);
+      return {
+        kind: upd ? "update" : "delete",
+        schema: "public",
+        table,
+        affected: before.length,
+        key: ["id"],
+        before: { columns, rows: before, rows_affected: 0, truncated: false },
+        after: upd ? { columns, rows: before.map((r) => [r[0], "paid", r[2]]), rows_affected: 0, truncated: false } : null,
+      } satisfies Impact;
+    }
+    case "commit_dml":
+      await sleep(200);
+      return a.expected;
     case "dashboard_snapshot_now": {
       const d = mockDashboards.find((x) => x.id === a.dashboardId);
       if (!d?.snapshot) throw "save the snapshot settings first";

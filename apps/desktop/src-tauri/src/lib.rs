@@ -563,6 +563,27 @@ fn dashboard_snapshot_now(app: tauri::AppHandle, dashboard_id: String) -> CmdRes
     Ok(())
 }
 
+/// Run an UPDATE / DELETE in a rolled-back transaction and show what it would change.
+#[tauri::command]
+async fn preview_dml(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+) -> CmdResult<rowhouse_core::impact::Impact> {
+    state.conn(&id).await?.preview_dml(&sql).await
+}
+
+/// Run a previewed statement; rolls back unless exactly `expected` rows change.
+#[tauri::command]
+async fn commit_dml(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    expected: u64,
+) -> CmdResult<u64> {
+    state.conn(&id).await?.commit_dml(&sql, expected).await
+}
+
 /// Tiles always run read-only.
 #[tauri::command]
 async fn dashboard_query(
@@ -1616,6 +1637,8 @@ pub fn run() {
             dashboard_save,
             dashboard_delete,
             dashboard_query,
+            preview_dml,
+            commit_dml,
             dashboard_snapshot_done,
             dashboard_snapshot_now,
             delivery_set_secret,

@@ -1,4 +1,4 @@
-import { AlertCircle, AlignLeft, BarChart3, GitCompareArrows, Pin, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
+import { AlertCircle, AlignLeft, BarChart3, Eye, GitCompareArrows, Pin, Puzzle, Bookmark, CalendarClock, ChevronLeft, ChevronRight, Filter as FilterIcon, BookOpen, Check, Download, GanttChart, History, KeyRound, Sparkles, Wand2, Lock, Play, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { canFormat, formatSql } from "../lib/format";
 import { api, dialogs, kindInfo, type ConnectionConfig, type ExportFormat, type Filter, type Relations, type TableInfo } from "../lib/api";
@@ -6,6 +6,7 @@ import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { diffResults, summaryText } from "../lib/rowdiff";
 import { DiffView } from "./DiffView";
+import { ImpactDialog, previewable } from "./ImpactDialog";
 import { AiPanel, type AiState } from "./AiPanel";
 import { FilterBar } from "./FilterBar";
 import { PlanView } from "./PlanView";
@@ -202,6 +203,8 @@ export function Workspace({
 
   // ---- saved queries --------------------------------------------------------
   const [saveDlg, setSaveDlg] = useState<{ name: string; global: boolean } | null>(null);
+  const [impactSql, setImpactSql] = useState<string | null>(null);
+  const canPreview = !!conn && ["postgres", "neon", "supabase", "cockroach", "greenplum", "mysql", "mariadb", "tidb", "singlestore", "sqlite"].includes(conn.kind) && !conn.readOnly;
   const saveSnippet = async () => {
     if (!saveDlg?.name.trim()) return;
     try {
@@ -350,6 +353,11 @@ export function Workspace({
             >
               <BarChart3 size={11} /> Chart
             </Button>
+            {tab.kind === "query" && canPreview && previewable(tab.sql) && (
+              <Button variant="ghost" size="xs" onClick={() => setImpactSql(tab.sql)} title="Run it in a rolled-back transaction and see which rows change, then commit">
+                <Eye size={11} /> Preview
+              </Button>
+            )}
             {rowDiff && (
               <Button
                 variant="ghost"
@@ -566,6 +574,18 @@ export function Workspace({
         {tab.running && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-accent" />}
       </div>
 
+      {impactSql && (
+        <ImpactDialog
+          connId={tab.connId}
+          sql={impactSql}
+          onToast={onToast}
+          onClose={() => setImpactSql(null)}
+          onCommitted={(n) => {
+            setImpactSql(null);
+            onChange({ output: { elapsed_ms: 0, results: [{ columns: [], rows: [], rows_affected: n, truncated: false }] }, error: undefined, showDiff: false });
+          }}
+        />
+      )}
       <Modal
         open={!!saveDlg}
         onClose={() => setSaveDlg(null)}
