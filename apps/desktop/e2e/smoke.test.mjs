@@ -119,6 +119,48 @@ describe("Rowhouse UI", () => {
     await p.close();
   });
 
+  test("preview an update, then commit it", async () => {
+    const p = await fresh();
+    await p.keyboard.press("Control+t");
+    await p.locator(".cm-content").first().click();
+    await p.keyboard.press("Control+a");
+    await p.keyboard.type("UPDATE orders SET status = 'paid' WHERE status = 'pending'");
+    await p.getByRole("button", { name: "Preview", exact: true }).click();
+    await p.locator("text=This UPDATE changes").waitFor();
+    await p.locator("text=3 changed").waitFor();
+    await p.getByRole("button", { name: /Update 3 rows/ }).click();
+    await p.locator("text=/3 rows? affected/").first().waitFor();
+    noErrors();
+    await p.close();
+  });
+
+  test("notebook runs its cells; screenshot mode masks emails", async () => {
+    const p = await fresh();
+    await p.keyboard.press("Control+k");
+    await p.keyboard.type("Notebook: Weekly");
+    await p.keyboard.press("Enter");
+    await p.locator("text=Weekly sales review").first().waitFor();
+    await p.locator("text=/\\d+ rows · \\d+ ms/").first().waitFor({ timeout: 10_000 });
+    await p.locator("text=/@example\\.com/").first().waitFor();
+    await p.keyboard.press("Control+Shift+M");
+    await p.locator("text=Screenshot mode").first().waitFor();
+    assert.equal(await p.locator("text=/[a-z]+\\d*@example\\.com/").count(), 0, "emails masked");
+    await p.keyboard.press("Control+Shift+M");
+    noErrors();
+    await p.close();
+  });
+
+  test("schema timeline shows changes and migration sql", async () => {
+    const p = await fresh();
+    await p.keyboard.press("Control+k");
+    await p.keyboard.type("Schema timeline");
+    await p.keyboard.press("Enter");
+    await p.locator("text=table added").waitFor();
+    await p.locator("text=Migration SQL").waitFor();
+    noErrors();
+    await p.close();
+  });
+
   test("connection form: new connectors and validation", async () => {
     const p = await fresh();
     await p.keyboard.press("Control+o");
