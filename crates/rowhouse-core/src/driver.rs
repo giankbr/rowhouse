@@ -142,6 +142,8 @@ pub struct Connection {
     pool: Pool,
     /// Kept alive for as long as the connection; dropped = tunnel closed.
     tunnel: Option<crate::tunnel::Tunnel>,
+    /// workspace: connections opened only for their SSH tunnels
+    _children: Vec<Connection>,
     /// host/port actually used (127.0.0.1:<local> when tunnelled) — for CLI tools
     endpoint: (String, u16),
     /// Server-side session ids of running tagged queries (for cancel).
@@ -188,7 +190,13 @@ impl Connection {
                 .clone()
                 .ok_or_else(|| Error::Other("profile has no database file path".into()))
         };
+        let mut children = Vec::new();
         let pool = match config.kind.driver() {
+            Driver::Duckdb if !config.attach.is_empty() => {
+                let (client, kids) = federate(config).await?;
+                children = kids;
+                Pool::Duck(client)
+            }
             _ if config.kind == DbKind::Turso => Pool::Libsql(
                 backend::libsql::Client::connect(config.host.as_deref().unwrap_or(""), password)
                     .await?,
@@ -428,6 +436,7 @@ impl Connection {
             config: config.clone(),
             pool,
             tunnel,
+            _children: children,
             running: Default::default(),
             endpoint: (host.clone(), port),
         })
@@ -849,8 +858,12 @@ impl Connection {
                  OR table_schema = DATABASE() ORDER BY 1, 2",
             Driver::Sqlite => "SELECT 'main', name, type FROM sqlite_master \
                  WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND substr(name, 1, 4) <> '_cf_' AND substr(name, 1, 7) <> 'libsql_' ORDER BY 2",
-            Driver::Duckdb => "SELECT table_schema, table_name, table_type FROM information_schema.tables \
-                 WHERE table_schema NOT IN ('information_schema','pg_catalog') ORDER BY 1, 2",
+            // attached databases (workspaces) show up as catalog.schema
+            Driver::Duckdb => "SELECT CASE WHEN table_catalog = current_database() THEN table_schema \
+                   ELSE table_catalog || '.' || table_schema END, table_name, table_type \
+                 FROM information_schema.tables \
+                 WHERE table_schema NOT IN ('information_schema','pg_catalog') \
+                   AND table_catalog NOT IN ('system','temp') ORDER BY 1, 2",
             Driver::Mssql => "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES \
                  WHERE TABLE_SCHEMA NOT IN ('sys','INFORMATION_SCHEMA') ORDER BY 1, 2",
             Driver::Oracle => "SELECT owner, table_name, 'table' FROM all_tables \
@@ -952,6 +965,17 @@ impl Connection {
             Driver::Postgres => {
                 let sql = info_schema(
                     "CASE WHEN c.data_type IN ('USER-DEFINED','ARRAY') THEN c.udt_name ELSE c.data_type END",
+                );
+                self.meta(&sql).await?.rows
+            }
+            Driver::Duckdb if schema.contains('.') => {
+                let (cat, sch) = schema.split_once('.').unwrap_or_default();
+                let sql = format!(
+                    "SELECT column_name, data_type, is_nullable, column_default, 0 \
+                     FROM information_schema.columns WHERE table_catalog = {} AND table_schema = {} \
+                     AND table_name = {t} ORDER BY ordinal_position",
+                    self.literal(cat),
+                    self.literal(sch)
                 );
                 self.meta(&sql).await?.rows
             }
@@ -1240,4 +1264,70 @@ fn first_i64(r: &[QueryResult]) -> Option<i64> {
         Value::String(s) => s.parse().ok(),
         _ => None,
     }
+}
+
+/// Open a workspace: an in-memory (or file) DuckDB with its attachments.
+async fn federate(config: &ConnectionConfig) -> Result<(backend::duck::Client, Vec<Connection>)> {
+    use crate::federation::{attach_connection_sql, attach_file_sql, explain_error};
+    let file = config
+        .file
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .map(crate::tunnel::expand_home)
+        .unwrap_or_else(|| ":memory:".into());
+    let client = backend::duck::Client::open(&file, false).await?;
+    let store = crate::ConnectionStore::open_default();
+    let mut kids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for a in &config.attach {
+        crate::federation::check_alias(&a.alias)?;
+        if !seen.insert(a.alias.to_lowercase()) {
+            return Err(Error::Other(format!(
+                "the alias `{}` is used twice",
+                a.alias
+            )));
+        }
+    }
+    for a in &config.attach {
+        let stmts = match (&a.connection_id, &a.path) {
+            (Some(id), _) => {
+                let cfg = store.get(id)?;
+                if cfg.id == config.id || !cfg.attach.is_empty() {
+                    return Err(Error::Other(format!(
+                        "`{}` is a workspace itself — attach its connections directly",
+                        cfg.name
+                    )));
+                }
+                let password = cfg.password().ok().flatten();
+                let (host, port) = if cfg.ssh.is_some() {
+                    // open it once for the tunnel; DuckDB dials the local end
+                    let kid = Box::pin(Connection::connect(&cfg)).await?;
+                    let (h, p) = kid.endpoint();
+                    let hp = (h.to_string(), p);
+                    kids.push(kid);
+                    hp
+                } else {
+                    (
+                        cfg.host.clone().unwrap_or_else(|| "localhost".into()),
+                        cfg.port.or(cfg.kind.default_port()).unwrap_or(0),
+                    )
+                };
+                attach_connection_sql(&a.alias, &cfg, password.as_deref(), &host, port)?
+            }
+            (None, Some(p)) => attach_file_sql(&a.alias, p)?,
+            (None, None) => {
+                return Err(Error::Other(format!(
+                    "`{}` needs a connection or a file",
+                    a.alias
+                )))
+            }
+        };
+        for s in stmts {
+            client.run(&s, 0, false).await.map_err(|e| {
+                Error::Other(format!("{}: {}", a.alias, explain_error(&e.to_string())))
+            })?;
+        }
+    }
+    Ok((client, kids))
 }

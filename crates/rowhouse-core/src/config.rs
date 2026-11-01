@@ -198,6 +198,9 @@ pub struct ConnectionConfig {
     /// Snowflake: role to use
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// DuckDB workspace: other connections and files to attach (cross-database queries)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attach: Vec<crate::federation::Attachment>,
 }
 
 /// Same names as libpq's `sslmode`.
@@ -304,6 +307,7 @@ impl ConnectionConfig {
             client_dir: None,
             warehouse: None,
             role: None,
+            attach: vec![],
         }
     }
 

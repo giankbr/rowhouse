@@ -42,6 +42,14 @@ impl Connection {
     pub(crate) fn target(&self, schema: &str, table: &str) -> String {
         if matches!(self.driver(), Driver::Sqlite | Driver::Elastic) || schema.is_empty() {
             self.ident(table)
+        } else if let (Driver::Duckdb, Some((cat, sch))) = (self.driver(), schema.split_once('.')) {
+            // workspace: an attached database's catalog.schema
+            format!(
+                "{}.{}.{}",
+                self.ident(cat),
+                self.ident(sch),
+                self.ident(table)
+            )
         } else {
             format!("{}.{}", self.ident(schema), self.ident(table))
         }

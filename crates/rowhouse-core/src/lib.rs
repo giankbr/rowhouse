@@ -21,6 +21,7 @@ pub mod erd;
 pub mod error;
 pub mod extensions;
 pub mod fakegen;
+pub mod federation;
 pub mod guard;
 pub mod history;
 pub mod import;
