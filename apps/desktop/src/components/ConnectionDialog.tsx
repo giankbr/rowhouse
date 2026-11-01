@@ -464,6 +464,12 @@ export function ConnectionDialog({
                 {c.mcpEnabled && !c.readOnly && (
                   <Switch checked={!!c.mcpWrites} onChange={(v) => set({ mcpWrites: v })} label="Allow AI to request writes — you approve each one" />
                 )}
+                <Switch
+                  checked={c.maskPii ?? c.env === "production"}
+                  onChange={(v) => set({ maskPii: v })}
+                  label="Mask personal data — emails, phones, card numbers, IDs and secrets, in the grid and in results sent to AI assistants"
+                />
+                {c.maskPii == null && <p className="-mt-1 pl-9 text-2xs text-subtle">On by default for production connections.</p>}
                 <p className="text-2xs text-subtle">Passwords and SSH secrets are stored in the system keychain, never in plain text.</p>
               </div>
             )}

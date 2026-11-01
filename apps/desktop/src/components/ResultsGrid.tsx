@@ -7,6 +7,7 @@ import { countPending, emptyPending, type Pending } from "../lib/pending";
 import { mod } from "../lib/types";
 import { rowHeight, useAppearance } from "../lib/appearance";
 import { Button, Kbd, cx } from "./ui";
+import { columnKind, maskCell } from "../lib/mask";
 
 const INDEX_W = 44;
 /** above this many columns only the ones in view are rendered */
@@ -50,7 +51,8 @@ function same(a: Cell | undefined, b: Cell | undefined) {
  */
 export function ResultsGrid({
   result,
-  edit,
+  edit: editProp,
+  mask,
   serverSort,
   onServerSort,
   table,
@@ -59,6 +61,8 @@ export function ResultsGrid({
   onFollow,
 }: {
   result: QueryResult;
+  /** mask personal data and secrets (also on in screenshot mode) */
+  mask?: boolean;
   /** table name for "Copy as INSERT" */
   table?: string;
   /** result-column indexes of the primary key (left out when duplicating rows) */
@@ -71,7 +75,13 @@ export function ResultsGrid({
   relations?: Relations;
   onFollow?: (target: { schema: string; name: string }, filters: Filter[]) => void;
 }) {
-  const ROW_H = rowHeight(useAppearance().density);
+  const appearance = useAppearance();
+  const ROW_H = rowHeight(appearance.density);
+  const masking = !!mask || !!appearance.maskAll;
+  // masked values must never be written back: no editing while masked
+  const edit = masking ? undefined : editProp;
+  const maskKinds = useMemo(() => result.columns.map((c) => columnKind(c.name)), [result.columns]);
+  const shown = (v: Cell | undefined, ci: number) => (masking ? (maskCell(maskKinds[ci], v) ?? display(v)) : display(v));
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
   /** other corner of a range selection (shift-click / shift-arrows); null = single cell */
@@ -250,7 +260,10 @@ export function ResultsGrid({
       const row = rows[r];
       if (!row) continue;
       const vals: (Cell | undefined)[] = [];
-      for (let c = range.c0; c <= range.c1; c++) vals.push(valueAt(row, c));
+      for (let c = range.c0; c <= range.c1; c++) {
+        const v = valueAt(row, c);
+        vals.push(masking ? (maskCell(maskKinds[c], v) ?? v) : v);
+      }
       block.push(vals);
     }
     navigator.clipboard.writeText(formatCells(format, cols, block, table));
@@ -434,7 +447,7 @@ export function ResultsGrid({
       if (rangeCells > 1) copyRange(e.shiftKey ? "csv" : "tsv");
       else {
         const v = valueAt(rows[sel.r], sel.c);
-        navigator.clipboard.writeText(v === null || v === undefined ? "" : display(v));
+        navigator.clipboard.writeText(v === null || v === undefined ? "" : shown(v, sel.c));
       }
       handled();
     } else if (!edit) return;
@@ -626,7 +639,7 @@ export function ResultsGrid({
                         )}
                         style={{ width: widths[ci], lineHeight: `${ROW_H - 1}px` }}
                       >
-                        {display(v)}
+                        {shown(v, ci)}
                         {fkByCol.has(ci) && v !== null && v !== undefined && !isNew && (
                           <button
                             title={`Open ${fkByCol.get(ci)!.ref_table} where ${fkByCol.get(ci)!.ref_columns.join(", ")} = ${display(v)}`}
@@ -654,7 +667,7 @@ export function ResultsGrid({
         <RowDetails
           columns={result.columns}
           row={selRow}
-          values={selRow ? result.columns.map((_, c) => valueAt(selRow, c)) : []}
+          values={selRow ? result.columns.map((_, c) => (masking ? (maskCell(maskKinds[c], valueAt(selRow, c)) ?? valueAt(selRow, c)) : valueAt(selRow, c))) : []}
           edited={(c) => !!selRow && isEdited(selRow, c)}
           focus={sel?.c}
           onEdit={edit && selRow && !isDeleted(selRow) ? (c, v) => setCell(sel!.r, c, v) : undefined}

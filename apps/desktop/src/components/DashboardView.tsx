@@ -4,6 +4,8 @@ import { api, dialogs, kindInfo, type ConnectionConfig, type Dashboard, type Das
 import { uid } from "../lib/types";
 import { findVars, substitute, type VarRef } from "../lib/vars";
 import { display } from "./ResultsGrid";
+import { columnKind, connMasks, maskCell } from "../lib/mask";
+import { useAppearance } from "../lib/appearance";
 import { ResultsChart, defaultSpec, type ChartSpec } from "./ResultsChart";
 import { ContextMenu } from "./TableActions";
 import { Button, Input, Menu, Modal, Segmented, cx } from "./ui";
@@ -328,7 +330,7 @@ export function DashboardView({
                     </button>
                   </div>
                   <div className="relative min-h-0 flex-1">
-                    <TileBody tile={t} state={st} onToast={onToast} />
+                    <TileBody tile={t} state={st} onToast={onToast} mask={connMasks(conn)} />
                   </div>
                 </div>
               );
@@ -398,7 +400,8 @@ export function DashboardView({
   );
 }
 
-function TileBody({ tile, state, onToast }: { tile: DashTile; state?: TileState; onToast: (m: string, k?: "ok" | "err") => void }) {
+function TileBody({ tile, state, onToast, mask }: { tile: DashTile; state?: TileState; onToast: (m: string, k?: "ok" | "err") => void; mask?: boolean }) {
+  const masking = !!mask || !!useAppearance().maskAll;
   if (!state || (state.loading && !state.result && !state.error)) return <div className="m-3 h-[calc(100%-24px)] animate-pulse rounded-lg bg-hover/60" />;
   if (state.error)
     return (
@@ -443,7 +446,7 @@ function TileBody({ tile, state, onToast }: { tile: DashTile; state?: TileState;
             <tr key={i} className="border-b border-line/50 last:border-0">
               {row.map((v, j) => (
                 <td key={j} className={cx("max-w-64 truncate px-2.5 py-1", v === null && "text-subtle italic", typeof v === "number" && "text-right tabular-nums")}>
-                  {display(v)}
+                  {masking ? (maskCell(columnKind(r.columns[j]?.name ?? ""), v) ?? display(v)) : display(v)}
                 </td>
               ))}
             </tr>

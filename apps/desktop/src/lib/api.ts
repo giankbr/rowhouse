@@ -127,6 +127,8 @@ export interface ConnectionConfig {
   ssh?: SshConfig | null;
   /** Oracle: Instant Client folder (empty = auto-detect) */
   clientDir?: string | null;
+  /** mask personal data in the grid and in MCP results (default: production) */
+  maskPii?: boolean | null;
   /** DuckDB workspace: connections and files attached for cross-database queries */
   attach?: Attachment[];
   /** Snowflake */
@@ -694,8 +696,8 @@ export const api = {
   switchDatabase: (id: string, database: string) => call<void>("switch_database", { id, database }),
   previewChanges: (id: string, changes: ChangeSet) => call<string[]>("preview_changes", { id, changes }),
   applyChanges: (id: string, changes: ChangeSet) => call<number>("apply_changes", { id, changes }),
-  exportQuery: (id: string, sql: string, format: ExportFormat, path: string, schema?: string, table?: string) =>
-    call<number>("export_query", { id, sql, format, path, schema, table }),
+  exportQuery: (id: string, sql: string, format: ExportFormat, path: string, schema?: string, table?: string, mask?: boolean) =>
+    call<number>("export_query", { id, sql, format, path, schema, table, mask }),
   tableSqlAll: (id: string, schema: string, table: string) => call<string>("table_sql_all", { id, schema, table }),
   importCsv: (id: string, schema: string, table: string, path: string) =>
     call<number>("import_csv", { id, schema, table, path }),

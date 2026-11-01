@@ -13,7 +13,7 @@ import { McpDialog } from "./components/McpDialog";
 import { SchedulesDialog } from "./components/SchedulesDialog";
 import { setWindowMode } from "./lib/windowSize";
 import { loadSession, saveSession } from "./lib/session";
-import { loadAppearance } from "./lib/appearance";
+import { loadAppearance, saveAppearance } from "./lib/appearance";
 import { QueryBuilder } from "./components/QueryBuilder";
 import { ActivityDialog } from "./components/ActivityDialog";
 import { RolesDialog } from "./components/RolesDialog";
@@ -700,6 +700,12 @@ export default function App() {
       const k = e.key.toLowerCase();
       if (k === "k" || k === "p") (e.preventDefault(), setPalette((p) => !p));
       else if (k === "t") (e.preventDefault(), newQuery());
+      else if (k === "m" && e.shiftKey) {
+        e.preventDefault();
+        const a = loadAppearance();
+        saveAppearance({ ...a, maskAll: !a.maskAll });
+        setToast(a.maskAll ? "Screenshot mode off" : "Screenshot mode on — personal data is masked", "ok");
+      }
       else if (k === "w" && activeTab) (e.preventDefault(), closeTab(activeTab));
       else if (k === "b") (e.preventDefault(), setSidebar((s) => !s));
       else if (k === "o") (e.preventDefault(), setSwitcherOpen((o) => !o));
@@ -1146,6 +1152,11 @@ export default function App() {
           runFile: () => setRunFileOpen(true),
           newWorkspace: () => setDialog({ open: true, edit: null, workspace: true }),
           newNotebook,
+          toggleMask: () => {
+            const a = loadAppearance();
+            saveAppearance({ ...a, maskAll: !a.maskAll });
+            setToast(a.maskAll ? "Screenshot mode off" : "Screenshot mode on — personal data is masked", "ok");
+          },
           showExtensions: () => setExtensionsOpen(true),
           showDashboards: () => setDashboardsOpen(true),
           backup: () => setBackup("backup"),

@@ -821,11 +821,18 @@ async fn export_query(
     path: String,
     schema: Option<String>,
     table: Option<String>,
+    mask: Option<bool>,
 ) -> CmdResult<u64> {
     let c = state.conn(&id).await?;
     let target = schema.as_deref().zip(table.as_deref());
-    c.export(&sql, format, std::path::Path::new(&path), target)
-        .await
+    c.export_with(
+        &sql,
+        format,
+        std::path::Path::new(&path),
+        target,
+        mask.unwrap_or(false),
+    )
+    .await
 }
 
 /// `SELECT * FROM table` without a row limit (for full-table export).

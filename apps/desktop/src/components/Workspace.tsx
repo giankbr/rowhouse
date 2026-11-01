@@ -6,6 +6,8 @@ import { countPending, editBlocker, toChangeSet } from "../lib/pending";
 import { mod, type Tab } from "../lib/types";
 import { diffResults, summaryText } from "../lib/rowdiff";
 import { DiffView } from "./DiffView";
+import { connMasks } from "../lib/mask";
+import { loadAppearance } from "../lib/appearance";
 import { ImpactDialog, previewable } from "./ImpactDialog";
 import { AiPanel, type AiState } from "./AiPanel";
 import { FilterBar } from "./FilterBar";
@@ -230,8 +232,9 @@ export function Workspace({
     if (!path) return;
     try {
       const sql = isTable ? await api.tableSqlAll(tab.connId, tab.schema!, tab.table!) : tab.sql;
-      const n = await api.exportQuery(tab.connId, sql, format, path, tab.schema, tab.table);
-      onToast(`Exported ${n.toLocaleString()} rows → ${path.split(/[\\/]/).pop()}`, "ok");
+      const masked = connMasks(conn) || !!loadAppearance().maskAll;
+      const n = await api.exportQuery(tab.connId, sql, format, path, tab.schema, tab.table, masked);
+      onToast(`Exported ${n.toLocaleString()} rows${masked ? " (personal data masked)" : ""} → ${path.split(/[\\/]/).pop()}`, "ok");
     } catch (e) {
       onToast(String(e));
     }
@@ -540,6 +543,7 @@ export function Workspace({
         ) : result ? (
           <ResultsGrid
             result={result}
+            mask={connMasks(conn)}
             table={tab.kind === "table" && tab.table ? (tab.schema && tab.schema !== "main" ? `${tab.schema}.${tab.table}` : tab.table) : undefined}
             pkColumns={(tab.columns ?? [])
               .filter((c) => c.primary_key)

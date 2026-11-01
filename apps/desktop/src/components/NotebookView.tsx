@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, BarChart3, Download, FileText, Loader2, NotebookPen
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, dialogs, kindInfo, type ConnectionConfig, type NbCell, type Notebook, type QueryResult, type TableInfo } from "../lib/api";
 import { renderMarkdown, resultToMarkdown } from "../lib/markdown";
+import { connMasks } from "../lib/mask";
 import { uid } from "../lib/types";
 import { findVars, substitute, type VarRef } from "../lib/vars";
 import { ResultsChart, defaultSpec } from "./ResultsChart";
@@ -239,7 +240,7 @@ export function NotebookView({
                         </div>
                       ) : (
                         <div className="flex border-t border-line/70" style={{ height: Math.min(320, 34 + Math.max(1, o.result.rows.length) * 26) }}>
-                          <ResultsGrid result={o.result} />
+                          <ResultsGrid result={o.result} mask={connMasks(conn)} />
                         </div>
                       ))}
                   </>

@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { Activity, Blocks, Combine, NotebookPen, FileCode2, LayoutGrid, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
+import { Activity, Blocks, Combine, EyeOff, NotebookPen, FileCode2, LayoutGrid, Puzzle, UsersRound, Bot, HardDriveDownload, HardDriveUpload, CalendarClock, Columns2, Database, GitCompareArrows, Eye, FileInput, History, Moon, Network, Plus, Settings, SquareTerminal, Table2 } from "lucide-react";
 import type { ConnectionConfig, TableInfo } from "../lib/api";
 import { Dot } from "./ui";
 
@@ -41,6 +41,7 @@ export function CommandPalette({
     runFile: () => void;
     newWorkspace: () => void;
     newNotebook: () => void;
+    toggleMask: () => void;
     showExtensions: () => void;
     showDashboards: () => void;
     backup: () => void;
@@ -120,6 +121,9 @@ export function CommandPalette({
             </Command.Item>
             <Command.Item onSelect={run(actions.showRoles)} className={item}>
               <UsersRound size={13} className="text-subtle" /> Users & roles (privileges)
+            </Command.Item>
+            <Command.Item onSelect={run(actions.toggleMask)} className={item} keywords={["pii", "privacy", "mask", "demo", "share"]}>
+              <EyeOff size={13} className="text-subtle" /> Toggle screenshot mode (mask personal data)
             </Command.Item>
             <Command.Item onSelect={run(actions.newWorkspace)} className={item} keywords={["join", "federated", "duckdb", "csv", "parquet"]}>
               <Combine size={13} className="text-subtle" /> New cross-database workspace…

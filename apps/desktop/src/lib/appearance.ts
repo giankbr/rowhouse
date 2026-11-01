@@ -10,6 +10,8 @@ export interface Appearance {
   density: Density;
   /** stop queries that run longer than this (0 = never) */
   queryTimeoutSec: number;
+  /** screenshot mode: mask personal data and secrets in every grid */
+  maskAll?: boolean;
 }
 
 const KEY = "rh-appearance";
