@@ -42,6 +42,7 @@ pub mod script;
 pub mod structure;
 pub mod sync;
 pub mod table_ops;
+pub mod timeline;
 pub mod tunnel;
 pub mod vars;
 
