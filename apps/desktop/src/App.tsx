@@ -984,6 +984,9 @@ export default function App() {
               onOpenFile={openDatabaseFile}
               onMcp={() => setMcpOpen(true)}
               onSettings={() => setSettingsOpen(true)}
+              onRenamed={(saved) =>
+                setConnections((cs) => cs.map((c) => saved.find((s) => s.id === c.id) ?? c))
+              }
             />
           )}
         </main>

@@ -708,6 +708,93 @@ impl AiClient {
             explanation: reply.trim().to_string(),
         })
     }
+
+    /// Suggest tidier display names for a batch of connections. The model only
+    /// sees connection metadata (name, kind, host, database, ssh host, env) —
+    /// never credentials or rows. Returns an entry only for names worth changing.
+    pub async fn suggest_names(&self, items: &[NameItem]) -> Result<Vec<NameSuggestion>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+        let payload: Vec<Value> = items
+            .iter()
+            .map(|i| {
+                json!({
+                    "id": i.id,
+                    "current": i.name,
+                    "kind": i.kind,
+                    "host": i.host,
+                    "database": i.database,
+                    "ssh_host": i.ssh_host,
+                    "env": i.env,
+                })
+            })
+            .collect();
+        let system = "You tidy up messy database-connection display names. For each connection you get its \
+            current name plus metadata (kind, host, database, ssh_host, env). Propose a short, human, Title-Case \
+            name that a developer would recognise. Prefer meaning from the database or project over raw IPs: e.g. \
+            a database 'mogi_cms' → 'Mogi CMS', a bare IP with no db stays descriptive like 'Infra Node'. Keep the \
+            environment out of the name unless it disambiguates duplicates. Do NOT invent facts not implied by the \
+            metadata. Leave a name alone if it is already clear. \
+            Reply with ONLY a JSON array of objects {\"id\":\"…\",\"name\":\"…\"}, including an entry solely for the \
+            connections whose name you would change. No prose, no code fences.";
+        let user = format!(
+            "Connections:\n{}",
+            serde_json::to_string_pretty(&payload).map_err(err)?
+        );
+        let reply = self.complete(system, &user).await?;
+        let json = strip_fences(&reply);
+        let out: Vec<NameSuggestion> = serde_json::from_str(json)
+            .map_err(|e| err(format!("couldn't parse name suggestions: {e}")))?;
+        // Keep only entries that actually differ and that map to a connection we sent.
+        let known: std::collections::HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        Ok(out
+            .into_iter()
+            .filter(|s| {
+                let name = s.name.trim();
+                !name.is_empty()
+                    && known.contains(s.id.as_str())
+                    && items.iter().any(|i| i.id == s.id && i.name.trim() != name)
+            })
+            .map(|s| NameSuggestion {
+                id: s.id,
+                name: s.name.trim().to_string(),
+            })
+            .collect())
+    }
+}
+
+/// One connection's metadata for [`AiClient::suggest_names`] (no secrets).
+#[derive(Debug, Clone, Deserialize)]
+pub struct NameItem {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub database: Option<String>,
+    #[serde(default)]
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub env: Option<String>,
+}
+
+/// A proposed replacement name for one connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NameSuggestion {
+    pub id: String,
+    pub name: String,
+}
+
+/// Strip a leading/trailing ```json (or ```) fence the model sometimes wraps JSON in.
+fn strip_fences(s: &str) -> &str {
+    let t = s.trim();
+    let t = t
+        .strip_prefix("```json")
+        .or_else(|| t.strip_prefix("```"))
+        .unwrap_or(t);
+    t.trim().strip_suffix("```").unwrap_or(t).trim()
 }
 
 #[cfg(test)]
@@ -729,6 +816,16 @@ mod tests {
             "WHERE active"
         );
         assert_eq!(clean_inline("", "x"), "");
+    }
+
+    #[test]
+    fn strips_json_fences() {
+        assert_eq!(
+            strip_fences("```json\n[{\"id\":\"a\"}]\n```"),
+            "[{\"id\":\"a\"}]"
+        );
+        assert_eq!(strip_fences("  [1,2]  "), "[1,2]");
+        assert_eq!(strip_fences("```\n{}\n```"), "{}");
     }
 
     #[test]

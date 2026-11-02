@@ -1058,6 +1058,14 @@ async fn ai_complete_inline(
         .await
 }
 
+/// Suggest tidier display names for the given connections (metadata only, no secrets).
+#[tauri::command]
+async fn ai_suggest_names(
+    items: Vec<rowhouse_core::ai::NameItem>,
+) -> CmdResult<Vec<rowhouse_core::ai::NameSuggestion>> {
+    AiClient::from_saved()?.suggest_names(&items).await
+}
+
 // ---- safety, ERD, import ---------------------------------------------------
 
 // ---- snippets, plans, compare -------------------------------------------------
@@ -1780,6 +1788,7 @@ pub fn run() {
             ai_edit,
             ai_explain,
             ai_complete_inline,
+            ai_suggest_names,
             schedules_list,
             license_status,
             license_activate,

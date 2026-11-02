@@ -209,6 +209,23 @@ export interface AiAnswer {
   explanation: string;
 }
 
+/** Connection metadata sent to the AI name tidier (no secrets). */
+export interface NameItem {
+  id: string;
+  name: string;
+  kind: string;
+  host?: string | null;
+  database?: string | null;
+  ssh_host?: string | null;
+  env?: string | null;
+}
+
+/** A proposed replacement name for one connection. */
+export interface NameSuggestion {
+  id: string;
+  name: string;
+}
+
 export interface Destructive {
   kind: "drop" | "truncate" | "delete-all" | "update-all" | "drop-column";
   object: string;
@@ -858,6 +875,8 @@ export const api = {
     edit: async (id: string, instruction: string, selection: string, before: string, after: string, onDelta?: (s: string) => void) =>
       call<AiAnswer>("ai_edit", { id, instruction, selection, before, after, onDelta: await channel(onDelta) }),
     completeInline: (id: string, before: string, after: string) => call<string>("ai_complete_inline", { id, before, after }),
+    /** Tidier display names for a batch of connections (metadata only). Returns only the ones worth changing. */
+    suggestNames: (items: NameItem[]) => call<NameSuggestion[]>("ai_suggest_names", { items }),
   },
 };
 
