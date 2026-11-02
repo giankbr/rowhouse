@@ -35,9 +35,9 @@ import { DdlDialog, NewTableDialog, TableActionDialog, type TableActionKind } fr
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { Titlebar } from "./components/Titlebar";
-import { Button, Kbd, TAG_COLORS, cx } from "./components/ui";
+import { Button, Kbd, cx } from "./components/ui";
 import { Workspace } from "./components/Workspace";
-import { api, dialogs, isTauri, newConnection, ENVIRONMENTS, type ConnectionConfig, type DbKind, type Destructive, type Dashboard, type DashTile, type DbObject, type Notebook, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
+import { api, dialogs, isTauri, newConnection, type ConnectionConfig, type DbKind, type Destructive, type Dashboard, type DashTile, type DbObject, type Notebook, type ExtensionInfo, type Filter, type Snippet, type TableInfo } from "./lib/api";
 import { kindInfo } from "./lib/api";
 import { mod, uid, type Tab } from "./lib/types";
 import { findVars, type VarRef } from "./lib/vars";
@@ -723,11 +723,6 @@ export default function App() {
   }, [newQuery, closeTab, activeTab, splitRight]);
 
   const schemas = useMemo(() => [...new Set(connTables.map((t) => t.schema))], [connTables]);
-  const env = conn?.env && conn.env !== "none" ? ENVIRONMENTS.find((e) => e.value === conn.env) : undefined;
-  const frame =
-    conn && (conn.env === "production" || conn.env === "staging")
-      ? (TAG_COLORS[conn.color ?? env?.color ?? "red"] ?? conn.color ?? "#ef4444")
-      : null;
 
   const renderPane = (p: 0 | 1) => {
     const t = activeIn(p);
@@ -855,13 +850,6 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      {frame && (
-        <div
-          className="pointer-events-none fixed inset-0 z-[60] rounded-[inherit]"
-          style={{ boxShadow: `inset 0 0 0 2px ${frame}` }}
-          title={`${env?.label} connection`}
-        />
-      )}
       {conn && (
       <Titlebar
         conn={conn}
